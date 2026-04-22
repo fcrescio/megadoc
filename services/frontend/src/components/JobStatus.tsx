@@ -1,9 +1,10 @@
 import { useJobs } from '../hooks/useJobs';
+import type { Job } from '../types';
 
 function JobStatus() {
   const { data: jobs, isLoading } = useJobs(20);
 
-  const getStatusColor = (status: string) => {
+  const getStatusColor = (status: Job['status']) => {
     switch (status) {
       case 'queued':
         return 'bg-yellow-100 text-yellow-800';
@@ -36,7 +37,7 @@ function JobStatus() {
         <p className="text-gray-500">No jobs found.</p>
       ) : (
         <div className="bg-white rounded-lg shadow divide-y">
-          {jobs?.map((job: { id: string; document_id: string; status: string; created_at: string; error_message: string | null }) => (
+          {jobs?.map((job: Job) => (
             <div key={job.id} className="p-4">
               <div className="flex items-center justify-between">
                 <div>

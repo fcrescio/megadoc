@@ -1,4 +1,5 @@
 import { useDocuments } from '../hooks/useDocuments';
+import type { Document } from '../types';
 
 interface Props {
   onSelectDocument: (id: string) => void;
@@ -35,7 +36,7 @@ function DocumentList({ onSelectDocument }: Props) {
         <p className="text-gray-500">No documents found.</p>
       ) : (
         <div className="bg-white rounded-lg shadow divide-y">
-          {documents?.map((doc: { id: string; original_filename: string; external_id: string | null; created_at: string; size_bytes: number }) => (
+          {documents?.map((doc: Document) => (
             <button
               key={doc.id}
               onClick={() => onSelectDocument(doc.id)}

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import type { Document, DocumentVersion, DocumentAsset, OCRResult } from '../types';
 import {
   useDocument,
   useDocumentVersions,
@@ -37,7 +38,7 @@ function DocumentDetail({ documentId, onBack }: Props) {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = (document as { original_filename: string }).original_filename;
+      a.download = document?.original_filename ?? 'document.pdf';
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {
@@ -90,25 +91,25 @@ function DocumentDetail({ documentId, onBack }: Props) {
         <div className="p-6">
           {activeTab === 'info' && document && (
             <div className="space-y-4">
-              <h2 className="text-xl font-semibold">{(document as { original_filename: string }).original_filename}</h2>
+              <h2 className="text-xl font-semibold">{document.original_filename}</h2>
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <div>
                   <span className="text-gray-500">Document ID:</span>
                   <p className="font-mono">{documentId}</p>
                 </div>
-                {(document as { external_id: string | null }).external_id && (
+                {document.external_id && (
                   <div>
                     <span className="text-gray-500">External ID:</span>
-                    <p>{(document as { external_id: string }).external_id}</p>
+                    <p>{document.external_id}</p>
                   </div>
                 )}
                 <div>
                   <span className="text-gray-500">Size:</span>
-                  <p>{((document as { size_bytes: number }).size_bytes / 1024).toFixed(1)} KB</p>
+                  <p>{(document.size_bytes / 1024).toFixed(1)} KB</p>
                 </div>
                 <div>
                   <span className="text-gray-500">Created:</span>
-                  <p>{new Date((document as { created_at: string }).created_at).toLocaleString()}</p>
+                  <p>{new Date(document.created_at).toLocaleString()}</p>
                 </div>
               </div>
               <button
@@ -130,13 +131,12 @@ function DocumentDetail({ documentId, onBack }: Props) {
               ) : ocrResult ? (
                 <div>
                   <div className="mb-4 text-sm text-gray-500">
-                    Engine: {(ocrResult as { engine_name: string; engine_version: string }).engine_name}{' '}
-                    {(ocrResult as { engine_version: string }).engine_version} |{' '}
-                    Pages: {(ocrResult as { page_count: number }).page_count}
+                    Engine: {ocrResult.engine_name} {ocrResult.engine_version} |{' '}
+                    Pages: {ocrResult.page_count}
                   </div>
                   <div className="border rounded-lg p-4 markdown-body bg-gray-50 max-h-96 overflow-y-auto">
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                      {(ocrResult as { markdown_text: string }).markdown_text || 'No markdown content'}
+                      {ocrResult.markdown_text || 'No markdown content'}
                     </ReactMarkdown>
                   </div>
                 </div>
@@ -160,7 +160,7 @@ function DocumentDetail({ documentId, onBack }: Props) {
                     </tr>
                   </thead>
                   <tbody className="divide-y">
-                    {versions?.map((v: { id: string; version_number: number; created_at: string }) => (
+                    {versions?.map((v: DocumentVersion) => (
                       <tr key={v.id}>
                         <td className="px-4 py-2 text-sm">{v.version_number}</td>
                         <td className="px-4 py-2 text-sm text-gray-500">
@@ -196,7 +196,7 @@ function DocumentDetail({ documentId, onBack }: Props) {
                     </tr>
                   </thead>
                   <tbody className="divide-y">
-                    {assets?.map((a: { id: string; asset_type: string; created_at: string }) => (
+                    {assets?.map((a: DocumentAsset) => (
                       <tr key={a.id}>
                         <td className="px-4 py-2 text-sm">{a.asset_type}</td>
                         <td className="px-4 py-2 text-sm text-gray-500">

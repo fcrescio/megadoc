@@ -1,3 +1,5 @@
+import type { Document, DocumentVersion, DocumentAsset, OCRResult, Job, UploadResponse } from '../types';
+
 const API_BASE = '';
 
 async function handleResponse<T>(response: Response): Promise<T> {
@@ -8,29 +10,29 @@ async function handleResponse<T>(response: Response): Promise<T> {
   return response.json();
 }
 
-export async function getDocuments(limit = 100): Promise<unknown[]> {
+export async function getDocuments(limit = 100): Promise<Document[]> {
   const response = await fetch(`${API_BASE}/documents?limit=${limit}`);
-  return handleResponse(response);
+  return handleResponse<Document[]>(response);
 }
 
-export async function getDocument(id: string): Promise<unknown> {
+export async function getDocument(id: string): Promise<Document> {
   const response = await fetch(`${API_BASE}/documents/${id}`);
-  return handleResponse(response);
+  return handleResponse<Document>(response);
 }
 
-export async function getDocumentVersions(documentId: string): Promise<unknown[]> {
+export async function getDocumentVersions(documentId: string): Promise<DocumentVersion[]> {
   const response = await fetch(`${API_BASE}/documents/${documentId}/versions`);
-  return handleResponse(response);
+  return handleResponse<DocumentVersion[]>(response);
 }
 
-export async function getDocumentAssets(documentId: string): Promise<unknown[]> {
+export async function getDocumentAssets(documentId: string): Promise<DocumentAsset[]> {
   const response = await fetch(`${API_BASE}/documents/${documentId}/assets`);
-  return handleResponse(response);
+  return handleResponse<DocumentAsset[]>(response);
 }
 
-export async function getDocumentOCR(documentId: string): Promise<unknown> {
+export async function getDocumentOCR(documentId: string): Promise<OCRResult> {
   const response = await fetch(`${API_BASE}/documents/${documentId}/ocr`);
-  return handleResponse(response);
+  return handleResponse<OCRResult>(response);
 }
 
 export async function downloadDocument(documentId: string, versionId?: string): Promise<Blob> {
@@ -52,7 +54,7 @@ export async function downloadAsset(documentId: string, assetId: string): Promis
   return response.blob();
 }
 
-export async function uploadDocument(file: File, externalId?: string, autoSubmit = true): Promise<unknown> {
+export async function uploadDocument(file: File, externalId?: string, autoSubmit = true): Promise<UploadResponse> {
   const formData = new FormData();
   formData.append('file', file);
   formData.append('auto_submit', String(autoSubmit));
@@ -64,15 +66,15 @@ export async function uploadDocument(file: File, externalId?: string, autoSubmit
     method: 'POST',
     body: formData,
   });
-  return handleResponse(response);
+  return handleResponse<UploadResponse>(response);
 }
 
-export async function getJobs(limit = 100): Promise<unknown[]> {
+export async function getJobs(limit = 100): Promise<Job[]> {
   const response = await fetch(`${API_BASE}/jobs?limit=${limit}`);
-  return handleResponse(response);
+  return handleResponse<Job[]>(response);
 }
 
-export async function getJob(id: string): Promise<unknown> {
+export async function getJob(id: string): Promise<Job> {
   const response = await fetch(`${API_BASE}/jobs/${id}`);
-  return handleResponse(response);
+  return handleResponse<Job>(response);
 }
