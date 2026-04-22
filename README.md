@@ -37,6 +37,7 @@ Variabili principali:
 - `REDIS_URL`, `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND`: broker e backend Celery.
 - `S3_ENDPOINT_URL`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_BUCKET_RAW`, `S3_BUCKET_DERIVATIVES`: object storage MinIO.
 - `DEDUPLICATE_BY_HASH`: attiva idempotenza per PDF identici.
+- `external_id` nell'upload API o nel comando CLI `upload`: identifica il documento logico da versionare.
 - `OCR_BACKEND`: `docling` in produzione, `fake` per test rapidi.
 - `STORAGE_BACKEND`: `s3` in compose, `filesystem` nei test.
 
@@ -46,6 +47,14 @@ Upload con auto submit:
 
 ```bash
 curl -X POST "http://localhost:8080/documents/upload?auto_submit=true" \
+  -F "file=@tests/fixtures/sample.pdf;type=application/pdf"
+```
+
+Upload versionato dello stesso documento logico:
+
+```bash
+curl -X POST "http://localhost:8080/documents/upload?auto_submit=false" \
+  -F "external_id=contract-001" \
   -F "file=@tests/fixtures/sample.pdf;type=application/pdf"
 ```
 
@@ -89,6 +98,7 @@ Upload singolo:
 
 ```bash
 python -m cli.main upload tests/fixtures/sample.pdf
+python -m cli.main upload tests/fixtures/sample.pdf --external-id contract-001
 ```
 
 Bulk ingestion ricorsiva:
@@ -133,4 +143,4 @@ I test usano SQLite, storage filesystem e backend OCR `fake` per restare leggeri
 - Il backend principale e `Docling`, ma l’astrazione `DocumentProcessingBackend` permette di aggiungere altri engine senza refactor invasivi.
 - I test di integrazione non usano il runtime Docling reale per evitare immagini pesanti e tempi lunghi in CI locale; il wiring applicativo resta identico.
 - Non sono ancora presenti auth multi-tenant, vector DB, summarization LLM o orchestration avanzata.
-- La policy di deduplica riusa il documento esistente quando `DEDUPLICATE_BY_HASH=true`; non crea una nuova versione per lo stesso contenuto binario.
+- Con `external_id`, un nuovo contenuto crea una nuova `document_version` sullo stesso documento logico; se il contenuto e identico e `DEDUPLICATE_BY_HASH=true`, l'upload viene deduplicato senza creare una nuova versione.

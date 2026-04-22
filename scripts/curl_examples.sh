@@ -5,6 +5,7 @@ API_BASE_URL="${API_BASE_URL:-http://localhost:8080}"
 PDF_PATH="${1:-tests/fixtures/sample.pdf}"
 
 UPLOAD_RESPONSE="$(curl -sS -X POST "${API_BASE_URL}/documents/upload?auto_submit=true" \
+  -F "external_id=example-doc-001" \
   -F "file=@${PDF_PATH};type=application/pdf")"
 
 printf '%s\n' "$UPLOAD_RESPONSE"

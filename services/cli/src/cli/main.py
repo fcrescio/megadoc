@@ -23,11 +23,17 @@ def _client() -> httpx.Client:
 
 
 @app.command("upload")
-def upload(path: Path, auto_submit: bool = True, json_output: bool = False) -> None:
+def upload(
+    path: Path,
+    auto_submit: bool = True,
+    external_id: str | None = None,
+    json_output: bool = False,
+) -> None:
     with _client() as client, path.open("rb") as handle:
         response = client.post(
             "/documents/upload",
             params={"auto_submit": str(auto_submit).lower()},
+            data={"external_id": external_id} if external_id else None,
             files={"file": (path.name, handle, "application/pdf")},
         )
         response.raise_for_status()
@@ -81,4 +87,3 @@ def reprocess(document_id: str, json_output: bool = False) -> None:
 
 if __name__ == "__main__":
     app()
-

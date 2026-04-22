@@ -15,6 +15,9 @@ class DocumentRepository:
     def get(self, document_id: UUID) -> Document | None:
         return self.session.get(Document, document_id)
 
+    def find_by_external_id(self, external_id: str) -> Document | None:
+        return self.session.scalar(select(Document).where(Document.external_id == external_id))
+
     def find_by_sha256(self, sha256: str) -> Document | None:
         return self.session.scalar(select(Document).where(Document.sha256 == sha256))
 

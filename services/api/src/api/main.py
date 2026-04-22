@@ -3,7 +3,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, Response, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile
 from redis import Redis
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -81,6 +81,7 @@ def get_job_service_dep(session: Annotated[Session, Depends(db_session_dep)]) ->
 async def upload_document(
     request: Request,
     file: UploadFile = File(...),
+    external_id: str | None = Form(default=None),
     auto_submit: bool = Query(default=True),
     document_service: DocumentService = Depends(get_document_service_dep),
     job_service: JobService = Depends(get_job_service_dep),
@@ -92,7 +93,12 @@ async def upload_document(
             temp_path = Path(tmp.name)
         try:
             persist_upload_to_temp(file.file, temp_path)
-            result = document_service.save_upload(temp_path, file.filename or "upload.pdf", SourceType.API)
+            result = document_service.save_upload(
+                temp_path,
+                file.filename or "upload.pdf",
+                SourceType.API,
+                external_id=external_id,
+            )
         finally:
             temp_path.unlink(missing_ok=True)
         job_id = None

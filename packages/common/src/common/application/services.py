@@ -47,35 +47,69 @@ class DocumentService:
         self.documents = DocumentRepository(session)
         self.versions = DocumentVersionRepository(session)
 
-    def save_upload(self, source_path: Path, filename: str, source_type: SourceType) -> UploadResult:
+    def save_upload(
+        self,
+        source_path: Path,
+        filename: str,
+        source_type: SourceType,
+        external_id: str | None = None,
+    ) -> UploadResult:
         validate_pdf_magic_bytes(source_path)
         size_bytes = source_path.stat().st_size
         if size_bytes > self.settings.max_upload_size_bytes:
             raise ValidationError("File exceeds configured upload size limit.")
         sha256 = sha256_file(source_path)
 
-        existing = self.documents.find_by_sha256(sha256) if self.settings.deduplicate_by_hash else None
-        if existing is not None:
+        if external_id is not None:
+            external_id = external_id.strip() or None
+
+        existing = None
+        if external_id is not None:
+            existing = self.documents.find_by_external_id(external_id)
+        elif self.settings.deduplicate_by_hash:
+            existing = self.documents.find_by_sha256(sha256)
+
+        if existing is not None and external_id is None and self.settings.deduplicate_by_hash:
             latest_version = self.versions.get_latest_for_document(existing.id)
             if latest_version is None:
                 raise ValidationError("Existing document has no versions.")
             return UploadResult(document=existing, version=latest_version, deduplicated=True)
 
-        document = Document(
-            original_filename=filename,
-            mime_type="application/pdf",
-            sha256=sha256,
-            size_bytes=size_bytes,
-            source_type=source_type.value,
-        )
-        self.session.add(document)
-        self.session.flush()
+        if existing is None:
+            document = Document(
+                external_id=external_id,
+                original_filename=filename,
+                mime_type="application/pdf",
+                sha256=sha256,
+                size_bytes=size_bytes,
+                source_type=source_type.value,
+            )
+            self.session.add(document)
+            self.session.flush()
+            version_number = 1
+            deduplicated = False
+        else:
+            document = existing
+            latest_version = self.versions.get_latest_for_document(document.id)
+            if latest_version is None:
+                raise ValidationError("Existing document has no versions.")
+
+            if self.settings.deduplicate_by_hash and document.sha256 == sha256:
+                return UploadResult(document=document, version=latest_version, deduplicated=True)
+
+            version_number = latest_version.version_number + 1
+            document.original_filename = filename
+            document.mime_type = "application/pdf"
+            document.sha256 = sha256
+            document.size_bytes = size_bytes
+            document.source_type = source_type.value
+            deduplicated = False
 
         version = DocumentVersion(
             document_id=document.id,
-            version_number=1,
+            version_number=version_number,
             storage_bucket=self.settings.s3_bucket_raw,
-            storage_object_key=f"{document.id}/v1/original.pdf",
+            storage_object_key=f"{document.id}/v{version_number}/original.pdf",
         )
         self.session.add(version)
         self.session.flush()
@@ -98,7 +132,7 @@ class DocumentService:
         self.session.commit()
         self.session.refresh(document)
         self.session.refresh(version)
-        return UploadResult(document=document, version=version, deduplicated=False)
+        return UploadResult(document=document, version=version, deduplicated=deduplicated)
 
 
 class JobService:

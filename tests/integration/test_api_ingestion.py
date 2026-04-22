@@ -85,3 +85,71 @@ def test_download_original_and_list_versions(client) -> None:
     assert download_response.status_code == 200
     assert download_response.headers["content-type"].startswith("application/pdf")
     assert download_response.content.startswith(b"%PDF-")
+
+
+def test_upload_same_external_id_creates_new_version(client, tmp_path: Path) -> None:
+    first = tmp_path / "v1.pdf"
+    second = tmp_path / "v2.pdf"
+    first.write_bytes(b"%PDF-1.4\n% version one\n")
+    second.write_bytes(b"%PDF-1.4\n% version two\n")
+
+    with first.open("rb") as handle:
+        response_one = client.post(
+            "/documents/upload?auto_submit=false",
+            data={"external_id": "contract-001"},
+            files={"file": ("v1.pdf", handle, "application/pdf")},
+        )
+    with second.open("rb") as handle:
+        response_two = client.post(
+            "/documents/upload?auto_submit=false",
+            data={"external_id": "contract-001"},
+            files={"file": ("v2.pdf", handle, "application/pdf")},
+        )
+
+    assert response_one.status_code == 200
+    assert response_two.status_code == 200
+
+    payload_one = response_one.json()
+    payload_two = response_two.json()
+    assert payload_one["document_id"] == payload_two["document_id"]
+    assert payload_one["version_id"] != payload_two["version_id"]
+    assert payload_two["deduplicated"] is False
+
+    versions_response = client.get(f"/documents/{payload_one['document_id']}/versions")
+    assert versions_response.status_code == 200
+    versions = versions_response.json()
+    assert [version["version_number"] for version in versions] == [2, 1]
+
+    document_response = client.get(f"/documents/{payload_one['document_id']}")
+    assert document_response.status_code == 200
+    assert document_response.json()["external_id"] == "contract-001"
+    assert document_response.json()["original_filename"] == "v2.pdf"
+
+
+def test_upload_same_external_id_and_hash_is_deduplicated(client) -> None:
+    fixture = Path("tests/fixtures/sample.pdf")
+    with fixture.open("rb") as handle:
+        response_one = client.post(
+            "/documents/upload?auto_submit=false",
+            data={"external_id": "contract-002"},
+            files={"file": ("sample.pdf", handle, "application/pdf")},
+        )
+    with fixture.open("rb") as handle:
+        response_two = client.post(
+            "/documents/upload?auto_submit=false",
+            data={"external_id": "contract-002"},
+            files={"file": ("sample.pdf", handle, "application/pdf")},
+        )
+
+    assert response_one.status_code == 200
+    assert response_two.status_code == 200
+
+    payload_one = response_one.json()
+    payload_two = response_two.json()
+    assert payload_one["document_id"] == payload_two["document_id"]
+    assert payload_one["version_id"] == payload_two["version_id"]
+    assert payload_two["deduplicated"] is True
+
+    versions_response = client.get(f"/documents/{payload_one['document_id']}/versions")
+    assert versions_response.status_code == 200
+    assert len(versions_response.json()) == 1
