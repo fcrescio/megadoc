@@ -1,10 +1,8 @@
 """Pydantic schemas for knowledge classifier."""
 
-from __future__ import annotations
-
 from datetime import datetime
 from enum import Enum
-from typing import Any
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -124,16 +122,16 @@ class ExtractedEntity(BaseModel):
     """An extracted entity from a document."""
     entity_type: str
     entity_value: str
-    normalized_value: str | None = None
+    normalized_value: Optional[str] = None
     confidence: float = Field(..., ge=0, le=1)
-    page_from: int | None = None
-    page_to: int | None = None
+    page_from: Optional[int] = None
+    page_to: Optional[int] = None
 
 
 class EntityExtractionResult(BaseModel):
     """Result of entity extraction."""
     entities: list[ExtractedEntity] = Field(...)
-    summary: str | None = None
+    summary: Optional[str] = None
 
 
 # Topic Retrieval
@@ -158,12 +156,37 @@ class TopicAssignmentDecision(BaseModel):
     action: str  # assign_existing, assign_multiple, propose_new, needs_review
     topic_ids: list[str] = Field(default_factory=list)
     assignment_roles: list[str] = Field(default_factory=list)
-    proposed_topic: dict[str, Any] | None = None
+    proposed_topic: Optional[dict[str, Any]] = None
     confidence: float = Field(..., ge=0, le=1)
     rationale: str
 
 
-# API Schemas
+# API Schemas - define in order to avoid forward reference issues
+class TopicAssignmentResponse(BaseModel):
+    """Response for topic assignment."""
+    id: str
+    topic_id: str
+    topic_slug: str
+    topic_title: str
+    assignment_role: str
+    confidence: Optional[float] = None
+    rationale: Optional[str] = None
+
+
+class TopicProposalResponse(BaseModel):
+    """Response for topic proposal."""
+    id: str
+    proposed_slug: str
+    proposed_title: str
+    topic_class: str
+    description: Optional[str] = None
+    proposal_status: str
+    confidence: Optional[float] = None
+    rationale: Optional[str] = None
+    created_at: datetime
+    reviewed_at: Optional[datetime] = None
+
+
 class ScanUnitCreate(BaseModel):
     """Request to create a scan unit from OCR result."""
     ocr_result_id: str
@@ -176,11 +199,11 @@ class ScanUnitResponse(BaseModel):
     source_ocr_result_id: str
     page_count: int
     status: str
-    segmentation_confidence: float | None
-    classification_confidence: float | None
-    assignment_confidence: float | None
+    segmentation_confidence: Optional[float] = None
+    classification_confidence: Optional[float] = None
+    assignment_confidence: Optional[float] = None
     created_at: datetime
-    updated_at: datetime | None
+    updated_at: Optional[datetime] = None
 
 
 class DocumentUnitResponse(BaseModel):
@@ -190,43 +213,18 @@ class DocumentUnitResponse(BaseModel):
     ordinal: int
     start_page: int
     end_page: int
-    title: str | None
-    document_type_code: str | None
-    document_type_name: str | None
-    document_type_confidence: float | None
-    segmentation_confidence: float | None
-    extracted_summary: str | None
+    title: Optional[str] = None
+    document_type_code: Optional[str] = None
+    document_type_name: Optional[str] = None
+    document_type_confidence: Optional[float] = None
+    segmentation_confidence: Optional[float] = None
+    extracted_summary: Optional[str] = None
     review_status: str
-    entities: list[ExtractedEntity]
-    topic_assignments: list["TopicAssignmentResponse"]
-    proposal: "TopicProposalResponse" | None
+    entities: list[ExtractedEntity] = Field(default_factory=list)
+    topic_assignments: list[TopicAssignmentResponse] = Field(default_factory=list)
+    proposal: Optional[TopicProposalResponse] = None
     created_at: datetime
-    updated_at: datetime | None
-
-
-class TopicAssignmentResponse(BaseModel):
-    """Response for topic assignment."""
-    id: str
-    topic_id: str
-    topic_slug: str
-    topic_title: str
-    assignment_role: str
-    confidence: float | None
-    rationale: str | None
-
-
-class TopicProposalResponse(BaseModel):
-    """Response for topic proposal."""
-    id: str
-    proposed_slug: str
-    proposed_title: str
-    topic_class: str
-    description: str | None
-    proposal_status: str
-    confidence: float | None
-    rationale: str | None
-    created_at: datetime
-    reviewed_at: datetime | None
+    updated_at: Optional[datetime] = None
 
 
 class TopicResponse(BaseModel):
@@ -235,11 +233,11 @@ class TopicResponse(BaseModel):
     slug: str
     title: str
     topic_class: str
-    description: str | None
+    description: Optional[str] = None
     canonical: bool
     is_active: bool
     created_at: datetime
-    updated_at: datetime | None
+    updated_at: Optional[datetime] = None
 
 
 class TopicCreate(BaseModel):
@@ -247,7 +245,7 @@ class TopicCreate(BaseModel):
     slug: str
     title: str
     topic_class: str
-    description: str | None = None
+    description: Optional[str] = None
     aliases: list[str] = Field(default_factory=list)
 
 
@@ -256,8 +254,8 @@ class DocumentTypeResponse(BaseModel):
     id: str
     code: str
     name: str
-    description: str | None
-    parent_code: str | None
+    description: Optional[str] = None
+    parent_code: Optional[str] = None
     is_active: bool
     created_at: datetime
 
@@ -269,14 +267,14 @@ class KnowledgeJobResponse(BaseModel):
     job_type: str
     status: str
     attempt_count: int
-    error_message: str | None
+    error_message: Optional[str] = None
     created_at: datetime
-    started_at: datetime | None
-    finished_at: datetime | None
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
 
 
 class ReviewUpdate(BaseModel):
     """Request to update review status."""
-    document_type_code: str | None = None
-    title: str | None = None
-    review_status: str | None = None
+    document_type_code: Optional[str] = None
+    title: Optional[str] = None
+    review_status: Optional[str] = None
