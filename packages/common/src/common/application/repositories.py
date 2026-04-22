@@ -27,6 +27,9 @@ class DocumentVersionRepository:
     def __init__(self, session: Session) -> None:
         self.session = session
 
+    def get(self, version_id: UUID) -> DocumentVersion | None:
+        return self.session.get(DocumentVersion, version_id)
+
     def get_latest_for_document(self, document_id: UUID) -> DocumentVersion | None:
         stmt = (
             select(DocumentVersion)
@@ -35,6 +38,14 @@ class DocumentVersionRepository:
             .limit(1)
         )
         return self.session.scalar(stmt)
+
+    def list_for_document(self, document_id: UUID) -> Iterable[DocumentVersion]:
+        stmt = (
+            select(DocumentVersion)
+            .where(DocumentVersion.document_id == document_id)
+            .order_by(desc(DocumentVersion.version_number))
+        )
+        return self.session.scalars(stmt).all()
 
 
 class JobRepository:
@@ -75,7 +86,13 @@ class AssetRepository:
     def __init__(self, session: Session) -> None:
         self.session = session
 
-    def list_for_document(self, document_id: UUID) -> Iterable[DocumentAsset]:
-        stmt = select(DocumentAsset).where(DocumentAsset.document_id == document_id)
-        return self.session.scalars(stmt).all()
+    def get(self, asset_id: UUID) -> DocumentAsset | None:
+        return self.session.get(DocumentAsset, asset_id)
 
+    def list_for_document(self, document_id: UUID) -> Iterable[DocumentAsset]:
+        stmt = (
+            select(DocumentAsset)
+            .where(DocumentAsset.document_id == document_id)
+            .order_by(desc(DocumentAsset.created_at))
+        )
+        return self.session.scalars(stmt).all()

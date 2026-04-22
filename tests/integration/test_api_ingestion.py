@@ -1,4 +1,7 @@
 from pathlib import Path
+from uuid import UUID
+
+from common.application.services import OCRService
 
 
 def test_upload_and_retrieve_document(client, tmp_path: Path) -> None:
@@ -12,6 +15,39 @@ def test_upload_and_retrieve_document(client, tmp_path: Path) -> None:
     document_response = client.get(f"/documents/{document_id}")
     assert document_response.status_code == 200
     assert document_response.json()["original_filename"] == "sample.pdf"
+
+
+def test_process_job_persists_ocr_and_assets(client, db_session) -> None:
+    fixture = Path("tests/fixtures/sample.pdf")
+    with fixture.open("rb") as handle:
+        response = client.post("/documents/upload?auto_submit=false", files={"file": ("sample.pdf", handle, "application/pdf")})
+
+    assert response.status_code == 200
+    payload = response.json()
+    document_id = payload["document_id"]
+
+    job_response = client.post("/jobs/ingest", json={"document_id": document_id, "priority": 5})
+    assert job_response.status_code == 200
+    job_id = job_response.json()["id"]
+
+    result = OCRService(db_session).process_job(UUID(job_id))
+    assert str(result.document_id) == document_id
+
+    ocr_response = client.get(f"/documents/{document_id}/ocr")
+    assert ocr_response.status_code == 200
+    assert ocr_response.json()["engine_name"] == "fake"
+
+    assets_response = client.get(f"/documents/{document_id}/assets")
+    assert assets_response.status_code == 200
+    assets = assets_response.json()
+    asset_types = {asset["asset_type"] for asset in assets}
+    assert {"original_pdf", "markdown", "text", "ocr_json"}.issubset(asset_types)
+
+    markdown_asset = next(asset for asset in assets if asset["asset_type"] == "markdown")
+    download_response = client.get(f"/documents/{document_id}/assets/{markdown_asset['id']}/download")
+    assert download_response.status_code == 200
+    assert download_response.headers["content-type"].startswith("text/markdown")
+    assert b"# OCR Result" in download_response.content
 
 
 def test_create_job_and_fetch_status(client) -> None:
@@ -28,3 +64,24 @@ def test_create_job_and_fetch_status(client) -> None:
     assert status_response.status_code == 200
     assert status_response.json()["document_id"] == document_id
 
+
+def test_download_original_and_list_versions(client) -> None:
+    fixture = Path("tests/fixtures/sample.pdf")
+    with fixture.open("rb") as handle:
+        response = client.post("/documents/upload?auto_submit=false", files={"file": ("sample.pdf", handle, "application/pdf")})
+
+    assert response.status_code == 200
+    payload = response.json()
+    document_id = payload["document_id"]
+    version_id = payload["version_id"]
+
+    versions_response = client.get(f"/documents/{document_id}/versions")
+    assert versions_response.status_code == 200
+    versions = versions_response.json()
+    assert len(versions) == 1
+    assert versions[0]["id"] == version_id
+
+    download_response = client.get(f"/documents/{document_id}/download")
+    assert download_response.status_code == 200
+    assert download_response.headers["content-type"].startswith("application/pdf")
+    assert download_response.content.startswith(b"%PDF-")

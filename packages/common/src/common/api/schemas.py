@@ -43,6 +43,25 @@ class DocumentResponse(BaseModel):
     created_at: datetime
 
 
+class DocumentVersionResponse(BaseModel):
+    id: UUID
+    document_id: UUID
+    version_number: int
+    storage_bucket: str
+    storage_object_key: str
+    created_at: datetime
+
+
+class DocumentAssetResponse(BaseModel):
+    id: UUID
+    document_id: UUID
+    asset_type: str
+    storage_bucket: str
+    storage_object_key: str
+    content_type: str
+    created_at: datetime
+
+
 class OCRResponse(BaseModel):
     id: UUID
     document_id: UUID
@@ -64,4 +83,3 @@ class ReadinessResponse(BaseModel):
     database: str
     redis: str
     storage: str
-

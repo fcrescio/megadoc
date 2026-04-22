@@ -30,6 +30,9 @@ class StorageBackend:
     def download_to_path(self, bucket: str, key: str, destination: Path) -> Path:
         raise NotImplementedError
 
+    def read_bytes(self, bucket: str, key: str) -> bytes:
+        raise NotImplementedError
+
     def exists(self, bucket: str, key: str) -> bool:
         raise NotImplementedError
 
@@ -63,6 +66,13 @@ class S3StorageBackend(StorageBackend):
         self._client.download_file(bucket, key, str(destination))
         return destination
 
+    def read_bytes(self, bucket: str, key: str) -> bytes:
+        response = self._client.get_object(Bucket=bucket, Key=key)
+        try:
+            return response["Body"].read()
+        finally:
+            response["Body"].close()
+
     def exists(self, bucket: str, key: str) -> bool:
         try:
             self._client.head_object(Bucket=bucket, Key=key)
@@ -95,6 +105,9 @@ class LocalFilesystemStorageBackend(StorageBackend):
         destination.write_bytes(source.read_bytes())
         return destination
 
+    def read_bytes(self, bucket: str, key: str) -> bytes:
+        return self._resolve(bucket, key).read_bytes()
+
     def exists(self, bucket: str, key: str) -> bool:
         return self._resolve(bucket, key).exists()
 
@@ -108,4 +121,3 @@ def get_storage_backend(settings: Settings | None = None) -> StorageBackend:
     if app_settings.storage_backend == "filesystem":
         return LocalFilesystemStorageBackend(app_settings)
     return S3StorageBackend(app_settings)
-

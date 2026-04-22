@@ -69,6 +69,20 @@ Ultimo OCR disponibile:
 curl "http://localhost:8080/documents/<document-id>/ocr"
 ```
 
+Versioni e asset:
+
+```bash
+curl "http://localhost:8080/documents/<document-id>/versions"
+curl "http://localhost:8080/documents/<document-id>/assets"
+```
+
+Download originale e derivati:
+
+```bash
+curl -OJ "http://localhost:8080/documents/<document-id>/download"
+curl -OJ "http://localhost:8080/documents/<document-id>/assets/<asset-id>/download"
+```
+
 ## Uso CLI
 
 Upload singolo:
@@ -102,13 +116,14 @@ Per ogni documento la pipeline salva:
 - testo piano in `derived-documents/<document_id>/<version_id>/ocr/result.txt`
 - JSON strutturato in `derived-documents/<document_id>/<version_id>/ocr/result.json`
 - record relazionali in `documents`, `document_versions`, `ingestion_jobs`, `ocr_results`, `document_assets`
+- API per listing di versioni e asset, piu download dell'originale e dei derivati
 
 ## Test
 
 Esegui:
 
 ```bash
-pytest
+docker compose run --rm --build api sh -lc 'pip install --no-cache-dir ".[dev]" && python -m pytest'
 ```
 
 I test usano SQLite, storage filesystem e backend OCR `fake` per restare leggeri e riproducibili.
