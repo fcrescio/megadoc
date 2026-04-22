@@ -4,7 +4,8 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession, select
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from common.db.models import (
     DocumentType,

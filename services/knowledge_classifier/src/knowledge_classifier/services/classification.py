@@ -2,7 +2,8 @@
 
 import logging
 
-from sqlalchemy.ext.asyncio import AsyncSession, select
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from common.db.models import DocumentType
 from knowledge_classifier.config import get_settings
