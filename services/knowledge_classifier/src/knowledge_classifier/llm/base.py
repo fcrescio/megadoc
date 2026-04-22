@@ -16,7 +16,7 @@ class LLMResponse(BaseModel):
     """Response from LLM."""
     content: str
     model: str
-    usage: dict[str, int] | None = None
+    usage: dict[str, Any] | None = None
 
 
 class LLMProvider(ABC):

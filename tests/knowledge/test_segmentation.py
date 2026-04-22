@@ -1,8 +1,5 @@
 """Tests for segmentation service."""
 
-import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from knowledge_classifier.llm.mock import MockDeterministicProvider
 from knowledge_classifier.services.segmentation import SegmentationService
 from tests.knowledge.fixtures import (
@@ -13,8 +10,7 @@ from tests.knowledge.fixtures import (
 )
 
 
-@pytest.mark.asyncio
-async def test_segmentation_single_document():
+def test_segmentation_single_document():
     """Test segmentation of a single document (verbale)."""
     # Mock session (not used in segmentation)
     class MockSession:
@@ -23,7 +19,7 @@ async def test_segmentation_single_document():
     llm = MockDeterministicProvider()
     service = SegmentationService(llm, MockSession())
     
-    result = await service.segment_ocr_result(
+    result = service.segment_ocr_result(
         ocr_structured=VERBALE_OCR_STRUCTURED,
         ocr_markdown=VERBALE_OCR_MARKDOWN,
         page_count=1,
@@ -35,8 +31,7 @@ async def test_segmentation_single_document():
     assert result.overall_confidence > 0
 
 
-@pytest.mark.asyncio
-async def test_segmentation_mixed_documents():
+def test_segmentation_mixed_documents():
     """Test segmentation of mixed documents (verbale + rendiconto)."""
     class MockSession:
         pass
@@ -44,7 +39,7 @@ async def test_segmentation_mixed_documents():
     llm = MockDeterministicProvider()
     service = SegmentationService(llm, MockSession())
     
-    result = await service.segment_ocr_result(
+    result = service.segment_ocr_result(
         ocr_structured=MIXED_OCR_STRUCTURED,
         ocr_markdown=MIXED_OCR_MARKDOWN,
         page_count=3,
@@ -56,8 +51,7 @@ async def test_segmentation_mixed_documents():
     assert result.segments[-1].end_page == 3
 
 
-@pytest.mark.asyncio
-async def test_segmentation_heuristic_boundaries():
+def test_segmentation_heuristic_boundaries():
     """Test heuristic boundary detection."""
     class MockSession:
         pass
@@ -74,7 +68,7 @@ async def test_segmentation_heuristic_boundaries():
     }
     markdown = "# VERBALE\n\nTest\n\n# RENDICONTO\n\nDifferent"
     
-    result = await service.segment_ocr_result(
+    result = service.segment_ocr_result(
         ocr_structured=structured,
         ocr_markdown=markdown,
         page_count=2,

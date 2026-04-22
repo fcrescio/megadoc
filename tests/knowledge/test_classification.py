@@ -1,13 +1,10 @@
 """Tests for classification service."""
 
-import pytest
-
 from knowledge_classifier.llm.mock import MockDeterministicProvider
 from knowledge_classifier.services.classification import ClassificationService
 
 
-@pytest.mark.asyncio
-async def test_classification_verbale():
+def test_classification_verbale():
     """Test classification of verbale assemblea."""
     class MockSession:
         pass
@@ -24,14 +21,13 @@ async def test_classification_verbale():
     
     Deliberazioni approvate all'unanimità."""
     
-    result = await service.classify_document(text)
+    result = service.classify_document(text)
     
     assert result.primary_type.type_code in ["verbale_assemblea", "altro"]
     assert result.primary_type.confidence > 0
 
 
-@pytest.mark.asyncio
-async def test_classification_fattura():
+def test_classification_fattura():
     """Test classification of fattura."""
     class MockSession:
         pass
@@ -47,14 +43,13 @@ async def test_classification_fattura():
     Importo: €1.250,00
     Scadenza: 31/01/2024"""
     
-    result = await service.classify_document(text)
+    result = service.classify_document(text)
     
     assert result.primary_type.type_code in ["fattura", "altro"]
     assert result.primary_type.confidence > 0
 
 
-@pytest.mark.asyncio
-async def test_classification_bolletta():
+def test_classification_bolletta():
     """Test classification of bolletta."""
     class MockSession:
         pass
@@ -70,14 +65,13 @@ async def test_classification_bolletta():
     Periodo: Gennaio - Marzo 2024
     Importo da pagare: €85,50"""
     
-    result = await service.classify_document(text)
+    result = service.classify_document(text)
     
     assert result.primary_type.type_code in ["bolletta", "altro"]
     assert result.primary_type.confidence > 0
 
 
-@pytest.mark.asyncio
-async def test_heuristic_classification():
+def test_heuristic_classification():
     """Test heuristic fallback classification."""
     class MockSession:
         pass
