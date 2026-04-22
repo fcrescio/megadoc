@@ -4,8 +4,7 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from common.db.models import (
     DocumentType,
@@ -16,7 +15,7 @@ from common.db.models import (
     TopicProposal,
     KnowledgeJob,
 )
-from common.db.session import get_db
+from common.db.session import get_db_session
 from knowledge_classifier.schemas import (
     ScanUnitCreate,
     ScanUnitResponse,
@@ -38,11 +37,11 @@ router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 async def create_scan_unit_from_ocr(
     ocr_result_id: str,
     data: ScanUnitCreate,
-    db: AsyncSession = Depends(get_db),
+    db: Session = Depends(get_db_session),
 ):
     """Create a scan unit from an OCR result and start processing."""
     # Verify OCR result exists
-    result = await db.execute(
+    result = db.execute(
         select(OCRResult).where(OCRResult.id == uuid.UUID(ocr_result_id))
     )
     ocr_result = result.scalar_one_or_none()
@@ -66,14 +65,14 @@ async def create_scan_unit_from_ocr(
         status="pending",
     )
     db.add(job)
-    await db.flush()
+    db.flush()
     
     # Queue the processing task
     process_scan_unit_task.delay(str(scan_unit.id))
     
     # Update job status
     job.status = "queued"
-    await db.commit()
+    db.commit()
     
     return ScanUnitResponse(
         id=str(scan_unit.id),
@@ -90,9 +89,9 @@ async def create_scan_unit_from_ocr(
 
 
 @router.get("/scan-units", response_model=list[ScanUnitResponse])
-async def list_scan_units(db: AsyncSession = Depends(get_db)):
+def list_scan_units(db: Session = Depends(get_db_session)):
     """List all scan units."""
-    result = await db.execute(select(ScanUnit).order_by(ScanUnit.created_at.desc()))
+    result = db.execute(select(ScanUnit).order_by(ScanUnit.created_at.desc()))
     scan_units = result.scalars().all()
     
     return [
@@ -113,9 +112,9 @@ async def list_scan_units(db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/scan-units/{scan_unit_id}", response_model=ScanUnitResponse)
-async def get_scan_unit(scan_unit_id: str, db: AsyncSession = Depends(get_db)):
+def get_scan_unit(scan_unit_id: str, db: Session = Depends(get_db_session)):
     """Get a scan unit by ID."""
-    result = await db.execute(
+    result = db.execute(
         select(ScanUnit).where(ScanUnit.id == uuid.UUID(scan_unit_id))
     )
     scan_unit = result.scalar_one_or_none()
@@ -138,9 +137,9 @@ async def get_scan_unit(scan_unit_id: str, db: AsyncSession = Depends(get_db)):
 
 # Document Units
 @router.get("/scan-units/{scan_unit_id}/document-units", response_model=list[DocumentUnitResponse])
-async def list_document_units(scan_unit_id: str, db: AsyncSession = Depends(get_db)):
+def list_document_units(scan_unit_id: str, db: Session = Depends(get_db_session)):
     """List document units for a scan unit."""
-    result = await db.execute(
+    result = db.execute(
         select(DocumentUnit)
         .where(DocumentUnit.scan_unit_id == uuid.UUID(scan_unit_id))
         .order_by(DocumentUnit.ordinal)
@@ -172,9 +171,9 @@ async def list_document_units(scan_unit_id: str, db: AsyncSession = Depends(get_
 
 
 @router.get("/document-units/{document_unit_id}", response_model=DocumentUnitResponse)
-async def get_document_unit(document_unit_id: str, db: AsyncSession = Depends(get_db)):
+def get_document_unit(document_unit_id: str, db: Session = Depends(get_db_session)):
     """Get a document unit by ID."""
-    result = await db.execute(
+    result = db.execute(
         select(DocumentUnit).where(DocumentUnit.id == uuid.UUID(document_unit_id))
     )
     doc_unit = result.scalar_one_or_none()
@@ -204,13 +203,13 @@ async def get_document_unit(document_unit_id: str, db: AsyncSession = Depends(ge
 
 
 @router.post("/document-units/{document_unit_id}/review", response_model=DocumentUnitResponse)
-async def review_document_unit(
+def review_document_unit(
     document_unit_id: str,
     update: ReviewUpdate,
-    db: AsyncSession = Depends(get_db),
+    db: Session = Depends(get_db_session),
 ):
     """Update review status for a document unit."""
-    result = await db.execute(
+    result = db.execute(
         select(DocumentUnit).where(DocumentUnit.id == uuid.UUID(document_unit_id))
     )
     doc_unit = result.scalar_one_or_none()
@@ -222,7 +221,7 @@ async def review_document_unit(
     if update.title:
         doc_unit.title = update.title
     
-    await db.commit()
+    db.commit()
     
     return DocumentUnitResponse(
         id=str(doc_unit.id),
@@ -247,9 +246,9 @@ async def review_document_unit(
 
 # Topics
 @router.get("/topics", response_model=list[TopicResponse])
-async def list_topics(db: AsyncSession = Depends(get_db)):
+def list_topics(db: Session = Depends(get_db_session)):
     """List all topics."""
-    result = await db.execute(select(Topic).where(Topic.is_active == True))
+    result = db.execute(select(Topic).where(Topic.is_active == True))
     topics = result.scalars().all()
     
     return [
@@ -269,7 +268,7 @@ async def list_topics(db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/topics", response_model=TopicResponse, status_code=status.HTTP_201_CREATED)
-async def create_topic(data: TopicCreate, db: AsyncSession = Depends(get_db)):
+def create_topic(data: TopicCreate, db: Session = Depends(get_db_session)):
     """Create a new topic."""
     topic = Topic(
         slug=data.slug,
@@ -280,7 +279,7 @@ async def create_topic(data: TopicCreate, db: AsyncSession = Depends(get_db)):
         is_active=True,
     )
     db.add(topic)
-    await db.commit()
+    db.commit()
     
     return TopicResponse(
         id=str(topic.id),
@@ -297,9 +296,9 @@ async def create_topic(data: TopicCreate, db: AsyncSession = Depends(get_db)):
 
 # Topic Proposals
 @router.get("/topic-proposals", response_model=list[TopicProposalResponse])
-async def list_topic_proposals(db: AsyncSession = Depends(get_db)):
+def list_topic_proposals(db: Session = Depends(get_db_session)):
     """List topic proposals."""
-    result = await db.execute(
+    result = db.execute(
         select(TopicProposal).where(TopicProposal.proposal_status == "proposed")
     )
     proposals = result.scalars().all()
@@ -322,9 +321,9 @@ async def list_topic_proposals(db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/topic-proposals/{proposal_id}/approve", response_model=TopicResponse)
-async def approve_topic_proposal(proposal_id: str, db: AsyncSession = Depends(get_db)):
+def approve_topic_proposal(proposal_id: str, db: Session = Depends(get_db_session)):
     """Approve a topic proposal and create the topic."""
-    result = await db.execute(
+    result = db.execute(
         select(TopicProposal).where(TopicProposal.id == uuid.UUID(proposal_id))
     )
     proposal = result.scalar_one_or_none()
@@ -347,7 +346,7 @@ async def approve_topic_proposal(proposal_id: str, db: AsyncSession = Depends(ge
     proposal.matched_existing_topic_id = topic.id
     proposal.reviewed_at = topic.created_at
     
-    await db.commit()
+    db.commit()
     
     return TopicResponse(
         id=str(topic.id),
@@ -363,9 +362,9 @@ async def approve_topic_proposal(proposal_id: str, db: AsyncSession = Depends(ge
 
 
 @router.post("/topic-proposals/{proposal_id}/reject", response_model=TopicProposalResponse)
-async def reject_topic_proposal(proposal_id: str, db: AsyncSession = Depends(get_db)):
+def reject_topic_proposal(proposal_id: str, db: Session = Depends(get_db_session)):
     """Reject a topic proposal."""
-    result = await db.execute(
+    result = db.execute(
         select(TopicProposal).where(TopicProposal.id == uuid.UUID(proposal_id))
     )
     proposal = result.scalar_one_or_none()
@@ -375,7 +374,7 @@ async def reject_topic_proposal(proposal_id: str, db: AsyncSession = Depends(get
     proposal.proposal_status = "rejected"
     proposal.reviewed_at = proposal.created_at  # Simplified
     
-    await db.commit()
+    db.commit()
     
     return TopicProposalResponse(
         id=str(proposal.id),
@@ -393,9 +392,9 @@ async def reject_topic_proposal(proposal_id: str, db: AsyncSession = Depends(get
 
 # Document Types
 @router.get("/document-types", response_model=list[DocumentTypeResponse])
-async def list_document_types(db: AsyncSession = Depends(get_db)):
+def list_document_types(db: Session = Depends(get_db_session)):
     """List all document types."""
-    result = await db.execute(select(DocumentType).order_by(DocumentType.code))
+    result = db.execute(select(DocumentType).order_by(DocumentType.code))
     types = result.scalars().all()
     
     return [
@@ -414,9 +413,9 @@ async def list_document_types(db: AsyncSession = Depends(get_db)):
 
 # Jobs
 @router.get("/jobs/{job_id}", response_model=KnowledgeJobResponse)
-async def get_job(job_id: str, db: AsyncSession = Depends(get_db)):
+def get_job(job_id: str, db: Session = Depends(get_db_session)):
     """Get a knowledge job by ID."""
-    result = await db.execute(
+    result = db.execute(
         select(KnowledgeJob).where(KnowledgeJob.id == uuid.UUID(job_id))
     )
     job = result.scalar_one_or_none()
@@ -437,9 +436,9 @@ async def get_job(job_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/jobs/{job_id}/run-sync")
-async def run_job_sync(job_id: str, db: AsyncSession = Depends(get_db)):
+def run_job_sync(job_id: str, db: Session = Depends(get_db_session)):
     """Run a job synchronously (for testing)."""
-    result = await db.execute(
+    result = db.execute(
         select(KnowledgeJob).where(KnowledgeJob.id == uuid.UUID(job_id))
     )
     job = result.scalar_one_or_none()
@@ -451,7 +450,7 @@ async def run_job_sync(job_id: str, db: AsyncSession = Depends(get_db)):
     from knowledge_classifier.services.pipeline import KnowledgePipelineService
     
     job.status = "running"
-    await db.flush()
+    db.flush()
     
     try:
         llm = MockDeterministicProvider()
@@ -463,6 +462,6 @@ async def run_job_sync(job_id: str, db: AsyncSession = Depends(get_db)):
         job.error_message = str(e)
         raise HTTPException(status_code=500, detail=str(e))
     
-    await db.commit()
+    db.commit()
     
     return {"status": job.status, "result": result}
