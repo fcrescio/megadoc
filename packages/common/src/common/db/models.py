@@ -183,7 +183,7 @@ class TopicProposal(Base):
     topic_class: Mapped[str] = mapped_column(String(64), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     proposal_status: Mapped[str] = mapped_column(String(32), nullable=False)
-    source_document_unit_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    source_document_unit_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, ForeignKey("document_units.id", ondelete="SET NULL"), nullable=True)
     matched_existing_topic_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, ForeignKey("topics.id"), nullable=True)
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
