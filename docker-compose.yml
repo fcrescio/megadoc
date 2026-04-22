@@ -78,7 +78,7 @@ services:
     env_file:
       - .env
     environment:
-      PYTHONPATH: /app/packages/common/src:/app/services/api/src:/app/services/worker/src:/app/services/cli/src
+      PYTHONPATH: /app/packages/common/src:/app/services/api/src:/app/services/worker/src:/app/services/cli/src:/app/services/knowledge_classifier/src:/app/services/knowledge_worker/src
     depends_on:
       postgres:
         condition: service_healthy
