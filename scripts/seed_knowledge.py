@@ -146,7 +146,7 @@ def seed_topics(session):
 
 def main():
     """Run seed script."""
-    database_url = "postgresql://megadoc:megadoc@postgres:5432/megadoc"
+    database_url = "postgresql+psycopg://megadoc:megadoc@postgres:5432/megadoc"
     
     engine = create_engine(database_url)
     
