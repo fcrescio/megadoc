@@ -194,7 +194,9 @@ class TopicProposal(Base):
         primaryjoin="TopicProposal.source_document_unit_id == DocumentUnit.id",
         back_populates="proposal"
     )
-    matched_topic: Mapped["Topic | None"] = relationship(foreign_keys="matched_existing_topic_id")
+    matched_topic: Mapped["Topic | None"] = relationship(
+        primaryjoin="TopicProposal.matched_existing_topic_id == Topic.id"
+    )
 
 
 class ScanUnit(Base):
