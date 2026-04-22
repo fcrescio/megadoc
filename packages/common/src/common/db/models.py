@@ -191,7 +191,8 @@ class TopicProposal(Base):
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     source_document_unit: Mapped["DocumentUnit | None"] = relationship(
-        foreign_keys="source_document_unit_id", back_populates="proposal"
+        primaryjoin="TopicProposal.source_document_unit_id == DocumentUnit.id",
+        back_populates="proposal"
     )
     matched_topic: Mapped["Topic | None"] = relationship(foreign_keys="matched_existing_topic_id")
 
