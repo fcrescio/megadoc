@@ -267,7 +267,8 @@ class SegmentationService:
             for p in pages[:10]  # Limit to first 10 pages for context
         ])
         
-        prompt = SEGMENTATION_PROMPT.format(pages_content=pages_content)
+        # Use replace instead of format to avoid conflicts with JSON in prompt
+        prompt = SEGMENTATION_PROMPT.replace("{pages_content}", pages_content)
         
         messages = [
             ChatMessage(role="system", content="You are a document segmentation expert."),

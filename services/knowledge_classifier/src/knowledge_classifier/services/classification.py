@@ -46,7 +46,8 @@ class ClassificationService:
             half = max_length // 2
             document_text = document_text[:half] + "\n...\n" + document_text[-half:]
         
-        prompt = CLASSIFICATION_PROMPT.format(document_text=document_text)
+        # Use replace instead of format to avoid conflicts with JSON in prompt
+        prompt = CLASSIFICATION_PROMPT.replace("{document_text}", document_text)
         
         messages = [
             ChatMessage(role="system", content="You are a document classification expert."),
@@ -124,11 +125,13 @@ class ClassificationService:
             primary_code = max(type_scores, key=type_scores.get)
             primary_score = type_scores[primary_code]
             
+            keywords = type_patterns[primary_code][0]
+            matched_keywords = [k for k in keywords if k in text_lower][:3]
             return ClassificationResult(
                 primary_type={
                     "type_code": primary_code,
                     "confidence": primary_score,
-                    "salient_features": [k for k, v in type_patterns[primary_code][0].items() if k in text_lower][:3]
+                    "salient_features": matched_keywords
                 },
                 alternatives=[],
                 rationale=f"Heuristic classification based on keyword matching"

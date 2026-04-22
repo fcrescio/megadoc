@@ -58,7 +58,7 @@ def process_scan_unit_task(self, scan_unit_id: str):
             return result
             
         except Exception as e:
-            logger.error(f"Task failed: {e}")
+            logger.error(f"Task failed: {e}", exc_info=True)
             session.rollback()
             raise self.retry(exc=e, countdown=60 * (2 ** self.request.retries))
         finally:

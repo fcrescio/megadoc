@@ -51,13 +51,13 @@ class TopicAssignmentService:
         # Build entities list for prompt
         entities_list = self._format_entities_list(entities)
         
-        prompt = TOPIC_ASSIGNMENT_PROMPT.format(
-            topics_list=topics_list,
-            document_type=document_type_code or "unknown",
-            document_title=document_title or "Untitled",
-            document_summary=document_summary or "No summary",
-            entities_list=entities_list,
-        )
+        # Use replace instead of format to avoid conflicts with JSON in prompt
+        prompt = (TOPIC_ASSIGNMENT_PROMPT
+            .replace("{topics_list}", topics_list)
+            .replace("{document_type}", document_type_code or "unknown")
+            .replace("{document_title}", document_title or "Untitled")
+            .replace("{document_summary}", document_summary or "No summary")
+            .replace("{entities_list}", entities_list))
         
         messages = [
             ChatMessage(role="system", content="You are a topic assignment expert."),

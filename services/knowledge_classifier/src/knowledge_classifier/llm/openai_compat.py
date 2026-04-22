@@ -53,13 +53,16 @@ class OpenAICompatibleProvider(LLMProvider):
             "model": self._model,
             "messages": [{"role": m.role, "content": m.content} for m in messages],
             "temperature": temperature,
+            "chat_template_kwargs": {"enable_thinking": False},
         }
         
         if response_format:
             payload["response_format"] = response_format
 
         try:
+            logger.debug(f"LLM request payload: {payload.get('messages', [])[:2]}")
             response = client.post("/chat/completions", json=payload)
+            logger.debug(f"LLM response status: {response.status_code}, body: {response.text[:200]}")
             response.raise_for_status()
             
             data = response.json()
@@ -71,7 +74,7 @@ class OpenAICompatibleProvider(LLMProvider):
                 usage=dict(data.get("usage", {})),
             )
         except httpx.HTTPError as e:
-            logger.error(f"LLM request failed: {e}")
+            logger.error(f"LLM request failed: {e}, response: {response.text[:200] if 'response' in dir() else 'N/A'}")
             raise
 
     def chat_with_json(
@@ -82,12 +85,12 @@ class OpenAICompatibleProvider(LLMProvider):
         max_retries: int = 3,
     ) -> tuple[BaseModel, str]:
         """Send chat messages and get structured JSON response."""
+        # Use json_schema without strict mode - qwen3.5-27B doesn't support strict or json_object
         response_format = {
             "type": "json_schema",
             "json_schema": {
                 "name": schema.__name__,
                 "schema": schema.model_json_schema(),
-                "strict": True,
             },
         }
 
@@ -106,7 +109,12 @@ class OpenAICompatibleProvider(LLMProvider):
                     content = content[:-3]
                 content = content.strip()
                 
-                parsed = schema.model_validate_json(content)
+                # Use model_validate with mode='lenient' to handle missing optional fields
+                try:
+                    parsed = schema.model_validate_json(content)
+                except Exception as parse_error:
+                    logger.error(f"JSON parse error: {parse_error}, content: {content[:200]}")
+                    raise
                 return parsed, response.content
                 
             except ValidationError as e:

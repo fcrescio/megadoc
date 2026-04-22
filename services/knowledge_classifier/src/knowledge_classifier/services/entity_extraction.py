@@ -43,7 +43,8 @@ class EntityExtractionService:
             half = max_length // 2
             document_text = document_text[:half] + "\n...\n" + document_text[-half:]
         
-        prompt = ENTITY_EXTRACTION_PROMPT.format(document_text=document_text)
+        # Use replace instead of format to avoid conflicts with JSON in prompt
+        prompt = ENTITY_EXTRACTION_PROMPT.replace("{document_text}", document_text)
         
         messages = [
             ChatMessage(role="system", content="You are an entity extraction expert."),
