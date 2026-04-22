@@ -26,6 +26,7 @@ class Document(Base):
     jobs: Mapped[list["IngestionJob"]] = relationship(back_populates="document")
     assets: Mapped[list["DocumentAsset"]] = relationship(back_populates="document")
     ocr_results: Mapped[list["OCRResult"]] = relationship(back_populates="document")
+    scan_units: Mapped[list["ScanUnit"]] = relationship(back_populates="document")
 
 
 class DocumentVersion(Base):
