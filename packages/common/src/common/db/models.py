@@ -101,6 +101,7 @@ class OCRResult(Base):
 
     document: Mapped["Document"] = relationship(back_populates="ocr_results")
     document_version: Mapped["DocumentVersion"] = relationship(back_populates="ocr_results")
+    scan_units: Mapped[list["ScanUnit"]] = relationship(back_populates="ocr_result")
 
 
 class DocumentAsset(Base):
@@ -122,7 +123,6 @@ class DocumentAsset(Base):
     )
 
     document: Mapped["Document"] = relationship(back_populates="assets")
-    scan_units: Mapped[list["ScanUnit"]] = relationship(back_populates="ocr_result")
 
 
 # Knowledge Classifier Models
