@@ -111,7 +111,6 @@ services:
     build:
       context: .
       dockerfile: infra/compose/Dockerfile.app
-    user: "0:0"
     restart: unless-stopped
     env_file:
       - .env
