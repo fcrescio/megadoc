@@ -8,6 +8,8 @@ services:
       POSTGRES_PASSWORD: megadoc
     volumes:
       - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U megadoc -d megadoc"]
       interval: 10s
@@ -20,6 +22,8 @@ services:
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis-data:/data
+    ports:
+      - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -144,6 +148,9 @@ services:
     env_file:
       - .env
     environment:
+      CELERY_BROKER_URL: redis://127.0.0.1:6379/1
+      CELERY_RESULT_BACKEND: redis://127.0.0.1:6379/2
+      DATABASE_URL: postgresql+psycopg://megadoc:megadoc@127.0.0.1:5432/megadoc
       PYTHONPATH: /app/packages/common/src:/app/services/api/src:/app/services/worker/src:/app/services/cli/src:/app/services/knowledge_classifier/src:/app/services/knowledge_worker/src
     depends_on:
       redis:
