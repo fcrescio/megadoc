@@ -1,16 +1,15 @@
 """Seed script for knowledge classifier data."""
 
-import asyncio
 import uuid
 from datetime import datetime
 
-from sqlalchemy.ext.asyncio import create_async_engine, async_session
-from sqlalchemy import text
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import Session
 
 from common.db.models import DocumentType, Topic
 
 
-async def seed_document_types(session):
+def seed_document_types(session):
     """Seed document types."""
     types_data = [
         {
@@ -89,7 +88,7 @@ async def seed_document_types(session):
         print(f"Created document type: {type_data['code']}")
 
 
-async def seed_topics(session):
+def seed_topics(session):
     """Seed example topics."""
     topics_data = [
         {
@@ -145,35 +144,35 @@ async def seed_topics(session):
         print(f"Created topic: {topic_data['slug']}")
 
 
-async def main():
+def main():
     """Run seed script."""
-    database_url = "postgresql+asyncpg://megadoc:megadoc@postgres:5432/megadoc"
+    database_url = "postgresql://megadoc:megadoc@postgres:5432/megadoc"
     
-    engine = create_async_engine(database_url)
+    engine = create_engine(database_url)
     
-    async with async_session(engine) as session:
+    with Session(engine) as session:
         # Check if already seeded
-        result = await session.execute(text("SELECT COUNT(*) FROM document_types"))
+        result = session.execute(text("SELECT COUNT(*) FROM document_types"))
         count = result.scalar()
         
         if count and count > 0:
             print(f"Document types already exist ({count} records). Skipping seed.")
         else:
-            await seed_document_types(session)
-            await session.flush()
+            seed_document_types(session)
+            session.flush()
         
-        result = await session.execute(text("SELECT COUNT(*) FROM topics"))
+        result = session.execute(text("SELECT COUNT(*) FROM topics"))
         count = result.scalar()
         
         if count and count > 0:
             print(f"Topics already exist ({count} records). Skipping seed.")
         else:
-            await seed_topics(session)
-            await session.flush()
+            seed_topics(session)
+            session.flush()
         
-        await session.commit()
+        session.commit()
         print("Seed completed successfully!")
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
