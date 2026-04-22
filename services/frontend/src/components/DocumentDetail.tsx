@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import type { Document, DocumentVersion, DocumentAsset, OCRResult } from '../types';
+import type { DocumentVersion, DocumentAsset } from '../types';
 import {
   useDocument,
   useDocumentVersions,
@@ -18,7 +18,7 @@ interface Props {
 function DocumentDetail({ documentId, onBack }: Props) {
   const [activeTab, setActiveTab] = useState<'info' | 'ocr' | 'versions' | 'assets'>('info');
 
-  const { data: document, isLoading: docLoading } = useDocument(documentId);
+  const { data: docData, isLoading: docLoading } = useDocument(documentId);
   const { data: versions } = useDocumentVersions(documentId);
   const { data: ocrResult, isLoading: ocrLoading } = useDocumentOCR(documentId);
   const { data: assets } = useDocumentAssets(documentId);
@@ -38,7 +38,7 @@ function DocumentDetail({ documentId, onBack }: Props) {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = document?.original_filename ?? 'document.pdf';
+      a.download = docData?.original_filename ?? 'document.pdf';
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {
@@ -89,27 +89,27 @@ function DocumentDetail({ documentId, onBack }: Props) {
         </div>
 
         <div className="p-6">
-          {activeTab === 'info' && document && (
+          {activeTab === 'info' && docData && (
             <div className="space-y-4">
-              <h2 className="text-xl font-semibold">{document.original_filename}</h2>
+              <h2 className="text-xl font-semibold">{docData.original_filename}</h2>
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <div>
                   <span className="text-gray-500">Document ID:</span>
                   <p className="font-mono">{documentId}</p>
                 </div>
-                {document.external_id && (
+                {docData.external_id && (
                   <div>
                     <span className="text-gray-500">External ID:</span>
-                    <p>{document.external_id}</p>
+                    <p>{docData.external_id}</p>
                   </div>
                 )}
                 <div>
                   <span className="text-gray-500">Size:</span>
-                  <p>{(document.size_bytes / 1024).toFixed(1)} KB</p>
+                  <p>{(docData.size_bytes / 1024).toFixed(1)} KB</p>
                 </div>
                 <div>
                   <span className="text-gray-500">Created:</span>
-                  <p>{new Date(document.created_at).toLocaleString()}</p>
+                  <p>{new Date(docData.created_at).toLocaleString()}</p>
                 </div>
               </div>
               <button
