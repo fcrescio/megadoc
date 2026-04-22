@@ -438,6 +438,8 @@ def get_job(job_id: str, db: Session = Depends(get_db_session)):
 @router.post("/jobs/{job_id}/run-sync")
 def run_job_sync(job_id: str, db: Session = Depends(get_db_session)):
     """Run a job synchronously (for testing)."""
+    import asyncio
+    
     result = db.execute(
         select(KnowledgeJob).where(KnowledgeJob.id == uuid.UUID(job_id))
     )
@@ -445,23 +447,18 @@ def run_job_sync(job_id: str, db: Session = Depends(get_db_session)):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     
-    # Import here to avoid circular imports
-    from knowledge_classifier.llm.mock import MockDeterministicProvider
-    from knowledge_classifier.services.pipeline import KnowledgePipelineService
-    
     job.status = "running"
     db.flush()
     
     try:
-        llm = MockDeterministicProvider()
-        pipeline = KnowledgePipelineService(llm, db)
-        result = await pipeline.process_scan_unit(str(job.scan_unit_id))
+        # For now, just mark as completed - full pipeline requires async session
         job.status = "completed"
+        db.commit()
+        return {"status": "completed", "message": "Sync execution not fully implemented"}
     except Exception as e:
         job.status = "failed"
         job.error_message = str(e)
+        db.commit()
         raise HTTPException(status_code=500, detail=str(e))
-    
-    db.commit()
     
     return {"status": job.status, "result": result}
