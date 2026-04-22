@@ -48,6 +48,7 @@ class DocumentVersion(Base):
 
     document: Mapped["Document"] = relationship(back_populates="versions")
     ocr_results: Mapped[list["OCRResult"]] = relationship(back_populates="document_version")
+    scan_units: Mapped[list["ScanUnit"]] = relationship(back_populates="document_version")
 
 
 class IngestionJob(Base):
