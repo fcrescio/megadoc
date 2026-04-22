@@ -1,0 +1,19 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+.markdown-body {
+  @apply prose prose-sm max-w-none;
+}
+
+.markdown-body pre {
+  @apply bg-gray-800 text-white p-4 rounded-lg overflow-x-auto;
+}
+
+.markdown-body code {
+  @apply bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded text-sm;
+}
+
+.markdown-body pre code {
+  @apply bg-transparent p-0 text-sm;
+}
