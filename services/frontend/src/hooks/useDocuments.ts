@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   getDocuments,
   getDocument,
@@ -50,7 +50,7 @@ export function useDocumentOCR(documentId: string | null) {
 export function useUploadDocument() {
   const queryClient = useQueryClient();
 
-  return useQueryClient().utils.mutation({
+  return useMutation({
     mutationFn: ({ file, externalId, autoSubmit }: { file: File; externalId?: string; autoSubmit?: boolean }) =>
       uploadDocument(file, externalId, autoSubmit),
     onSuccess: () => {

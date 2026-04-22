@@ -14,14 +14,14 @@ function UploadForm() {
     if (!file) return;
 
     try {
-      const result = await uploadMutation.mutateAsync({
+      await uploadMutation.mutateAsync({
         file,
         externalId: externalId || undefined,
         autoSubmit,
       });
       setMessage({
         type: 'success',
-        text: `Uploaded successfully! Document ID: ${(result as { document_id: string }).document_id}`,
+        text: 'Uploaded successfully!',
       });
       setFile(null);
       setExternalId('');
