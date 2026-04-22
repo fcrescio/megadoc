@@ -93,7 +93,7 @@ class OpenAICompatibleProvider(LLMProvider):
 
         for attempt in range(max_retries):
             try:
-                response = await self.chat(messages, temperature=temperature, response_format=response_format)
+                response = self.chat(messages, temperature=temperature, response_format=response_format)
                 
                 # Try to parse JSON
                 content = response.content.strip()

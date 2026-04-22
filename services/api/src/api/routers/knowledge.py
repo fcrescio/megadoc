@@ -28,7 +28,7 @@ from knowledge_classifier.schemas import (
     KnowledgeJobResponse,
     ReviewUpdate,
 )
-from knowledge_worker.tasks import process_scan_unit_task
+from knowledge_worker.dispatch import dispatch_scan_unit_processing
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 
@@ -69,7 +69,7 @@ async def create_scan_unit_from_ocr(
     db.add(job)
     
     # Queue the processing task
-    process_scan_unit_task.delay(str(scan_unit.id))
+    dispatch_scan_unit_processing(str(scan_unit.id))
     
     # Update job status
     job.status = "queued"

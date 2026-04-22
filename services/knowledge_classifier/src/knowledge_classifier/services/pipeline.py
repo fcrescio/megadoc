@@ -137,16 +137,22 @@ class KnowledgePipelineService:
     def _get_scan_unit(self, scan_unit_id: str) -> DBScanUnit | None:
         """Get scan unit by ID."""
         from sqlalchemy import select
+        # Handle both string and UUID input
+        if isinstance(scan_unit_id, str):
+            scan_unit_id = uuid.UUID(scan_unit_id)
         result = self.db.execute(
-            select(DBScanUnit).where(DBScanUnit.id == uuid.UUID(scan_unit_id))
+            select(DBScanUnit).where(DBScanUnit.id == scan_unit_id)
         )
         return result.scalar_one_or_none()
 
-    def _get_ocr_result(self, ocr_result_id: str) -> OCRResult | None:
+    def _get_ocr_result(self, ocr_result_id) -> OCRResult | None:
         """Get OCR result by ID."""
         from sqlalchemy import select
+        # Handle both string and UUID input
+        if isinstance(ocr_result_id, str):
+            ocr_result_id = uuid.UUID(ocr_result_id)
         result = self.db.execute(
-            select(OCRResult).where(OCRResult.id == uuid.UUID(ocr_result_id))
+            select(OCRResult).where(OCRResult.id == ocr_result_id)
         )
         return result.scalar_one_or_none()
 
