@@ -58,6 +58,7 @@ async def create_scan_unit_from_ocr(
         status="pending",
     )
     db.add(scan_unit)
+    db.flush()  # Get scan_unit.id
     
     # Create knowledge job
     job = KnowledgeJob(
@@ -66,7 +67,6 @@ async def create_scan_unit_from_ocr(
         status="pending",
     )
     db.add(job)
-    db.flush()
     
     # Queue the processing task
     process_scan_unit_task.delay(str(scan_unit.id))
