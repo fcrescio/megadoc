@@ -9,6 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from api.middleware import RequestContextMiddleware
+from api.routers import knowledge
 from common.api.schemas import (
     CreateJobRequest,
     DocumentAssetResponse,
@@ -39,6 +40,9 @@ configure_logging(get_settings().log_level)
 
 app = FastAPI(title="megadoc api", version="0.1.0")
 app.add_middleware(RequestContextMiddleware)
+
+# Include routers
+app.include_router(knowledge.router)
 
 
 def dispatch_ingestion_job(job_id: uuid.UUID) -> None:

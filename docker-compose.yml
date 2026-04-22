@@ -136,6 +136,33 @@ services:
         "ingestion"
       ]
 
+  knowledge_worker:
+    build:
+      context: .
+      dockerfile: infra/compose/Dockerfile.app
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PYTHONPATH: /app/packages/common/src:/app/services/api/src:/app/services/worker/src:/app/services/cli/src:/app/services/knowledge_classifier/src:/app/services/knowledge_worker/src
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    command:
+      [
+        "celery",
+        "-A",
+        "knowledge_worker.celery_app:celery_app",
+        "worker",
+        "--loglevel=INFO",
+        "-Q",
+        "knowledge"
+      ]
+
   cli:
     build:
       context: .

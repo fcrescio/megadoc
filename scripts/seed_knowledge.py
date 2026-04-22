@@ -1,0 +1,179 @@
+"""Seed script for knowledge classifier data."""
+
+import asyncio
+import uuid
+from datetime import datetime
+
+from sqlalchemy.ext.asyncio import create_async_engine, async_session
+from sqlalchemy import text
+
+from common.db.models import DocumentType, Topic
+
+
+async def seed_document_types(session):
+    """Seed document types."""
+    types_data = [
+        {
+            "code": "bolletta",
+            "name": "Bolletta",
+            "description": "Utility bills, service charges, payment notices",
+            "parent_code": None,
+        },
+        {
+            "code": "verbale_assemblea",
+            "name": "Verbale Assemblea",
+            "description": "Meeting minutes, assembly records, deliberations",
+            "parent_code": None,
+        },
+        {
+            "code": "rendiconto_contabile",
+            "name": "Rendiconto Contabile",
+            "description": "Financial statements, accounting reports",
+            "parent_code": None,
+        },
+        {
+            "code": "riparto_spese",
+            "name": "Riparto Spese",
+            "description": "Expense allocation documents",
+            "parent_code": None,
+        },
+        {
+            "code": "fattura",
+            "name": "Fattura",
+            "description": "Invoices from vendors and suppliers",
+            "parent_code": None,
+        },
+        {
+            "code": "preventivo",
+            "name": "Preventivo",
+            "description": "Quotes, estimates, price proposals",
+            "parent_code": None,
+        },
+        {
+            "code": "lettera",
+            "name": "Lettera",
+            "description": "Letters, correspondence, communications",
+            "parent_code": None,
+        },
+        {
+            "code": "contratto",
+            "name": "Contratto",
+            "description": "Contracts, agreements, legal documents",
+            "parent_code": None,
+        },
+        {
+            "code": "allegato_tecnico",
+            "name": "Allegato Tecnico",
+            "description": "Technical attachments, specifications, drawings",
+            "parent_code": None,
+        },
+        {
+            "code": "altro",
+            "name": "Altro",
+            "description": "Other documents not fitting standard categories",
+            "parent_code": None,
+        },
+    ]
+    
+    for type_data in types_data:
+        doc_type = DocumentType(
+            id=uuid.uuid4(),
+            code=type_data["code"],
+            name=type_data["name"],
+            description=type_data["description"],
+            parent_code=type_data["parent_code"],
+            is_active=True,
+            created_at=datetime.utcnow(),
+        )
+        session.add(doc_type)
+        print(f"Created document type: {type_data['code']}")
+
+
+async def seed_topics(session):
+    """Seed example topics."""
+    topics_data = [
+        {
+            "slug": "condominio_via_roma_bilancio_2024",
+            "title": "Condominio Via Roma - Bilancio 2024",
+            "topic_class": "financial_period",
+            "description": "Financial documents for Condominio Via Roma fiscal year 2024",
+        },
+        {
+            "slug": "rifacimento_facciata",
+            "title": "Rifacimento Facciata",
+            "topic_class": "building_issue",
+            "description": "Documents related to facade renovation project",
+        },
+        {
+            "slug": "fornitura_energia",
+            "title": "Fornitura Energia Elettrica",
+            "topic_class": "vendor_relationship",
+            "description": "Energy supplier contracts and invoices",
+        },
+        {
+            "slug": "assemblea_straordinaria_2024_03_12",
+            "title": "Assemblea Straordinaria 12 Marzo 2024",
+            "topic_class": "meeting",
+            "description": "Extraordinary assembly meeting on March 12, 2024",
+        },
+        {
+            "slug": "pratica_legale_rossi",
+            "title": "Pratica Legale Rossi",
+            "topic_class": "legal_matter",
+            "description": "Legal matter involving Rossi",
+        },
+        {
+            "slug": "manutenzione_ascensore",
+            "title": "Manutenzione Ascensore",
+            "topic_class": "building_issue",
+            "description": "Elevator maintenance contracts and service records",
+        },
+    ]
+    
+    for topic_data in topics_data:
+        topic = Topic(
+            id=uuid.uuid4(),
+            slug=topic_data["slug"],
+            title=topic_data["title"],
+            topic_class=topic_data["topic_class"],
+            description=topic_data["description"],
+            canonical=True,
+            is_active=True,
+            created_at=datetime.utcnow(),
+        )
+        session.add(topic)
+        print(f"Created topic: {topic_data['slug']}")
+
+
+async def main():
+    """Run seed script."""
+    database_url = "postgresql+asyncpg://megadoc:megadoc@postgres:5432/megadoc"
+    
+    engine = create_async_engine(database_url)
+    
+    async with async_session(engine) as session:
+        # Check if already seeded
+        result = await session.execute(text("SELECT COUNT(*) FROM document_types"))
+        count = result.scalar()
+        
+        if count and count > 0:
+            print(f"Document types already exist ({count} records). Skipping seed.")
+        else:
+            await seed_document_types(session)
+            await session.flush()
+        
+        result = await session.execute(text("SELECT COUNT(*) FROM topics"))
+        count = result.scalar()
+        
+        if count and count > 0:
+            print(f"Topics already exist ({count} records). Skipping seed.")
+        else:
+            await seed_topics(session)
+            await session.flush()
+        
+        await session.commit()
+        print("Seed completed successfully!")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
