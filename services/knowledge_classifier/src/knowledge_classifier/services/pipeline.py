@@ -1,10 +1,11 @@
 """Knowledge pipeline service - orchestrates the full classification pipeline."""
 
 import logging
+import re
 import uuid
 from typing import Any
 
-from sqlalchemy import insert
+from sqlalchemy import insert, select
 from sqlalchemy.orm import Session
 
 from common.db.models import (
@@ -103,7 +104,8 @@ class KnowledgePipelineService:
             
             # Step 5: Topic assignment
             logger.info("Step 5: Assigning topics")
-            self._assign_topics(document_units, entity_results)
+            self._assign_topics(scan_unit, document_units, entity_results)
+            self._consolidate_scan_topics(scan_unit, document_units, entity_results)
             
             # Update final status
             needs_review = any(
@@ -136,7 +138,6 @@ class KnowledgePipelineService:
 
     def _get_scan_unit(self, scan_unit_id: str) -> DBScanUnit | None:
         """Get scan unit by ID."""
-        from sqlalchemy import select
         # Handle both string and UUID input
         if isinstance(scan_unit_id, str):
             scan_unit_id = uuid.UUID(scan_unit_id)
@@ -147,7 +148,6 @@ class KnowledgePipelineService:
 
     def _get_ocr_result(self, ocr_result_id) -> OCRResult | None:
         """Get OCR result by ID."""
-        from sqlalchemy import select
         # Handle both string and UUID input
         if isinstance(ocr_result_id, str):
             ocr_result_id = uuid.UUID(ocr_result_id)
@@ -207,7 +207,7 @@ class KnowledgePipelineService:
             classification = self.classification_service.classify_document(segment_text)
             
             # Update document unit
-            doc_unit.document_type_code = classification.primary_type.type_code
+            self._set_document_type(doc_unit, classification.primary_type.type_code)
             doc_unit.document_type_confidence = classification.primary_type.confidence
             doc_unit.extracted_summary = classification.rationale[:500] if classification.rationale else None
             
@@ -248,9 +248,16 @@ class KnowledgePipelineService:
                 doc_unit.start_page,
                 doc_unit.end_page,
             )
+
+            entities = self._normalize_entities(
+                entity_result.entities,
+                doc_unit.start_page,
+                doc_unit.end_page,
+            )
+            entity_result.entities = entities
             
             # Save entities to database
-            for entity in entity_result.entities:
+            for entity in entities:
                 db_entity = DBDocumentUnitEntity(
                     document_unit_id=doc_unit.id,
                     entity_type=entity.entity_type,
@@ -272,6 +279,7 @@ class KnowledgePipelineService:
 
     def _assign_topics(
         self,
+        scan_unit: DBScanUnit,
         document_units: list[DBDocumentUnit],
         entity_results: dict[uuid.UUID, Any],
     ):
@@ -279,10 +287,11 @@ class KnowledgePipelineService:
         for doc_unit in document_units:
             entity_result = entity_results.get(doc_unit.id)
             entities = entity_result.entities if entity_result else []
+            document_type_code = self._get_document_type_code(doc_unit)
             
             # Retrieve candidate topics
             candidates_result = self.topic_retrieval_service.retrieve_candidates(
-                document_type_code=doc_unit.document_type_code,
+                document_type_code=document_type_code,
                 document_title=doc_unit.title,
                 document_summary=doc_unit.extracted_summary,
                 entities=entities,
@@ -290,7 +299,7 @@ class KnowledgePipelineService:
             
             # Make assignment decision
             decision = self.topic_assignment_service.assign_topic(
-                document_type_code=doc_unit.document_type_code,
+                document_type_code=document_type_code,
                 document_title=doc_unit.title,
                 document_summary=doc_unit.extracted_summary,
                 entities=entities,
@@ -303,7 +312,19 @@ class KnowledgePipelineService:
             elif decision.action == "assign_multiple":
                 self._create_topic_assignments(doc_unit, decision)
             elif decision.action == "propose_new":
-                self._create_topic_proposal(doc_unit, decision)
+                reused_proposal = self._find_reusable_topic_proposal(scan_unit, decision, entities)
+                if reused_proposal and reused_proposal.matched_existing_topic_id:
+                    doc_unit.review_status = ReviewStatus.NEEDS_REVIEW.value
+                    decision.action = "assign_existing"
+                    decision.topic_ids = [str(reused_proposal.matched_existing_topic_id)]
+                    decision.assignment_roles = ["primary"]
+                    decision.rationale = (
+                        f"{decision.rationale} Reused provisional topic from the same scan "
+                        f"to avoid duplicate topic proposals."
+                    )
+                    self._create_topic_assignments(doc_unit, decision)
+                else:
+                    self._create_topic_proposal(scan_unit, doc_unit, decision, entities)
             elif decision.action == "needs_review":
                 doc_unit.review_status = ReviewStatus.NEEDS_REVIEW.value
                 # Still create tentative assignment
@@ -335,24 +356,50 @@ class KnowledgePipelineService:
 
     def _create_topic_proposal(
         self,
+        scan_unit: DBScanUnit,
         doc_unit: DBDocumentUnit,
         decision: Any,
+        entities: list[Any],
     ):
         """Create topic proposal from decision."""
         if not decision.proposed_topic:
             return
-        
+
+        proposed_slug = decision.proposed_topic.get("proposed_slug", "unknown")
+        proposed_title = decision.proposed_topic.get("proposed_title", "Unknown")
+        provisional_topic = self._find_topic_by_slug(proposed_slug)
+        if provisional_topic is None:
+            provisional_topic = DBTopic(
+                slug=proposed_slug,
+                title=proposed_title,
+                topic_class=decision.proposed_topic.get("topic_class", "other"),
+                description=decision.proposed_topic.get("description"),
+                canonical=False,
+                is_active=False,
+            )
+            self.db.add(provisional_topic)
+            self.db.flush()
+
         proposal = TopicProposal(
-            proposed_slug=decision.proposed_topic.get("proposed_slug", "unknown"),
-            proposed_title=decision.proposed_topic.get("proposed_title", "Unknown"),
+            proposed_slug=proposed_slug,
+            proposed_title=proposed_title,
             topic_class=decision.proposed_topic.get("topic_class", "other"),
             description=decision.proposed_topic.get("description"),
             proposal_status=TopicProposalStatus.PROPOSED.value,
             source_document_unit_id=doc_unit.id,
+            matched_existing_topic_id=provisional_topic.id,
             confidence=decision.confidence,
             rationale=decision.rationale,
         )
         self.db.add(proposal)
+        assignment = DBDocumentUnitTopicAssignment(
+            document_unit_id=doc_unit.id,
+            topic_id=provisional_topic.id,
+            assignment_role="primary",
+            confidence=decision.confidence,
+            rationale=decision.rationale,
+        )
+        self.db.add(assignment)
         doc_unit.review_status = ReviewStatus.NEEDS_REVIEW.value
 
     def _extract_segment_text(
@@ -390,3 +437,256 @@ class KnowledgePipelineService:
             output_payload_json=output_payload or {},
         )
         self.db.add(decision)
+
+    def _set_document_type(self, doc_unit: DBDocumentUnit, type_code: str) -> None:
+        """Resolve and persist the document type by code."""
+        result = self.db.execute(
+            select(DBDocumentType).where(DBDocumentType.code == type_code)
+        )
+        document_type = result.scalar_one_or_none()
+        if document_type is None:
+            logger.warning("Unknown document type code returned by classifier: %s", type_code)
+            return
+        doc_unit.document_type_id = document_type.id
+        doc_unit.document_type = document_type
+
+    def _get_document_type_code(self, doc_unit: DBDocumentUnit) -> str | None:
+        """Return the persisted document type code for a document unit."""
+        if doc_unit.document_type is not None:
+            return doc_unit.document_type.code
+        if doc_unit.document_type_id is None:
+            return None
+        result = self.db.execute(
+            select(DBDocumentType).where(DBDocumentType.id == doc_unit.document_type_id)
+        )
+        document_type = result.scalar_one_or_none()
+        if document_type is None:
+            return None
+        doc_unit.document_type = document_type
+        return document_type.code
+
+    def _normalize_entities(
+        self,
+        entities: list[Any],
+        start_page: int,
+        end_page: int,
+    ) -> list[Any]:
+        """Deduplicate entities and convert page numbers to scan-level coordinates."""
+        normalized_entities: list[Any] = []
+        seen: set[tuple[str, str, int | None, int | None]] = set()
+        segment_length = max(1, end_page - start_page + 1)
+
+        for entity in entities:
+            page_from = entity.page_from
+            page_to = entity.page_to
+
+            if page_from is None:
+                page_from = start_page
+            elif 1 <= page_from <= segment_length and page_from < start_page:
+                page_from = start_page + page_from - 1
+
+            if page_to is None:
+                page_to = end_page if page_from != start_page else page_from
+            elif 1 <= page_to <= segment_length and page_to < start_page:
+                page_to = start_page + page_to - 1
+
+            page_from = max(start_page, min(page_from, end_page))
+            page_to = max(page_from, min(page_to, end_page))
+
+            entity.page_from = page_from
+            entity.page_to = page_to
+            if not entity.normalized_value:
+                entity.normalized_value = self._normalize_entity_value(entity.entity_value)
+
+            dedupe_key = (
+                entity.entity_type.strip().lower(),
+                entity.entity_value.strip().lower(),
+                entity.page_from,
+                entity.page_to,
+            )
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            normalized_entities.append(entity)
+
+        return normalized_entities
+
+    def _normalize_entity_value(self, value: str) -> str:
+        """Create a stable normalized value for extracted entities."""
+        normalized = value.strip().lower()
+        normalized = re.sub(r"\s+", "_", normalized)
+        normalized = re.sub(r"[^a-z0-9_./-]+", "", normalized)
+        return normalized
+
+    def _find_reusable_topic_proposal(
+        self,
+        scan_unit: DBScanUnit,
+        decision: Any,
+        entities: list[Any],
+    ) -> TopicProposal | None:
+        """Reuse a proposal already created in the same scan when it clearly targets the same topic."""
+        result = self.db.execute(
+            select(TopicProposal)
+            .join(DBDocumentUnit, TopicProposal.source_document_unit_id == DBDocumentUnit.id)
+            .where(DBDocumentUnit.scan_unit_id == scan_unit.id)
+            .where(TopicProposal.proposal_status == TopicProposalStatus.PROPOSED.value)
+            .order_by(TopicProposal.created_at.asc())
+        )
+        proposals = list(result.scalars().all())
+        if not proposals:
+            return None
+
+        new_slug = self._proposal_key(decision.proposed_topic.get("proposed_slug", ""))
+        new_title = self._proposal_key(decision.proposed_topic.get("proposed_title", ""))
+        new_anchor = self._topic_anchor(entities, new_slug, new_title)
+
+        for proposal in proposals:
+            proposal_key = self._proposal_key(proposal.proposed_slug)
+            proposal_title = self._proposal_key(proposal.proposed_title)
+            proposal_anchor = self._topic_anchor([], proposal_key, proposal_title)
+            if (
+                new_anchor
+                and proposal_anchor
+                and self._proposal_similarity(new_anchor, proposal_anchor) >= 0.6
+            ):
+                return proposal
+            if (
+                new_slug
+                and proposal_key
+                and self._proposal_similarity(new_slug, proposal_key) >= 0.75
+            ):
+                return proposal
+            if (
+                new_title
+                and proposal_title
+                and self._proposal_similarity(new_title, proposal_title) >= 0.75
+            ):
+                return proposal
+        return None
+
+    def _topic_anchor(self, entities: list[Any], *fallback_texts: str) -> str | None:
+        """Build a coarse topic anchor, preferring condominium/address entities."""
+        for preferred_type in ("condominio", "indirizzo"):
+            for entity in entities:
+                if entity.entity_type == preferred_type:
+                    return self._proposal_key(entity.normalized_value or entity.entity_value)
+
+        for text in fallback_texts:
+            key = self._proposal_key(text)
+            if key:
+                tokens = [
+                    token
+                    for token in key.split("_")
+                    if token
+                    not in {
+                        "bilancio",
+                        "preventivo",
+                        "riparto",
+                        "spese",
+                        "case",
+                        "file",
+                        "financial",
+                        "period",
+                        "condominio",
+                        "scandicci",
+                        "via",
+                        "di",
+                    }
+                ]
+                if tokens:
+                    return "_".join(tokens[:6])
+        return None
+
+    def _proposal_key(self, value: str) -> str:
+        """Normalize proposal text for approximate equality checks."""
+        key = value.strip().lower()
+        key = re.sub(r"[^a-z0-9]+", "_", key)
+        key = re.sub(r"_+", "_", key).strip("_")
+        return key
+
+    def _proposal_similarity(self, left: str, right: str) -> float:
+        """Compute a simple token-overlap similarity for proposal consolidation."""
+        left_tokens = set(left.split("_")) - {"", "condominio", "via", "di", "scandicci"}
+        right_tokens = set(right.split("_")) - {"", "condominio", "via", "di", "scandicci"}
+        if not left_tokens or not right_tokens:
+            return 0.0
+        intersection = len(left_tokens & right_tokens)
+        union = len(left_tokens | right_tokens)
+        return intersection / union if union else 0.0
+
+    def _find_topic_by_slug(self, slug: str) -> DBTopic | None:
+        """Find an existing topic by slug."""
+        result = self.db.execute(select(DBTopic).where(DBTopic.slug == slug))
+        return result.scalar_one_or_none()
+
+    def _consolidate_scan_topics(
+        self,
+        scan_unit: DBScanUnit,
+        document_units: list[DBDocumentUnit],
+        entity_results: dict[uuid.UUID, Any],
+    ) -> None:
+        """Merge duplicate proposed topics generated for the same scan."""
+        canonical_groups: list[tuple[str, TopicProposal]] = []
+
+        for doc_unit in document_units:
+            entity_result = entity_results.get(doc_unit.id)
+            entities = entity_result.entities if entity_result else []
+            anchor = self._topic_anchor(entities)
+            if not anchor:
+                continue
+
+            proposal = self.db.execute(
+                select(TopicProposal).where(TopicProposal.source_document_unit_id == doc_unit.id)
+            ).scalar_one_or_none()
+            if proposal is None or proposal.matched_existing_topic_id is None:
+                continue
+
+            canonical = None
+            for existing_anchor, existing_proposal in canonical_groups:
+                if self._proposal_similarity(anchor, existing_anchor) >= 0.6:
+                    canonical = existing_proposal
+                    break
+            if canonical is None:
+                canonical_groups.append((anchor, proposal))
+                continue
+
+            if canonical.id == proposal.id:
+                continue
+
+            self._reassign_document_unit_topic(doc_unit.id, proposal.matched_existing_topic_id, canonical.matched_existing_topic_id)
+            self.db.delete(proposal)
+
+            duplicate_topic = self.db.execute(
+                select(DBTopic).where(DBTopic.id == proposal.matched_existing_topic_id)
+            ).scalar_one_or_none()
+            if duplicate_topic is not None:
+                remaining_assignments = self.db.execute(
+                    select(DBDocumentUnitTopicAssignment).where(
+                        DBDocumentUnitTopicAssignment.topic_id == duplicate_topic.id
+                    )
+                ).scalars().all()
+                remaining_proposals = self.db.execute(
+                    select(TopicProposal).where(TopicProposal.matched_existing_topic_id == duplicate_topic.id)
+                ).scalars().all()
+                if not remaining_assignments and not remaining_proposals:
+                    self.db.delete(duplicate_topic)
+
+    def _reassign_document_unit_topic(
+        self,
+        document_unit_id: uuid.UUID,
+        old_topic_id: uuid.UUID | None,
+        new_topic_id: uuid.UUID | None,
+    ) -> None:
+        """Point existing assignments for a document unit to the canonical provisional topic."""
+        if old_topic_id is None or new_topic_id is None or old_topic_id == new_topic_id:
+            return
+
+        assignments = self.db.execute(
+            select(DBDocumentUnitTopicAssignment).where(
+                DBDocumentUnitTopicAssignment.document_unit_id == document_unit_id
+            )
+        ).scalars().all()
+
+        for assignment in assignments:
+            if assignment.topic_id == old_topic_id:
+                assignment.topic_id = new_topic_id
