@@ -29,7 +29,7 @@ async def process_scan_unit_task(self, scan_unit_id: str):
     
     # Create DB session
     engine = create_async_engine(
-        os.getenv("DATABASE_URL", "postgresql+asyncpg://megadoc:megadoc@postgres:5432/megadoc"),
+        os.getenv("DATABASE_URL", "postgresql+psycopg://megadoc:megadoc@postgres:5432/megadoc"),
         echo=False,
     )
     
