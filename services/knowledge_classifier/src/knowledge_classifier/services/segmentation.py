@@ -4,12 +4,10 @@ import logging
 import re
 from typing import Any
 
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from knowledge_classifier.config import get_settings
 from knowledge_classifier.llm.base import ChatMessage
-from knowledge_classifier.llm.mock import MockDeterministicProvider
-from knowledge_classifier.llm.openai_compat import OpenAICompatibleProvider
 from knowledge_classifier.llm.base import LLMProvider
 from knowledge_classifier.prompts import SEGMENTATION_PROMPT
 from knowledge_classifier.schemas import (
@@ -38,12 +36,12 @@ BOUNDARY_PATTERNS = [
 class SegmentationService:
     """Service for segmenting OCR results into document units."""
 
-    def __init__(self, llm_provider: LLMProvider, db_session: AsyncSession):
+    def __init__(self, llm_provider: LLMProvider, db_session: Session):
         self.llm = llm_provider
         self.db = db_session
         self.settings = get_settings()
 
-    async def segment_ocr_result(
+    def segment_ocr_result(
         self,
         ocr_structured: dict[str, Any],
         ocr_markdown: str,
@@ -89,7 +87,7 @@ class SegmentationService:
         
         # Second pass: LLM-based segmentation for ambiguous cases
         if len(pages) > 1:
-            llm_result = await self._segment_with_llm(pages)
+            llm_result = self._segment_with_llm(pages)
             return llm_result
         
         # Default: single segment
@@ -261,7 +259,7 @@ class SegmentationService:
         
         return segments
 
-    async def _segment_with_llm(self, pages: list[PageRepresentation]) -> SegmentationResult:
+    def _segment_with_llm(self, pages: list[PageRepresentation]) -> SegmentationResult:
         """Use LLM to segment ambiguous documents."""
         # Build pages content string
         pages_content = "\n\n".join([
@@ -277,7 +275,7 @@ class SegmentationService:
         ]
         
         try:
-            result, _ = await self.llm.chat_with_json(
+            result, _ = self.llm.chat_with_json(
                 messages,
                 SegmentationResult,
                 temperature=self.settings.llm_temperature,

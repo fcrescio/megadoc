@@ -23,7 +23,7 @@ class LLMProvider(ABC):
     """Abstract base class for LLM providers."""
 
     @abstractmethod
-    async def chat(
+    def chat(
         self,
         messages: list[ChatMessage],
         temperature: float = 0.1,
@@ -33,7 +33,7 @@ class LLMProvider(ABC):
         pass
 
     @abstractmethod
-    async def chat_with_json(
+    def chat_with_json(
         self,
         messages: list[ChatMessage],
         schema: type[BaseModel],

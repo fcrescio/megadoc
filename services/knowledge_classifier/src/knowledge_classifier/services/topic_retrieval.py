@@ -4,7 +4,7 @@ import logging
 from typing import Any
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from common.db.models import Topic, TopicAlias
 from knowledge_classifier.config import get_settings
@@ -16,11 +16,11 @@ logger = logging.getLogger(__name__)
 class TopicRetrievalService:
     """Service for retrieving candidate topics for document assignment."""
 
-    def __init__(self, db_session: AsyncSession):
+    def __init__(self, db_session: Session):
         self.db = db_session
         self.settings = get_settings()
 
-    async def retrieve_candidates(
+    def retrieve_candidates(
         self,
         document_type_code: str | None,
         document_title: str | None,
@@ -49,7 +49,7 @@ class TopicRetrievalService:
             limit = self.settings.max_topics_to_retrieve
         
         # Get all active topics with their aliases
-        topics_result = await self.db.execute(
+        topics_result = self.db.execute(
             select(Topic).where(Topic.is_active == True)
         )
         topics = list(topics_result.scalars().all())

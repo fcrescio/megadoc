@@ -17,7 +17,7 @@ class MockDeterministicProvider(LLMProvider):
     def __init__(self, model: str = "mock-model"):
         self._model = model
 
-    async def chat(
+    def chat(
         self,
         messages: list[ChatMessage],
         temperature: float = 0.1,
@@ -40,7 +40,7 @@ class MockDeterministicProvider(LLMProvider):
             usage={"prompt_tokens": len(user_text) // 4, "completion_tokens": len(response) // 4},
         )
 
-    async def chat_with_json(
+    def chat_with_json(
         self,
         messages: list[ChatMessage],
         schema: type[BaseModel],

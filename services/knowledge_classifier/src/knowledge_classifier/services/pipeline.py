@@ -5,7 +5,7 @@ import uuid
 from typing import Any
 
 from sqlalchemy import insert
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from common.db.models import (
     DocumentUnit as DBDocumentUnit,
@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 class KnowledgePipelineService:
     """Orchestrates the full knowledge classification pipeline."""
 
-    def __init__(self, llm_provider: LLMProvider, db_session: AsyncSession):
+    def __init__(self, llm_provider: LLMProvider, db_session: Session):
         self.llm = llm_provider
         self.db = db_session
         self.settings = get_settings()
@@ -49,7 +49,7 @@ class KnowledgePipelineService:
         self.topic_retrieval_service = TopicRetrievalService(db_session)
         self.topic_assignment_service = TopicAssignmentService(llm_provider, db_session)
 
-    async def process_scan_unit(self, scan_unit_id: str) -> dict[str, Any]:
+    def process_scan_unit(self, scan_unit_id: str) -> dict[str, Any]:
         """Process a scan unit through the full pipeline.
         
         Args:
@@ -61,11 +61,11 @@ class KnowledgePipelineService:
         logger.info(f"Starting pipeline for scan_unit: {scan_unit_id}")
         
         # Load scan unit and OCR result
-        scan_unit = await self._get_scan_unit(scan_unit_id)
+        scan_unit = self._get_scan_unit(scan_unit_id)
         if not scan_unit:
             raise ValueError(f"Scan unit not found: {scan_unit_id}")
         
-        ocr_result = await self._get_ocr_result(scan_unit.source_ocr_result_id)
+        ocr_result = self._get_ocr_result(scan_unit.source_ocr_result_id)
         if not ocr_result:
             raise ValueError(f"OCR result not found: {scan_unit.source_ocr_result_id}")
         
@@ -73,9 +73,9 @@ class KnowledgePipelineService:
             # Step 1: Segmentation
             logger.info("Step 1: Segmenting document")
             scan_unit.status = ScanUnitStatus.PROCESSING.value
-            await self.db.flush()
+            self.db.flush()
             
-            segmentation_result = await self.segmentation_service.segment_ocr_result(
+            segmentation_result = self.segmentation_service.segment_ocr_result(
                 ocr_structured=ocr_result.structured_json,
                 ocr_markdown=ocr_result.markdown_text,
                 page_count=ocr_result.page_count,
@@ -83,27 +83,27 @@ class KnowledgePipelineService:
             
             # Step 2: Create document units
             logger.info(f"Step 2: Creating {len(segmentation_result.segments)} document units")
-            document_units = await self._create_document_units(
+            document_units = self._create_document_units(
                 scan_unit, segmentation_result
             )
             
             scan_unit.segmentation_confidence = segmentation_result.overall_confidence
             scan_unit.status = ScanUnitStatus.SEGMENTED.value
-            await self.db.flush()
+            self.db.flush()
             
             # Step 3: Classify each document unit
             logger.info("Step 3: Classifying document units")
-            classification_results = await self._classify_document_units(
+            classification_results = self._classify_document_units(
                 document_units, ocr_result
             )
             
             # Step 4: Extract entities
             logger.info("Step 4: Extracting entities")
-            entity_results = await self._extract_entities(document_units, ocr_result)
+            entity_results = self._extract_entities(document_units, ocr_result)
             
             # Step 5: Topic assignment
             logger.info("Step 5: Assigning topics")
-            await self._assign_topics(document_units, entity_results)
+            self._assign_topics(document_units, entity_results)
             
             # Update final status
             needs_review = any(
@@ -116,7 +116,7 @@ class KnowledgePipelineService:
             confidences = [du.document_type_confidence or 0 for du in document_units]
             scan_unit.classification_confidence = sum(confidences) / len(confidences) if confidences else 0
             
-            await self.db.flush()
+            self.db.flush()
             
             logger.info(f"Pipeline completed for scan_unit: {scan_unit_id}")
             
@@ -131,26 +131,26 @@ class KnowledgePipelineService:
         except Exception as e:
             logger.error(f"Pipeline failed for scan_unit {scan_unit_id}: {e}")
             scan_unit.status = ScanUnitStatus.FAILED.value
-            await self.db.flush()
+            self.db.flush()
             raise
 
-    async def _get_scan_unit(self, scan_unit_id: str) -> DBScanUnit | None:
+    def _get_scan_unit(self, scan_unit_id: str) -> DBScanUnit | None:
         """Get scan unit by ID."""
         from sqlalchemy import select
-        result = await self.db.execute(
+        result = self.db.execute(
             select(DBScanUnit).where(DBScanUnit.id == uuid.UUID(scan_unit_id))
         )
         return result.scalar_one_or_none()
 
-    async def _get_ocr_result(self, ocr_result_id: str) -> OCRResult | None:
+    def _get_ocr_result(self, ocr_result_id: str) -> OCRResult | None:
         """Get OCR result by ID."""
         from sqlalchemy import select
-        result = await self.db.execute(
+        result = self.db.execute(
             select(OCRResult).where(OCRResult.id == uuid.UUID(ocr_result_id))
         )
         return result.scalar_one_or_none()
 
-    async def _create_document_units(
+    def _create_document_units(
         self,
         scan_unit: DBScanUnit,
         segmentation_result: Any,
@@ -172,7 +172,7 @@ class KnowledgePipelineService:
         
         # Save LLM decision for segmentation
         if segmentation_result.boundaries:
-            await self._save_llm_decision(
+            self._save_llm_decision(
                 scan_unit_id=scan_unit.id,
                 decision_type="segmentation",
                 input_payload={"page_count": scan_unit.page_count},
@@ -181,7 +181,7 @@ class KnowledgePipelineService:
         
         return document_units
 
-    async def _classify_document_units(
+    def _classify_document_units(
         self,
         document_units: list[DBDocumentUnit],
         ocr_result: OCRResult,
@@ -198,7 +198,7 @@ class KnowledgePipelineService:
                 ocr_result.page_count
             )
             
-            classification = await self.classification_service.classify_document(segment_text)
+            classification = self.classification_service.classify_document(segment_text)
             
             # Update document unit
             doc_unit.document_type_code = classification.primary_type.type_code
@@ -210,7 +210,7 @@ class KnowledgePipelineService:
                 doc_unit.review_status = ReviewStatus.NEEDS_REVIEW.value
             
             # Save LLM decision
-            await self._save_llm_decision(
+            self._save_llm_decision(
                 document_unit_id=doc_unit.id,
                 decision_type="classification",
                 input_payload={"text_length": len(segment_text)},
@@ -221,7 +221,7 @@ class KnowledgePipelineService:
         
         return results
 
-    async def _extract_entities(
+    def _extract_entities(
         self,
         document_units: list[DBDocumentUnit],
         ocr_result: OCRResult,
@@ -237,7 +237,7 @@ class KnowledgePipelineService:
                 ocr_result.page_count
             )
             
-            entity_result = await self.entity_extraction_service.extract_entities(
+            entity_result = self.entity_extraction_service.extract_entities(
                 segment_text,
                 doc_unit.start_page,
                 doc_unit.end_page,
@@ -264,7 +264,7 @@ class KnowledgePipelineService:
         
         return results
 
-    async def _assign_topics(
+    def _assign_topics(
         self,
         document_units: list[DBDocumentUnit],
         entity_results: dict[uuid.UUID, Any],
@@ -275,7 +275,7 @@ class KnowledgePipelineService:
             entities = entity_result.entities if entity_result else []
             
             # Retrieve candidate topics
-            candidates_result = await self.topic_retrieval_service.retrieve_candidates(
+            candidates_result = self.topic_retrieval_service.retrieve_candidates(
                 document_type_code=doc_unit.document_type_code,
                 document_title=doc_unit.title,
                 document_summary=doc_unit.extracted_summary,
@@ -283,7 +283,7 @@ class KnowledgePipelineService:
             )
             
             # Make assignment decision
-            decision = await self.topic_assignment_service.assign_topic(
+            decision = self.topic_assignment_service.assign_topic(
                 document_type_code=doc_unit.document_type_code,
                 document_title=doc_unit.title,
                 document_summary=doc_unit.extracted_summary,
@@ -293,25 +293,25 @@ class KnowledgePipelineService:
             
             # Execute decision
             if decision.action == "assign_existing":
-                await self._create_topic_assignments(doc_unit, decision)
+                self._create_topic_assignments(doc_unit, decision)
             elif decision.action == "assign_multiple":
-                await self._create_topic_assignments(doc_unit, decision)
+                self._create_topic_assignments(doc_unit, decision)
             elif decision.action == "propose_new":
-                await self._create_topic_proposal(doc_unit, decision)
+                self._create_topic_proposal(doc_unit, decision)
             elif decision.action == "needs_review":
                 doc_unit.review_status = ReviewStatus.NEEDS_REVIEW.value
                 # Still create tentative assignment
-                await self._create_topic_assignments(doc_unit, decision)
+                self._create_topic_assignments(doc_unit, decision)
             
             # Save LLM decision
-            await self._save_llm_decision(
+            self._save_llm_decision(
                 document_unit_id=doc_unit.id,
                 decision_type="topic_assignment",
                 input_payload={"candidates_count": len(candidates_result.candidates)},
                 output_payload=decision.model_dump(),
             )
 
-    async def _create_topic_assignments(
+    def _create_topic_assignments(
         self,
         doc_unit: DBDocumentUnit,
         decision: Any,
@@ -327,7 +327,7 @@ class KnowledgePipelineService:
             )
             self.db.add(assignment)
 
-    async def _create_topic_proposal(
+    def _create_topic_proposal(
         self,
         doc_unit: DBDocumentUnit,
         decision: Any,
@@ -365,7 +365,7 @@ class KnowledgePipelineService:
         
         return "\n".join(lines[start_idx:end_idx])
 
-    async def _save_llm_decision(
+    def _save_llm_decision(
         self,
         scan_unit_id: uuid.UUID | None = None,
         document_unit_id: uuid.UUID | None = None,

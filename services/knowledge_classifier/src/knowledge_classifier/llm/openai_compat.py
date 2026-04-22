@@ -26,28 +26,28 @@ class OpenAICompatibleProvider(LLMProvider):
         self._model = model
         self.api_key = api_key
         self.timeout = timeout
-        self._client: httpx.AsyncClient | None = None
+        self._client: httpx.Client | None = None
 
-    async def _get_client(self) -> httpx.AsyncClient:
+    def _get_client(self) -> httpx.Client:
         if self._client is None or self._client.is_closed:
             headers = {"Content-Type": "application/json"}
             if self.api_key:
                 headers["Authorization"] = f"Bearer {self.api_key}"
-            self._client = httpx.AsyncClient(
+            self._client = httpx.Client(
                 base_url=self.base_url,
                 headers=headers,
                 timeout=httpx.Timeout(self.timeout),
             )
         return self._client
 
-    async def chat(
+    def chat(
         self,
         messages: list[ChatMessage],
         temperature: float = 0.1,
         response_format: dict[str, Any] | None = None,
     ) -> LLMResponse:
         """Send chat messages and get response."""
-        client = await self._get_client()
+        client = self._get_client()
         
         payload: dict[str, Any] = {
             "model": self._model,
@@ -59,7 +59,7 @@ class OpenAICompatibleProvider(LLMProvider):
             payload["response_format"] = response_format
 
         try:
-            response = await client.post("/chat/completions", json=payload)
+            response = client.post("/chat/completions", json=payload)
             response.raise_for_status()
             
             data = response.json()
@@ -74,7 +74,7 @@ class OpenAICompatibleProvider(LLMProvider):
             logger.error(f"LLM request failed: {e}")
             raise
 
-    async def chat_with_json(
+    def chat_with_json(
         self,
         messages: list[ChatMessage],
         schema: type[BaseModel],
@@ -145,7 +145,7 @@ class OpenAICompatibleProvider(LLMProvider):
     def provider_name(self) -> str:
         return "openai-compatible"
 
-    async def close(self):
+    def close(self):
         """Close the HTTP client."""
         if self._client and not self._client.is_closed:
-            await self._client.aclose()
+            self._client.close()

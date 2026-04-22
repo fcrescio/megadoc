@@ -2,7 +2,7 @@
 
 import logging
 
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from knowledge_classifier.config import get_settings
 from knowledge_classifier.llm.base import ChatMessage, LLMProvider
@@ -20,12 +20,12 @@ logger = logging.getLogger(__name__)
 class TopicAssignmentService:
     """Service for assigning documents to topics or proposing new topics."""
 
-    def __init__(self, llm_provider: LLMProvider, db_session: AsyncSession):
+    def __init__(self, llm_provider: LLMProvider, db_session: Session):
         self.llm = llm_provider
         self.db = db_session
         self.settings = get_settings()
 
-    async def assign_topic(
+    def assign_topic(
         self,
         document_type_code: str | None,
         document_title: str | None,
@@ -65,7 +65,7 @@ class TopicAssignmentService:
         ]
         
         try:
-            result, _ = await self.llm.chat_with_json(
+            result, _ = self.llm.chat_with_json(
                 messages,
                 TopicAssignmentDecision,
                 temperature=self.settings.llm_temperature,

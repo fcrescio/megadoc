@@ -3,7 +3,7 @@
 import logging
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from common.db.models import DocumentType
 from knowledge_classifier.config import get_settings
@@ -17,12 +17,12 @@ logger = logging.getLogger(__name__)
 class ClassificationService:
     """Service for classifying document units into document types."""
 
-    def __init__(self, llm_provider: LLMProvider, db_session: AsyncSession):
+    def __init__(self, llm_provider: LLMProvider, db_session: Session):
         self.llm = llm_provider
         self.db = db_session
         self.settings = get_settings()
 
-    async def classify_document(
+    def classify_document(
         self,
         document_text: str,
         available_types: list[DocumentType] | None = None,
@@ -37,7 +37,7 @@ class ClassificationService:
             ClassificationResult with primary type and alternatives
         """
         if available_types is None:
-            available_types = await self._get_active_document_types()
+            available_types = self._get_active_document_types()
         
         # Truncate text if too long
         max_length = 15000
@@ -54,7 +54,7 @@ class ClassificationService:
         ]
         
         try:
-            result, _ = await self.llm.chat_with_json(
+            result, _ = self.llm.chat_with_json(
                 messages,
                 ClassificationResult,
                 temperature=self.settings.llm_temperature,
@@ -65,9 +65,9 @@ class ClassificationService:
             # Fallback to heuristic classification
             return self._heuristic_classification(document_text)
 
-    async def _get_active_document_types(self) -> list[DocumentType]:
+    def _get_active_document_types(self) -> list[DocumentType]:
         """Get all active document types from database."""
-        result = await self.db.execute(
+        result = self.db.execute(
             select(DocumentType).where(DocumentType.is_active == True)
         )
         return list(result.scalars().all())

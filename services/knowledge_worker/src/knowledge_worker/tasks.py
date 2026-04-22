@@ -2,7 +2,6 @@
 
 import logging
 import os
-import uuid
 
 from celery import shared_task
 from sqlalchemy import create_engine
@@ -49,9 +48,8 @@ def process_scan_unit_task(self, scan_unit_id: str):
             # Create pipeline service
             pipeline = KnowledgePipelineService(llm_provider, session)
             
-            # Process scan unit - need to run async code
-            import asyncio
-            result = asyncio.run(pipeline.process_scan_unit(scan_unit_id))
+            # Process scan unit (sync)
+            result = pipeline.process_scan_unit(scan_unit_id)
             
             # Commit changes
             session.commit()
