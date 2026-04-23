@@ -1,4 +1,5 @@
 import importlib.metadata
+from contextlib import contextmanager
 from pathlib import Path
 
 from common.config import Settings, get_settings
@@ -48,10 +49,25 @@ class FakeProcessingBackend(DocumentProcessingBackend):
 
 
 class DoclingProcessingBackend(DocumentProcessingBackend):
+    _warmup_lock_path = Path("/tmp/megadoc-docling-init.lock")
+    _warmup_ready_path = Path("/tmp/megadoc-docling-init.ready")
+
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
 
     def process(self, source: Path, preflight: PDFPreflightReport | None = None) -> OCRResultModel:
+        if self._warmup_ready_path.exists():
+            return self._convert(source)
+
+        with self._warmup_lock():
+            if self._warmup_ready_path.exists():
+                return self._convert(source)
+
+            result = self._convert(source)
+            self._warmup_ready_path.touch()
+            return result
+
+    def _convert(self, source: Path) -> OCRResultModel:
         try:
             from docling.document_converter import DocumentConverter
         except ImportError as exc:
@@ -76,6 +92,21 @@ class DoclingProcessingBackend(DocumentProcessingBackend):
             page_count=page_count,
             confidence_summary=None,
         )
+
+    @contextmanager
+    def _warmup_lock(self):
+        self._warmup_lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with self._warmup_lock_path.open("a+b") as handle:
+            try:
+                import fcntl
+            except ImportError as exc:
+                raise ProcessingError("fcntl is required for serialized Docling warmup.") from exc
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def get_processing_backend(settings: Settings | None = None) -> DocumentProcessingBackend:
