@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     llm_timeout: int = Field(default=120, description="LLM request timeout in seconds")
     llm_temperature: float = Field(default=0.1, description="LLM temperature (low for deterministic)")
     llm_max_retries: int = Field(default=3, description="Max retries for LLM requests")
+    llm_max_tokens: int = Field(default=4096, description="Max completion tokens per LLM request")
 
     # Prompt versions
     prompt_version_segmentation: str = Field(default="v1", description="Segmentation prompt version")

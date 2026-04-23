@@ -43,6 +43,7 @@ def process_scan_unit_task(self, scan_unit_id: str):
                     model=settings.llm_model,
                     api_key=settings.llm_api_key,
                     timeout=settings.llm_timeout,
+                    max_tokens=settings.llm_max_tokens,
                 )
             
             # Create pipeline service

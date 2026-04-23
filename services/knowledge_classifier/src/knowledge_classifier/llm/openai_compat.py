@@ -22,11 +22,13 @@ class OpenAICompatibleProvider(LLMProvider):
         model: str,
         api_key: str | None = None,
         timeout: int = 120,
+        max_tokens: int | None = 4096,
     ):
         self.base_url = base_url.rstrip("/")
         self._model = model
         self.api_key = api_key
         self.timeout = timeout
+        self.max_tokens = max_tokens
         self._client: httpx.Client | None = None
 
     def _get_client(self) -> httpx.Client:
@@ -59,6 +61,8 @@ class OpenAICompatibleProvider(LLMProvider):
             "temperature": temperature,
             "chat_template_kwargs": {"enable_thinking": False},
         }
+        if self.max_tokens is not None:
+            payload["max_tokens"] = self.max_tokens
 
         if response_format:
             payload["response_format"] = response_format

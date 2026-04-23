@@ -90,3 +90,59 @@ def test_chat_with_json_retries_without_response_format_after_server_error():
     assert len(calls) == 2
     assert '"response_format"' in calls[0]["body"]
     assert '"response_format"' not in calls[1]["body"]
+
+
+def test_chat_includes_max_tokens_by_default():
+    seen_payloads: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = request.read().decode("utf-8")
+        import json
+
+        seen_payloads.append(json.loads(payload))
+        return httpx.Response(
+            200,
+            json={
+                "model": "qwen3.6-A3B",
+                "choices": [{"message": {"role": "assistant", "content": "OK"}}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    provider = OpenAICompatibleProvider(base_url="http://test/v1", model="qwen3.6-A3B")
+    provider._client = httpx.Client(transport=transport, base_url="http://test/v1")
+
+    provider.chat([ChatMessage(role="user", content="Say OK")])
+
+    assert seen_payloads[0]["max_tokens"] == 4096
+
+
+def test_chat_can_disable_max_tokens_for_compatibility():
+    seen_payloads: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = request.read().decode("utf-8")
+        import json
+
+        seen_payloads.append(json.loads(payload))
+        return httpx.Response(
+            200,
+            json={
+                "model": "qwen3.6-A3B",
+                "choices": [{"message": {"role": "assistant", "content": "OK"}}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    provider = OpenAICompatibleProvider(
+        base_url="http://test/v1",
+        model="qwen3.6-A3B",
+        max_tokens=None,
+    )
+    provider._client = httpx.Client(transport=transport, base_url="http://test/v1")
+
+    provider.chat([ChatMessage(role="user", content="Say OK")])
+
+    assert "max_tokens" not in seen_payloads[0]
