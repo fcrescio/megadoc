@@ -275,3 +275,106 @@ def test_pick_regulation_canonical_unit_prefers_condominium_anchor(db_session):
 
     assert canonical is not None
     assert canonical.id == doc_unit_2.id
+
+
+def test_consolidate_financial_topics_merges_same_vendor_proposals(db_session):
+    scan_unit = ScanUnit(
+        source_document_id=uuid.uuid4(),
+        source_ocr_result_id=uuid.uuid4(),
+        page_count=2,
+        status="processing",
+    )
+    fattura_type = DocumentType(code="fattura", name="Fattura", is_active=True)
+    doc_unit_1 = DocumentUnit(
+        scan_unit=scan_unit,
+        ordinal=1,
+        start_page=1,
+        end_page=1,
+        review_status="needs_review",
+        document_type=fattura_type,
+    )
+    doc_unit_2 = DocumentUnit(
+        scan_unit=scan_unit,
+        ordinal=2,
+        start_page=2,
+        end_page=2,
+        review_status="needs_review",
+        document_type=fattura_type,
+    )
+    db_session.add_all([scan_unit, fattura_type, doc_unit_1, doc_unit_2])
+    db_session.flush()
+
+    service = KnowledgePipelineService(MockDeterministicProvider(), db_session)
+    entities_1 = [
+        ExtractedEntity(
+            entity_type="fornitore",
+            entity_value="Elettrosat snc",
+            normalized_value="elettrosat_snc",
+            confidence=0.95,
+            page_from=1,
+            page_to=1,
+        )
+    ]
+    entities_2 = [
+        ExtractedEntity(
+            entity_type="fornitore",
+            entity_value="Elettrosat snc",
+            normalized_value="elettrosat_snc",
+            confidence=0.95,
+            page_from=2,
+            page_to=2,
+        )
+    ]
+    first_decision = type(
+        "Decision",
+        (),
+        {
+            "proposed_topic": {
+                "proposed_slug": "invoice_from_elettrosat_snc",
+                "proposed_title": "Invoice from Elettrosat snc",
+                "topic_class": "vendor_relationship",
+                "description": "Invoices from Elettrosat",
+            },
+            "confidence": 0.91,
+            "rationale": "First invoice",
+        },
+    )()
+    second_decision = type(
+        "Decision",
+        (),
+        {
+            "proposed_topic": {
+                "proposed_slug": "invoice_from_elettrosat_snc_april_2007",
+                "proposed_title": "Invoice from Elettrosat snc - April 2007",
+                "topic_class": "vendor_relationship",
+                "description": "Another invoice from same vendor",
+            },
+            "confidence": 0.9,
+            "rationale": "Second invoice",
+        },
+    )()
+
+    service._create_topic_proposal(scan_unit, doc_unit_1, first_decision, entities_1)
+    service._create_topic_proposal(scan_unit, doc_unit_2, second_decision, entities_2)
+    db_session.flush()
+
+    service._consolidate_financial_topics(
+        scan_unit,
+        [doc_unit_1, doc_unit_2],
+        {
+            doc_unit_1.id: SimpleNamespace(entities=entities_1),
+            doc_unit_2.id: SimpleNamespace(entities=entities_2),
+        },
+    )
+    db_session.flush()
+
+    proposals = db_session.query(TopicProposal).all()
+    assignments = (
+        db_session.query(DocumentUnitTopicAssignment)
+        .order_by(DocumentUnitTopicAssignment.document_unit_id)
+        .all()
+    )
+
+    assert len(proposals) == 1
+    assert len(assignments) == 2
+    assert assignments[0].topic_id == assignments[1].topic_id

@@ -62,6 +62,17 @@ class FinancialPipelineStrategy(BasePipelineStrategy):
 
     pipeline_id = "financial_pipeline"
 
+    def postprocess(
+        self,
+        pipeline_service: KnowledgePipelineService,
+        scan_unit: Any,
+        document_units: list[Any],
+        entity_results: dict[Any, Any],
+        ocr_result: OCRResult,
+    ) -> None:
+        pipeline_service._consolidate_financial_topics(scan_unit, document_units, entity_results)
+        super().postprocess(pipeline_service, scan_unit, document_units, entity_results, ocr_result)
+
 
 class UtilityVendorPipelineStrategy(BasePipelineStrategy):
     """Reserved strategy for utility/vendor scans."""

@@ -34,6 +34,7 @@ class PipelineRouterService:
     def route_scan(self, ocr_result: OCRResult) -> PipelineRoutingDecision:
         """Route a scan based on coarse document-family signals."""
         scan_text = self._scan_text(ocr_result)
+        compact_text = self._compact_scan_text(scan_text)
 
         for rule in (
             self._route_normative,
@@ -42,7 +43,7 @@ class PipelineRouterService:
             self._route_utility_vendor,
             self._route_technical_admin,
         ):
-            decision = rule(scan_text)
+            decision = rule(scan_text, compact_text)
             if decision is not None:
                 return decision
 
@@ -65,7 +66,14 @@ class PipelineRouterService:
         )
         return text[:30000].lower()
 
-    def _route_normative(self, scan_text: str) -> PipelineRoutingDecision | None:
+    def _compact_scan_text(self, scan_text: str) -> str:
+        return "".join(ch for ch in scan_text if ch.isalnum())
+
+    def _route_normative(
+        self,
+        scan_text: str,
+        compact_text: str,
+    ) -> PipelineRoutingDecision | None:
         signals = []
         if "regolamento" in scan_text:
             signals.append("regolamento")
@@ -84,7 +92,11 @@ class PipelineRouterService:
             signals=signals,
         )
 
-    def _route_meeting(self, scan_text: str) -> PipelineRoutingDecision | None:
+    def _route_meeting(
+        self,
+        scan_text: str,
+        compact_text: str,
+    ) -> PipelineRoutingDecision | None:
         signals = [
             token
             for token in ("verbale", "assemblea", "delibera", "presenti", "assenti")
@@ -100,12 +112,39 @@ class PipelineRouterService:
             signals=signals,
         )
 
-    def _route_financial(self, scan_text: str) -> PipelineRoutingDecision | None:
-        signals = [
-            token
-            for token in ("rendiconto", "bilancio", "riparto", "spese", "consuntivo", "preventivo")
-            if token in scan_text
-        ]
+    def _route_financial(
+        self,
+        scan_text: str,
+        compact_text: str,
+    ) -> PipelineRoutingDecision | None:
+        signals = []
+
+        for token in (
+            "rendiconto",
+            "bilancio",
+            "riparto",
+            "spese",
+            "consuntivo",
+            "preventivo",
+            "fattura",
+            "imponibile",
+            "importo fattura",
+            "iva",
+            "totale",
+        ):
+            if token in scan_text:
+                signals.append(token)
+
+        for label, token in (
+            ("partita_iva", "partitaiva"),
+            ("partita_va", "partitava"),
+            ("cedente_prestatore", "cedenteoprestatore"),
+            ("dati_cliente", "datiidentificatividelcliente"),
+            ("codice_fiscale_partita_iva", "codicefiscalepartitaiva"),
+        ):
+            if token in compact_text:
+                signals.append(label)
+
         if len(signals) < 2:
             return None
         return PipelineRoutingDecision(
@@ -116,7 +155,11 @@ class PipelineRouterService:
             signals=signals,
         )
 
-    def _route_utility_vendor(self, scan_text: str) -> PipelineRoutingDecision | None:
+    def _route_utility_vendor(
+        self,
+        scan_text: str,
+        compact_text: str,
+    ) -> PipelineRoutingDecision | None:
         signals = [
             token
             for token in ("fattura", "fornitura", "bolletta", "acque", "enel", "servizio idrico")
@@ -132,7 +175,11 @@ class PipelineRouterService:
             signals=signals,
         )
 
-    def _route_technical_admin(self, scan_text: str) -> PipelineRoutingDecision | None:
+    def _route_technical_admin(
+        self,
+        scan_text: str,
+        compact_text: str,
+    ) -> PipelineRoutingDecision | None:
         signals = [
             token
             for token in (

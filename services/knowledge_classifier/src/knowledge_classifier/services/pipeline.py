@@ -713,6 +713,71 @@ class KnowledgePipelineService:
                 if not remaining_assignments and not remaining_proposals:
                     self.db.delete(duplicate_topic)
 
+    def _consolidate_financial_topics(
+        self,
+        scan_unit: DBScanUnit,
+        document_units: list[DBDocumentUnit],
+        entity_results: dict[uuid.UUID, Any],
+    ) -> None:
+        """Merge duplicate financial/vendor proposals using vendor-first anchors."""
+        canonical_groups: list[tuple[str, TopicProposal]] = []
+
+        for doc_unit in document_units:
+            document_type_code = self._get_document_type_code(doc_unit)
+            if document_type_code not in {
+                "fattura",
+                "preventivo",
+                "riparto_spese",
+                "rendiconto_contabile",
+            }:
+                continue
+
+            entity_result = entity_results.get(doc_unit.id)
+            entities = entity_result.entities if entity_result else []
+            anchor = self._financial_topic_anchor(entities)
+            if not anchor:
+                continue
+
+            proposal = self.db.execute(
+                select(TopicProposal).where(TopicProposal.source_document_unit_id == doc_unit.id)
+            ).scalar_one_or_none()
+            if proposal is None or proposal.matched_existing_topic_id is None:
+                continue
+
+            canonical = None
+            for existing_anchor, existing_proposal in canonical_groups:
+                if self._proposal_similarity(anchor, existing_anchor) >= 0.75:
+                    canonical = existing_proposal
+                    break
+            if canonical is None:
+                canonical_groups.append((anchor, proposal))
+                continue
+
+            if canonical.id == proposal.id:
+                continue
+
+            self._reassign_document_unit_topic(
+                doc_unit.id,
+                proposal.matched_existing_topic_id,
+                canonical.matched_existing_topic_id,
+            )
+            self.db.delete(proposal)
+
+            duplicate_topic = self.db.execute(
+                select(DBTopic).where(DBTopic.id == proposal.matched_existing_topic_id)
+            ).scalar_one_or_none()
+            if duplicate_topic is not None:
+                remaining_assignments = self.db.execute(
+                    select(DBDocumentUnitTopicAssignment).where(
+                        DBDocumentUnitTopicAssignment.topic_id == duplicate_topic.id
+                    )
+                ).scalars().all()
+                remaining_proposals = self.db.execute(
+                    select(TopicProposal).where(TopicProposal.matched_existing_topic_id == duplicate_topic.id)
+                ).scalars().all()
+                if not remaining_assignments and not remaining_proposals:
+                    self.db.delete(duplicate_topic)
+
     def _update_scan_assignment_confidence(
         self,
         scan_unit: DBScanUnit,
@@ -727,6 +792,14 @@ class KnowledgePipelineService:
         ]
         if confidences:
             scan_unit.assignment_confidence = sum(confidences) / len(confidences)
+
+    def _financial_topic_anchor(self, entities: list[Any]) -> str | None:
+        """Build a vendor-first anchor for financial documents."""
+        for preferred_type in ("fornitore", "organizzazione", "persona", "indirizzo"):
+            for entity in entities:
+                if entity.entity_type == preferred_type:
+                    return self._proposal_key(entity.normalized_value or entity.entity_value)
+        return None
 
     def _consolidate_scan_semantics(
         self,
