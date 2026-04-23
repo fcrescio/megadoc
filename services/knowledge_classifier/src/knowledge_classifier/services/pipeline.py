@@ -106,6 +106,7 @@ class KnowledgePipelineService:
             logger.info("Step 5: Assigning topics")
             self._assign_topics(scan_unit, document_units, entity_results)
             self._consolidate_scan_topics(scan_unit, document_units, entity_results)
+            self._consolidate_scan_semantics(scan_unit, document_units, entity_results, ocr_result)
             
             # Update final status
             needs_review = any(
@@ -670,6 +671,156 @@ class KnowledgePipelineService:
                 ).scalars().all()
                 if not remaining_assignments and not remaining_proposals:
                     self.db.delete(duplicate_topic)
+
+    def _consolidate_scan_semantics(
+        self,
+        scan_unit: DBScanUnit,
+        document_units: list[DBDocumentUnit],
+        entity_results: dict[uuid.UUID, Any],
+        ocr_result: OCRResult,
+    ) -> None:
+        """Apply scan-level semantic normalization after first-pass classification/topicing."""
+        if not document_units:
+            return
+
+        scan_text = " ".join(
+            filter(
+                None,
+                [
+                    ocr_result.full_text[:20000] if ocr_result.full_text else "",
+                    " ".join(
+                        doc_unit.extracted_summary or ""
+                        for doc_unit in document_units
+                    ),
+                ],
+            )
+        ).lower()
+
+        if self._looks_like_condominium_regulation(scan_text, document_units):
+            self._normalize_regulation_scan(document_units, entity_results)
+
+        confidences = [
+            assignment.confidence
+            for doc_unit in document_units
+            for assignment in doc_unit.topic_assignments
+            if assignment.confidence is not None
+        ]
+        if confidences:
+            scan_unit.assignment_confidence = sum(confidences) / len(confidences)
+
+    def _looks_like_condominium_regulation(
+        self,
+        scan_text: str,
+        document_units: list[DBDocumentUnit],
+    ) -> bool:
+        """Detect long-form normative condominium regulations split into multiple units."""
+        if "regolamento" not in scan_text or "condominio" not in scan_text:
+            return False
+
+        article_markers = scan_text.count("art.") + scan_text.count("articolo")
+        if article_markers < 3:
+            return False
+
+        type_codes = [self._get_document_type_code(doc_unit) for doc_unit in document_units]
+        allowed_types = {"contratto", "verbale_assemblea", "lettera", "altro"}
+        classified = [type_code for type_code in type_codes if type_code]
+        if not classified or any(type_code not in allowed_types for type_code in classified):
+            return False
+
+        return len(document_units) >= 2
+
+    def _normalize_regulation_scan(
+        self,
+        document_units: list[DBDocumentUnit],
+        entity_results: dict[uuid.UUID, Any],
+    ) -> None:
+        """Force coherence for scans that are clearly one condominium regulation."""
+        canonical_doc_unit = self._pick_regulation_canonical_unit(document_units, entity_results)
+        if canonical_doc_unit is None:
+            return
+
+        canonical_proposal = self.db.execute(
+            select(TopicProposal).where(TopicProposal.source_document_unit_id == canonical_doc_unit.id)
+        ).scalar_one_or_none()
+        canonical_topic_id = canonical_proposal.matched_existing_topic_id if canonical_proposal else None
+
+        for doc_unit in document_units:
+            doc_unit.review_status = ReviewStatus.NEEDS_REVIEW.value
+            self._set_document_type(doc_unit, "contratto")
+            if (doc_unit.document_type_confidence or 0.0) < 0.95:
+                doc_unit.document_type_confidence = 0.95
+            if not doc_unit.title:
+                doc_unit.title = canonical_doc_unit.title or "Regolamento condominiale"
+
+            proposal = self.db.execute(
+                select(TopicProposal).where(TopicProposal.source_document_unit_id == doc_unit.id)
+            ).scalar_one_or_none()
+            if canonical_proposal is not None and proposal is not None and proposal.id != canonical_proposal.id:
+                if proposal.matched_existing_topic_id and canonical_topic_id:
+                    self._reassign_document_unit_topic(
+                        doc_unit.id,
+                        proposal.matched_existing_topic_id,
+                        canonical_topic_id,
+                    )
+                self.db.delete(proposal)
+
+            if canonical_topic_id is not None and doc_unit.id != canonical_doc_unit.id:
+                assignments = self.db.execute(
+                    select(DBDocumentUnitTopicAssignment).where(
+                        DBDocumentUnitTopicAssignment.document_unit_id == doc_unit.id
+                    )
+                ).scalars().all()
+                if assignments:
+                    for assignment in assignments:
+                        assignment.topic_id = canonical_topic_id
+                        assignment.assignment_role = "primary"
+                        assignment.confidence = max(assignment.confidence or 0.0, 0.92)
+                        assignment.rationale = (
+                            "Consolidated at scan level: this scan is a single condominium regulation "
+                            "split across multiple OCR/classification segments."
+                        )
+                else:
+                    assignment = DBDocumentUnitTopicAssignment(
+                        document_unit_id=doc_unit.id,
+                        topic_id=canonical_topic_id,
+                        assignment_role="primary",
+                        confidence=0.92,
+                        rationale=(
+                            "Consolidated at scan level: this scan is a single condominium regulation "
+                            "split across multiple OCR/classification segments."
+                        ),
+                    )
+                    self.db.add(assignment)
+
+    def _pick_regulation_canonical_unit(
+        self,
+        document_units: list[DBDocumentUnit],
+        entity_results: dict[uuid.UUID, Any],
+    ) -> DBDocumentUnit | None:
+        """Choose the document unit with the strongest condominium anchor/proposal."""
+        best_doc_unit: DBDocumentUnit | None = None
+        best_score = -1
+
+        for doc_unit in document_units:
+            score = 0
+            entity_result = entity_results.get(doc_unit.id)
+            entities = entity_result.entities if entity_result else []
+            if any(entity.entity_type == "condominio" for entity in entities):
+                score += 4
+            if any(entity.entity_type == "indirizzo" for entity in entities):
+                score += 2
+            if doc_unit.proposal is not None:
+                score += 3
+            summary = (doc_unit.extracted_summary or "").lower()
+            if "regolamento" in summary:
+                score += 2
+            if "condominio" in summary:
+                score += 1
+            if score > best_score:
+                best_score = score
+                best_doc_unit = doc_unit
+
+        return best_doc_unit
 
     def _reassign_document_unit_topic(
         self,

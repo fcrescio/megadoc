@@ -1,6 +1,7 @@
 """Tests for pipeline persistence and topic consolidation."""
 
 import uuid
+from types import SimpleNamespace
 
 from common.db.models import (
     DocumentType,
@@ -182,3 +183,95 @@ def test_create_topic_proposal_reuses_existing_provisional_topic_in_same_scan(db
     assert len(assignments) == 2
     assert assignments[0].topic_id == assignments[1].topic_id == reused_topic_id
     assert entities_count == 0
+
+
+def test_looks_like_condominium_regulation_detects_fragmented_regulation_scan(db_session):
+    contract_type = DocumentType(code="contratto", name="Contratto", is_active=True)
+    meeting_type = DocumentType(code="verbale_assemblea", name="Verbale assemblea", is_active=True)
+    scan_unit = ScanUnit(
+        source_document_id=uuid.uuid4(),
+        source_ocr_result_id=uuid.uuid4(),
+        page_count=12,
+        status="processing",
+    )
+    doc_units = [
+        DocumentUnit(
+            scan_unit=scan_unit,
+            ordinal=1,
+            start_page=1,
+            end_page=5,
+            review_status="needs_review",
+            extracted_summary="Regolamento del condominio con articoli e norme sulle spese comuni.",
+            document_type=contract_type,
+            document_type_confidence=0.91,
+        ),
+        DocumentUnit(
+            scan_unit=scan_unit,
+            ordinal=2,
+            start_page=6,
+            end_page=8,
+            review_status="needs_review",
+            extracted_summary="Norme assembleari e convocazioni previste dal regolamento.",
+            document_type=meeting_type,
+            document_type_confidence=0.88,
+        ),
+    ]
+    db_session.add_all([contract_type, meeting_type, scan_unit, *doc_units])
+    db_session.flush()
+
+    service = KnowledgePipelineService(MockDeterministicProvider(), db_session)
+    scan_text = (
+        "Regolamento del condominio. Art. 1 proprieta comune. "
+        "Art. 2 assemblea. Articolo 3 ripartizione spese. Articolo 4 amministratore."
+    )
+
+    assert service._looks_like_condominium_regulation(scan_text.lower(), doc_units) is True
+
+
+def test_pick_regulation_canonical_unit_prefers_condominium_anchor(db_session):
+    scan_unit = ScanUnit(
+        source_document_id=uuid.uuid4(),
+        source_ocr_result_id=uuid.uuid4(),
+        page_count=8,
+        status="processing",
+    )
+    doc_unit_1 = DocumentUnit(
+        scan_unit=scan_unit,
+        ordinal=1,
+        start_page=1,
+        end_page=3,
+        review_status="needs_review",
+        extracted_summary="Regolamento generale delle parti comuni.",
+    )
+    doc_unit_2 = DocumentUnit(
+        scan_unit=scan_unit,
+        ordinal=2,
+        start_page=4,
+        end_page=8,
+        review_status="needs_review",
+        extracted_summary="Regolamento del condominio di Via Cesare Studiati.",
+    )
+    db_session.add_all([scan_unit, doc_unit_1, doc_unit_2])
+    db_session.flush()
+
+    service = KnowledgePipelineService(MockDeterministicProvider(), db_session)
+    entity_results = {
+        doc_unit_1.id: SimpleNamespace(entities=[]),
+        doc_unit_2.id: SimpleNamespace(
+            entities=[
+                ExtractedEntity(
+                    entity_type="condominio",
+                    entity_value="Condominio Via Cesare Studiati",
+                    normalized_value="condominio_via_cesare_studiati",
+                    confidence=0.95,
+                    page_from=4,
+                    page_to=4,
+                )
+            ]
+        ),
+    }
+
+    canonical = service._pick_regulation_canonical_unit([doc_unit_1, doc_unit_2], entity_results)
+
+    assert canonical is not None
+    assert canonical.id == doc_unit_2.id
