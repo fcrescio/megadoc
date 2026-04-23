@@ -27,4 +27,4 @@ class AssetType(StrEnum):
     OCR_JSON = "ocr_json"
     MARKDOWN = "markdown"
     TEXT = "text"
-
+    PREFLIGHT_JSON = "preflight_json"

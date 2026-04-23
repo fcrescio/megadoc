@@ -4,8 +4,8 @@ from uuid import UUID
 from common.application.services import OCRService
 
 
-def test_upload_and_retrieve_document(client, tmp_path: Path) -> None:
-    fixture = Path("tests/fixtures/sample.pdf")
+def test_upload_and_retrieve_document(client, valid_pdf_path) -> None:
+    fixture = valid_pdf_path
     with fixture.open("rb") as handle:
         response = client.post("/documents/upload?auto_submit=false", files={"file": ("sample.pdf", handle, "application/pdf")})
     assert response.status_code == 200
@@ -17,8 +17,8 @@ def test_upload_and_retrieve_document(client, tmp_path: Path) -> None:
     assert document_response.json()["original_filename"] == "sample.pdf"
 
 
-def test_process_job_persists_ocr_and_assets(client, db_session) -> None:
-    fixture = Path("tests/fixtures/sample.pdf")
+def test_process_job_persists_ocr_and_assets(client, db_session, valid_pdf_path) -> None:
+    fixture = valid_pdf_path
     with fixture.open("rb") as handle:
         response = client.post("/documents/upload?auto_submit=false", files={"file": ("sample.pdf", handle, "application/pdf")})
 
@@ -36,12 +36,14 @@ def test_process_job_persists_ocr_and_assets(client, db_session) -> None:
     ocr_response = client.get(f"/documents/{document_id}/ocr")
     assert ocr_response.status_code == 200
     assert ocr_response.json()["engine_name"] == "fake"
+    assert ocr_response.json()["confidence_summary"]["preflight"]["valid_pdf"] is True
+    assert ocr_response.json()["structured_json"]["preflight"]["page_count"] == 1
 
     assets_response = client.get(f"/documents/{document_id}/assets")
     assert assets_response.status_code == 200
     assets = assets_response.json()
     asset_types = {asset["asset_type"] for asset in assets}
-    assert {"original_pdf", "markdown", "text", "ocr_json"}.issubset(asset_types)
+    assert {"original_pdf", "markdown", "text", "ocr_json", "preflight_json"}.issubset(asset_types)
 
     markdown_asset = next(asset for asset in assets if asset["asset_type"] == "markdown")
     download_response = client.get(f"/documents/{document_id}/assets/{markdown_asset['id']}/download")
@@ -50,8 +52,8 @@ def test_process_job_persists_ocr_and_assets(client, db_session) -> None:
     assert b"# OCR Result" in download_response.content
 
 
-def test_create_job_and_fetch_status(client) -> None:
-    fixture = Path("tests/fixtures/sample.pdf")
+def test_create_job_and_fetch_status(client, valid_pdf_path) -> None:
+    fixture = valid_pdf_path
     with fixture.open("rb") as handle:
         upload_response = client.post("/documents/upload?auto_submit=false", files={"file": ("sample.pdf", handle, "application/pdf")})
     document_id = upload_response.json()["document_id"]
@@ -65,8 +67,8 @@ def test_create_job_and_fetch_status(client) -> None:
     assert status_response.json()["document_id"] == document_id
 
 
-def test_download_original_and_list_versions(client) -> None:
-    fixture = Path("tests/fixtures/sample.pdf")
+def test_download_original_and_list_versions(client, valid_pdf_path) -> None:
+    fixture = valid_pdf_path
     with fixture.open("rb") as handle:
         response = client.post("/documents/upload?auto_submit=false", files={"file": ("sample.pdf", handle, "application/pdf")})
 
@@ -126,8 +128,8 @@ def test_upload_same_external_id_creates_new_version(client, tmp_path: Path) -> 
     assert document_response.json()["original_filename"] == "v2.pdf"
 
 
-def test_upload_same_external_id_and_hash_is_deduplicated(client) -> None:
-    fixture = Path("tests/fixtures/sample.pdf")
+def test_upload_same_external_id_and_hash_is_deduplicated(client, valid_pdf_path) -> None:
+    fixture = valid_pdf_path
     with fixture.open("rb") as handle:
         response_one = client.post(
             "/documents/upload?auto_submit=false",

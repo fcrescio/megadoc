@@ -4,10 +4,11 @@ from pathlib import Path
 from common.config import Settings, get_settings
 from common.domain.exceptions import ProcessingError
 from common.domain.models import OCRResultModel
+from common.processing.preflight import PDFPreflightReport
 
 
 class DocumentProcessingBackend:
-    def process(self, source: Path) -> OCRResultModel:
+    def process(self, source: Path, preflight: PDFPreflightReport | None = None) -> OCRResultModel:
         raise NotImplementedError
 
 
@@ -15,7 +16,7 @@ class FakeProcessingBackend(DocumentProcessingBackend):
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
 
-    def process(self, source: Path) -> OCRResultModel:
+    def process(self, source: Path, preflight: PDFPreflightReport | None = None) -> OCRResultModel:
         text = f"Fake OCR output for {source.name}"
         structured = {
             "pages": [
@@ -50,7 +51,7 @@ class DoclingProcessingBackend(DocumentProcessingBackend):
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
 
-    def process(self, source: Path) -> OCRResultModel:
+    def process(self, source: Path, preflight: PDFPreflightReport | None = None) -> OCRResultModel:
         try:
             from docling.document_converter import DocumentConverter
         except ImportError as exc:
@@ -82,4 +83,3 @@ def get_processing_backend(settings: Settings | None = None) -> DocumentProcessi
     if app_settings.ocr_backend == "fake":
         return FakeProcessingBackend(app_settings)
     return DoclingProcessingBackend(app_settings)
-

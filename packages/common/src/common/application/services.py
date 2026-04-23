@@ -2,6 +2,7 @@ import shutil
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import json
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from uuid import UUID
@@ -17,11 +18,12 @@ from common.application.repositories import (
 from common.config import Settings, get_settings
 from common.db.models import Document, DocumentAsset, DocumentVersion, IngestionJob, OCRResult
 from common.domain.enums import AssetType, JobStatus, JobType, OCRStatus, SourceType
-from common.domain.exceptions import NotFoundError, ValidationError
+from common.domain.exceptions import NotFoundError, ProcessingError, ValidationError
 from common.domain.models import OCRResultModel
 from common.infrastructure.security import sha256_file, validate_pdf_magic_bytes
 from common.logging import get_logger
 from common.processing.backends import DocumentProcessingBackend, get_processing_backend
+from common.processing.preflight import PDFPreflightReport, PDFPreflightService
 from common.storage.backends import StorageBackend, get_storage_backend
 
 logger = get_logger(__name__)
@@ -192,6 +194,7 @@ class OCRService:
         self.settings = settings or get_settings()
         self.storage = storage or get_storage_backend(self.settings)
         self.processor = processor or get_processing_backend(self.settings)
+        self.preflight = PDFPreflightService(self.settings)
         self.documents = DocumentRepository(session)
         self.versions = DocumentVersionRepository(session)
         self.results = OCRResultRepository(session)
@@ -214,7 +217,18 @@ class OCRService:
             with NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
                 temp_path = Path(tmp.name)
             self.storage.download_to_path(version.storage_bucket, version.storage_object_key, temp_path)
-            ocr_result_model = self.processor.process(temp_path)
+            preflight_report = self.preflight.analyze(temp_path)
+            if not preflight_report.valid_pdf:
+                raise ProcessingError(preflight_report.error or "PDF preflight failed.")
+            ocr_result_model = self.processor.process(temp_path, preflight=preflight_report)
+            ocr_result_model.structured_json = {
+                **ocr_result_model.structured_json,
+                "preflight": preflight_report.model_dump(mode="json"),
+            }
+            ocr_result_model.confidence_summary = self._merge_confidence_summary(
+                ocr_result_model.confidence_summary,
+                preflight_report,
+            )
             return self._store_ocr_result(document.id, version.id, ocr_result_model)
         finally:
             if temp_path is not None:
@@ -244,31 +258,52 @@ class OCRService:
             content_type="application/json",
         )
 
-        self.session.add_all(
-            [
+        preflight_payload = None
+        if isinstance(result_model.confidence_summary, dict):
+            preflight_payload = result_model.confidence_summary.get("preflight")
+        if preflight_payload is not None:
+            self.storage.put_bytes(
+                json.dumps(preflight_payload, indent=2).encode("utf-8"),
+                bucket=self.settings.s3_bucket_derivatives,
+                key=f"{base_key}/preflight.json",
+                content_type="application/json",
+            )
+
+        assets = [
+            DocumentAsset(
+                document_id=document_id,
+                asset_type=AssetType.MARKDOWN.value,
+                storage_bucket=self.settings.s3_bucket_derivatives,
+                storage_object_key=f"{base_key}/result.md",
+                content_type="text/markdown",
+            ),
+            DocumentAsset(
+                document_id=document_id,
+                asset_type=AssetType.TEXT.value,
+                storage_bucket=self.settings.s3_bucket_derivatives,
+                storage_object_key=f"{base_key}/result.txt",
+                content_type="text/plain",
+            ),
+            DocumentAsset(
+                document_id=document_id,
+                asset_type=AssetType.OCR_JSON.value,
+                storage_bucket=self.settings.s3_bucket_derivatives,
+                storage_object_key=f"{base_key}/result.json",
+                content_type="application/json",
+            ),
+        ]
+        if preflight_payload is not None:
+            assets.append(
                 DocumentAsset(
                     document_id=document_id,
-                    asset_type=AssetType.MARKDOWN.value,
+                    asset_type=AssetType.PREFLIGHT_JSON.value,
                     storage_bucket=self.settings.s3_bucket_derivatives,
-                    storage_object_key=f"{base_key}/result.md",
-                    content_type="text/markdown",
-                ),
-                DocumentAsset(
-                    document_id=document_id,
-                    asset_type=AssetType.TEXT.value,
-                    storage_bucket=self.settings.s3_bucket_derivatives,
-                    storage_object_key=f"{base_key}/result.txt",
-                    content_type="text/plain",
-                ),
-                DocumentAsset(
-                    document_id=document_id,
-                    asset_type=AssetType.OCR_JSON.value,
-                    storage_bucket=self.settings.s3_bucket_derivatives,
-                    storage_object_key=f"{base_key}/result.json",
+                    storage_object_key=f"{base_key}/preflight.json",
                     content_type="application/json",
-                ),
-            ]
-        )
+                )
+            )
+
+        self.session.add_all(assets)
 
         ocr_result = OCRResult(
             document_id=document_id,
@@ -288,6 +323,15 @@ class OCRService:
         self.session.refresh(ocr_result)
         logger.info("ocr_result_stored", document_id=str(document_id), version_id=str(version_id))
         return ocr_result
+
+    def _merge_confidence_summary(
+        self,
+        confidence_summary: dict | None,
+        preflight_report: PDFPreflightReport,
+    ) -> dict:
+        merged = dict(confidence_summary or {})
+        merged["preflight"] = preflight_report.model_dump(mode="json")
+        return merged
 
 
 def persist_upload_to_temp(source, destination: Path) -> None:

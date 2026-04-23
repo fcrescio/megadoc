@@ -36,9 +36,16 @@ class Settings(BaseSettings):
     pipeline_version: str = Field(default="v1", alias="PIPELINE_VERSION")
     request_timeout_seconds: int = Field(default=30, alias="REQUEST_TIMEOUT_SECONDS")
     api_base_url: str = Field(default="http://api:8080", alias="API_BASE_URL")
+    preflight_enabled: bool = Field(default=True, alias="PREFLIGHT_ENABLED")
+    preflight_text_sample_pages: int = Field(default=4, alias="PREFLIGHT_TEXT_SAMPLE_PAGES")
+    preflight_heavy_scan_bytes_per_page: int = Field(
+        default=400_000,
+        alias="PREFLIGHT_HEAVY_SCAN_BYTES_PER_PAGE",
+    )
+    rotation_detector_backend: str = Field(default="none", alias="ROTATION_DETECTOR_BACKEND")
+    rotation_detector_model_id: str | None = Field(default=None, alias="ROTATION_DETECTOR_MODEL_ID")
 
 
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
-

@@ -18,6 +18,18 @@ from common.db.base import Base  # noqa: E402
 
 
 @pytest.fixture()
+def valid_pdf_path(tmp_path: Path) -> Path:
+    from pypdf import PdfWriter
+
+    pdf_path = tmp_path / "sample.pdf"
+    writer = PdfWriter()
+    writer.add_blank_page(width=595, height=842)
+    with pdf_path.open("wb") as handle:
+        writer.write(handle)
+    return pdf_path
+
+
+@pytest.fixture()
 def db_session(tmp_path: Path):
     db_path = tmp_path / "test.sqlite3"
     engine = create_engine(f"sqlite+pysqlite:///{db_path}")
