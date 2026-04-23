@@ -28,6 +28,15 @@ from knowledge_classifier.schemas import (
 )
 from knowledge_classifier.services.classification import ClassificationService
 from knowledge_classifier.services.entity_extraction import EntityExtractionService
+from knowledge_classifier.services.pipeline_strategies import (
+    FinancialPipelineStrategy,
+    GeneralPipelineStrategy,
+    MeetingPipelineStrategy,
+    NormativePipelineStrategy,
+    TechnicalAdminPipelineStrategy,
+    UtilityVendorPipelineStrategy,
+)
+from knowledge_classifier.services.routing import PipelineRouterService
 from knowledge_classifier.services.segmentation import SegmentationService
 from knowledge_classifier.services.topic_assignment import TopicAssignmentService
 from knowledge_classifier.services.topic_retrieval import TopicRetrievalService
@@ -49,6 +58,15 @@ class KnowledgePipelineService:
         self.entity_extraction_service = EntityExtractionService(llm_provider, db_session)
         self.topic_retrieval_service = TopicRetrievalService(db_session)
         self.topic_assignment_service = TopicAssignmentService(llm_provider, db_session)
+        self.pipeline_router_service = PipelineRouterService()
+        self.pipeline_strategies = {
+            "general_pipeline": GeneralPipelineStrategy(),
+            "normative_pipeline": NormativePipelineStrategy(),
+            "meeting_pipeline": MeetingPipelineStrategy(),
+            "financial_pipeline": FinancialPipelineStrategy(),
+            "utility_vendor_pipeline": UtilityVendorPipelineStrategy(),
+            "technical_admin_pipeline": TechnicalAdminPipelineStrategy(),
+        }
 
     def process_scan_unit(self, scan_unit_id: str) -> dict[str, Any]:
         """Process a scan unit through the full pipeline.
@@ -71,6 +89,21 @@ class KnowledgePipelineService:
             raise ValueError(f"OCR result not found: {scan_unit.source_ocr_result_id}")
         
         try:
+            routing_decision = self.pipeline_router_service.route_scan(ocr_result)
+            strategy = self._resolve_pipeline_strategy(routing_decision.pipeline_id)
+            logger.info(
+                "Routing scan_unit %s to %s (%s)",
+                scan_unit_id,
+                routing_decision.pipeline_id,
+                routing_decision.family,
+            )
+            self._save_llm_decision(
+                scan_unit_id=scan_unit.id,
+                decision_type="pipeline_routing",
+                input_payload={"page_count": ocr_result.page_count},
+                output_payload=routing_decision.model_dump(),
+            )
+
             # Step 1: Segmentation
             logger.info("Step 1: Segmenting document")
             scan_unit.status = ScanUnitStatus.PROCESSING.value
@@ -105,8 +138,7 @@ class KnowledgePipelineService:
             # Step 5: Topic assignment
             logger.info("Step 5: Assigning topics")
             self._assign_topics(scan_unit, document_units, entity_results)
-            self._consolidate_scan_topics(scan_unit, document_units, entity_results)
-            self._consolidate_scan_semantics(scan_unit, document_units, entity_results, ocr_result)
+            strategy.postprocess(self, scan_unit, document_units, entity_results, ocr_result)
             
             # Update final status
             needs_review = any(
@@ -127,6 +159,8 @@ class KnowledgePipelineService:
                 "scan_unit_id": str(scan_unit.id),
                 "status": scan_unit.status,
                 "document_units_count": len(document_units),
+                "pipeline_id": routing_decision.pipeline_id,
+                "pipeline_family": routing_decision.family,
                 "segmentation_confidence": scan_unit.segmentation_confidence,
                 "classification_confidence": scan_unit.classification_confidence,
             }
@@ -146,6 +180,13 @@ class KnowledgePipelineService:
             select(DBScanUnit).where(DBScanUnit.id == scan_unit_id)
         )
         return result.scalar_one_or_none()
+
+    def _resolve_pipeline_strategy(self, pipeline_id: str):
+        """Resolve the selected pipeline strategy, defaulting to the general pipeline."""
+        return self.pipeline_strategies.get(
+            pipeline_id,
+            self.pipeline_strategies["general_pipeline"],
+        )
 
     def _get_ocr_result(self, ocr_result_id) -> OCRResult | None:
         """Get OCR result by ID."""
@@ -672,6 +713,21 @@ class KnowledgePipelineService:
                 if not remaining_assignments and not remaining_proposals:
                     self.db.delete(duplicate_topic)
 
+    def _update_scan_assignment_confidence(
+        self,
+        scan_unit: DBScanUnit,
+        document_units: list[DBDocumentUnit],
+    ) -> None:
+        """Recompute the scan-level assignment confidence from unit assignments."""
+        confidences = [
+            assignment.confidence
+            for doc_unit in document_units
+            for assignment in doc_unit.topic_assignments
+            if assignment.confidence is not None
+        ]
+        if confidences:
+            scan_unit.assignment_confidence = sum(confidences) / len(confidences)
+
     def _consolidate_scan_semantics(
         self,
         scan_unit: DBScanUnit,
@@ -698,15 +754,6 @@ class KnowledgePipelineService:
 
         if self._looks_like_condominium_regulation(scan_text, document_units):
             self._normalize_regulation_scan(document_units, entity_results)
-
-        confidences = [
-            assignment.confidence
-            for doc_unit in document_units
-            for assignment in doc_unit.topic_assignments
-            if assignment.confidence is not None
-        ]
-        if confidences:
-            scan_unit.assignment_confidence = sum(confidences) / len(confidences)
 
     def _looks_like_condominium_regulation(
         self,
