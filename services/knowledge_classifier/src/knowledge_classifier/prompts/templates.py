@@ -90,7 +90,20 @@ Rules:
 """
 
 # Entity extraction prompt
-ENTITY_EXTRACTION_PROMPT = """You are an entity extraction expert. Extract key entities from the document.
+ENTITY_EXTRACTION_PROMPT = """You are an archival entity extraction expert for condominium documents.
+
+Extract ONLY high-value filing/search entities from the document. This is not table transcription.
+
+Hard rules:
+- Return at most 25 entities total.
+- Use only these entity_type values: condominio, organizzazione, persona, fornitore, indirizzo, data, periodo, importo, numero_documento.
+- Do NOT extract every owner row, apartment row, table cell, or repeated amount.
+- For monetary amounts, return at most 8 values and only if they are document-level totals, balances, installments, or payment amounts.
+- For people, return only administrators, vendors, lawyers, signatories, or named parties central to the document. Do not list all condominium owners from allocation tables.
+- Deduplicate aggressively. Same condominium/address/date/amount appears once.
+- Use concise normalized_value. Dates as YYYY-MM-DD when unambiguous; periods as YYYY-MM-DD_to_YYYY-MM-DD.
+- If the text is mostly a table, summarize the table in summary instead of enumerating rows.
+- Stop immediately after a single valid JSON object. No markdown, no prose.
 
 Entity types to extract:
 - condominio: Condominium name
@@ -122,11 +135,11 @@ Output JSON schema:
 }
 
 Rules:
-- Extract ALL relevant entities of each type
+- Extract only the most important archival/search entities
 - Normalize values for consistent matching (lowercase, underscores)
 - Confidence between 0 and 1
 - Track page locations when possible
-- Summary should capture document purpose
+- Summary should capture document purpose in one sentence, max 30 words
 """
 
 # Topic assignment prompt

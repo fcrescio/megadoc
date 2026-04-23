@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -120,9 +120,19 @@ class ClassificationResult(BaseModel):
 # Entity Extraction
 class ExtractedEntity(BaseModel):
     """An extracted entity from a document."""
-    entity_type: str
-    entity_value: str
-    normalized_value: Optional[str] = None
+    entity_type: Literal[
+        "condominio",
+        "organizzazione",
+        "persona",
+        "fornitore",
+        "indirizzo",
+        "data",
+        "periodo",
+        "importo",
+        "numero_documento",
+    ]
+    entity_value: str = Field(..., max_length=256)
+    normalized_value: Optional[str] = Field(default=None, max_length=256)
     confidence: float = Field(..., ge=0, le=1)
     page_from: Optional[int] = None
     page_to: Optional[int] = None
@@ -130,8 +140,8 @@ class ExtractedEntity(BaseModel):
 
 class EntityExtractionResult(BaseModel):
     """Result of entity extraction."""
-    entities: list[ExtractedEntity] = Field(...)
-    summary: Optional[str] = None
+    entities: list[ExtractedEntity] = Field(..., max_length=25)
+    summary: Optional[str] = Field(default=None, max_length=500)
 
 
 # Topic Retrieval
