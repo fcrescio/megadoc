@@ -1,6 +1,7 @@
 """Topic retrieval service."""
 
 import logging
+import re
 from typing import Any
 
 from sqlalchemy import select
@@ -106,6 +107,7 @@ class TopicRetrievalService:
             "summary_words": set(),
             "entity_values": set(),
             "entity_normalized": set(),
+            "anchors": [],
         }
         
         if title:
@@ -118,6 +120,10 @@ class TopicRetrievalService:
             terms["entity_values"].add(entity.entity_value.lower())
             if entity.normalized_value:
                 terms["entity_normalized"].add(entity.normalized_value.lower())
+            if entity.entity_type in {"condominio", "indirizzo"}:
+                anchor = self._anchor_tokens(entity.normalized_value or entity.entity_value)
+                if anchor:
+                    terms["anchors"].append(anchor)
         
         return terms
 
@@ -134,6 +140,15 @@ class TopicRetrievalService:
         topic_title_lower = topic.title.lower()
         topic_slug_lower = topic.slug.lower()
         topic_desc_lower = (topic.description or "").lower()
+        topic_anchor = self._topic_anchor_tokens(
+            f"{topic_title_lower} {topic_slug_lower} {topic_desc_lower}"
+        )
+
+        for document_anchor in search_terms["anchors"]:
+            if topic_anchor and document_anchor and document_anchor.isdisjoint(topic_anchor):
+                return 0.0, [
+                    "Anchor mismatch: document building/address differs from topic"
+                ]
         
         topic_words = self._tokenize(topic_title_lower)
         
@@ -190,7 +205,6 @@ class TopicRetrievalService:
 
     def _tokenize(self, text: str) -> set[str]:
         """Simple tokenization."""
-        import re
         # Remove stopwords and tokenize
         stopwords = {
             "the", "a", "an", "is", "are", "was", "were", "be", "been",
@@ -199,6 +213,68 @@ class TopicRetrievalService:
         }
         words = re.findall(r"\b[a-zàéìòù]{3,}\b", text.lower())
         return {w for w in words if w not in stopwords}
+
+    def _anchor_tokens(self, text: str | None) -> set[str]:
+        """Extract building/address identity tokens, excluding generic topic words."""
+        if not text:
+            return set()
+
+        normalized = text.replace("_", " ")
+        generic = {
+            "amministrazione",
+            "assemblea",
+            "bilancio",
+            "case",
+            "condominio",
+            "consuntivo",
+            "contabile",
+            "documento",
+            "documents",
+            "edificio",
+            "fascicolo",
+            "file",
+            "finanziario",
+            "fiscal",
+            "financial",
+            "for",
+            "gestione",
+            "ordinaria",
+            "period",
+            "periodo",
+            "preventivo",
+            "rendiconto",
+            "riparto",
+            "scandicci",
+            "spese",
+            "straordinaria",
+            "verbale",
+            "year",
+        }
+        street_words = {
+            "via",
+            "viale",
+            "piazza",
+            "corso",
+            "largo",
+            "vicolo",
+            "strada",
+            "localita",
+            "località",
+        }
+        return self._tokenize(normalized) - generic - street_words
+
+    def _topic_anchor_tokens(self, text: str | None) -> set[str]:
+        """Extract topic anchors only when the topic explicitly names a building/address."""
+        if not text:
+            return set()
+
+        lowered = text.lower()
+        if not re.search(
+            r"\b(condominio|via|viale|piazza|corso|largo|vicolo|strada|localit[aà])\b",
+            lowered,
+        ):
+            return set()
+        return self._anchor_tokens(lowered)
 
     def _check_type_compatibility(
         self,

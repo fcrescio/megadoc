@@ -12,6 +12,8 @@ from common.db.models import (
     OCRResult,
     ScanUnit,
     DocumentUnit,
+    DocumentUnitEntity,
+    DocumentUnitTopicAssignment,
     Topic,
     TopicProposal,
     KnowledgeJob,
@@ -31,6 +33,122 @@ from knowledge_classifier.schemas import (
 from knowledge_worker.dispatch import dispatch_scan_unit_processing
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
+
+
+def _serialize_entity(entity: DocumentUnitEntity) -> dict[str, Any]:
+    return {
+        "id": str(entity.id),
+        "entity_type": entity.entity_type,
+        "entity_value": entity.entity_value,
+        "normalized_value": entity.normalized_value,
+        "confidence": entity.confidence,
+        "page_from": entity.page_from,
+        "page_to": entity.page_to,
+    }
+
+
+def _serialize_topic_assignment(assignment: DocumentUnitTopicAssignment) -> dict[str, Any]:
+    topic = assignment.topic
+    return {
+        "id": str(assignment.id),
+        "topic_id": str(assignment.topic_id),
+        "topic_slug": topic.slug if topic else None,
+        "topic_title": topic.title if topic else None,
+        "topic_class": topic.topic_class if topic else None,
+        "assignment_role": assignment.assignment_role,
+        "confidence": assignment.confidence,
+        "rationale": assignment.rationale,
+    }
+
+
+def _serialize_topic_proposal(proposal: TopicProposal | None) -> dict[str, Any] | None:
+    if proposal is None:
+        return None
+    return {
+        "id": str(proposal.id),
+        "proposed_slug": proposal.proposed_slug,
+        "proposed_title": proposal.proposed_title,
+        "topic_class": proposal.topic_class,
+        "description": proposal.description,
+        "proposal_status": proposal.proposal_status,
+        "matched_existing_topic_id": str(proposal.matched_existing_topic_id) if proposal.matched_existing_topic_id else None,
+        "confidence": proposal.confidence,
+        "rationale": proposal.rationale,
+        "created_at": proposal.created_at,
+        "reviewed_at": proposal.reviewed_at,
+    }
+
+
+def _serialize_document_unit(doc_unit: DocumentUnit) -> dict[str, Any]:
+    return {
+        "id": str(doc_unit.id),
+        "scan_unit_id": str(doc_unit.scan_unit_id),
+        "ordinal": doc_unit.ordinal,
+        "start_page": doc_unit.start_page,
+        "end_page": doc_unit.end_page,
+        "title": doc_unit.title,
+        "document_type_code": doc_unit.document_type.code if doc_unit.document_type else None,
+        "document_type_name": doc_unit.document_type.name if doc_unit.document_type else None,
+        "document_type_confidence": doc_unit.document_type_confidence,
+        "segmentation_confidence": doc_unit.segmentation_confidence,
+        "extracted_summary": doc_unit.extracted_summary,
+        "review_status": doc_unit.review_status,
+        "entities": [_serialize_entity(entity) for entity in doc_unit.entities],
+        "topic_assignments": [
+            _serialize_topic_assignment(assignment)
+            for assignment in doc_unit.topic_assignments
+        ],
+        "proposal": _serialize_topic_proposal(doc_unit.proposal),
+        "created_at": doc_unit.created_at,
+        "updated_at": doc_unit.updated_at,
+    }
+
+
+def _serialize_scan_unit(scan_unit: ScanUnit, include_units: bool = False) -> dict[str, Any]:
+    payload = {
+        "id": str(scan_unit.id),
+        "source_document_id": str(scan_unit.source_document_id),
+        "source_document_version_id": str(scan_unit.source_document_version_id)
+        if scan_unit.source_document_version_id
+        else None,
+        "source_ocr_result_id": str(scan_unit.source_ocr_result_id),
+        "page_count": scan_unit.page_count,
+        "status": scan_unit.status,
+        "segmentation_confidence": scan_unit.segmentation_confidence,
+        "classification_confidence": scan_unit.classification_confidence,
+        "assignment_confidence": scan_unit.assignment_confidence,
+        "created_at": scan_unit.created_at,
+        "updated_at": scan_unit.updated_at,
+    }
+    if include_units:
+        payload["document_units"] = [
+            _serialize_document_unit(doc_unit)
+            for doc_unit in sorted(scan_unit.document_units, key=lambda unit: unit.ordinal)
+        ]
+    return payload
+
+
+@router.get("/documents/{document_id}")
+def get_document_knowledge(document_id: str, db: Session = Depends(get_db_session)):
+    """Return scan units and rich document-unit results for a source document."""
+    try:
+        parsed_document_id = uuid.UUID(document_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid document ID") from exc
+
+    result = db.execute(
+        select(ScanUnit)
+        .where(ScanUnit.source_document_id == parsed_document_id)
+        .order_by(ScanUnit.created_at.desc())
+    )
+    scan_units = result.scalars().unique().all()
+    return {
+        "document_id": document_id,
+        "scan_units": [
+            _serialize_scan_unit(scan_unit, include_units=True)
+            for scan_unit in scan_units
+        ],
+    }
 
 
 # Scan Units

@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import type { DocumentVersion, DocumentAsset } from '../types';
+import type { DocumentVersion, DocumentAsset, KnowledgeDocumentUnit } from '../types';
 import {
   useDocument,
   useDocumentVersions,
   useDocumentOCR,
   useDocumentAssets,
+  useDocumentKnowledge,
 } from '../hooks/useDocuments';
 import { downloadDocument, downloadAsset } from '../api/client';
 
@@ -16,11 +17,12 @@ interface Props {
 }
 
 function DocumentDetail({ documentId, onBack }: Props) {
-  const [activeTab, setActiveTab] = useState<'info' | 'ocr' | 'versions' | 'assets'>('info');
+  const [activeTab, setActiveTab] = useState<'info' | 'ocr' | 'knowledge' | 'versions' | 'assets'>('info');
 
   const { data: docData, isLoading: docLoading } = useDocument(documentId);
   const { data: versions } = useDocumentVersions(documentId);
   const { data: ocrResult, isLoading: ocrLoading } = useDocumentOCR(documentId);
+  const { data: knowledge, isLoading: knowledgeLoading } = useDocumentKnowledge(documentId);
   const { data: assets } = useDocumentAssets(documentId);
 
   if (docLoading) {
@@ -72,7 +74,7 @@ function DocumentDetail({ documentId, onBack }: Props) {
       <div className="bg-white rounded-lg shadow">
         <div className="border-b">
           <nav className="flex -mb-px">
-            {(['info', 'ocr', 'versions', 'assets'] as const).map((tab) => (
+            {(['info', 'ocr', 'knowledge', 'versions', 'assets'] as const).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
@@ -142,6 +144,131 @@ function DocumentDetail({ documentId, onBack }: Props) {
                 </div>
               ) : (
                 <p className="text-gray-500">No OCR result available yet.</p>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'knowledge' && (
+            <div>
+              {knowledgeLoading ? (
+                <div className="animate-pulse space-y-4">
+                  <div className="h-4 bg-gray-200 rounded w-1/4"></div>
+                  <div className="h-32 bg-gray-200 rounded"></div>
+                </div>
+              ) : knowledge && knowledge.scan_units.length > 0 ? (
+                <div className="space-y-6">
+                  {knowledge.scan_units.map((scanUnit) => (
+                    <div key={scanUnit.id} className="border rounded-lg overflow-hidden">
+                      <div className="bg-gray-50 px-4 py-3 border-b">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div>
+                            <p className="font-medium text-gray-900">Scan unit</p>
+                            <p className="font-mono text-xs text-gray-500">{scanUnit.id}</p>
+                          </div>
+                          <div className="flex flex-wrap gap-2 text-xs">
+                            <span className="px-2 py-1 rounded-full bg-blue-50 text-blue-700">
+                              {scanUnit.status}
+                            </span>
+                            <span className="px-2 py-1 rounded-full bg-gray-100 text-gray-700">
+                              {scanUnit.page_count} pages
+                            </span>
+                            {scanUnit.classification_confidence !== null && (
+                              <span className="px-2 py-1 rounded-full bg-emerald-50 text-emerald-700">
+                                class {(scanUnit.classification_confidence * 100).toFixed(0)}%
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="divide-y">
+                        {scanUnit.document_units.map((unit: KnowledgeDocumentUnit) => (
+                          <div key={unit.id} className="p-4 space-y-3">
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div>
+                                <h3 className="font-semibold text-gray-900">
+                                  Unit {unit.ordinal}: {unit.document_type_code ?? 'unknown'}
+                                </h3>
+                                <p className="text-sm text-gray-500">
+                                  Pages {unit.start_page}-{unit.end_page} · {unit.review_status}
+                                  {unit.document_type_confidence !== null &&
+                                    ` · ${(unit.document_type_confidence * 100).toFixed(0)}% confidence`}
+                                </p>
+                              </div>
+                              <p className="font-mono text-xs text-gray-400">{unit.id}</p>
+                            </div>
+
+                            {unit.extracted_summary && (
+                              <p className="text-sm text-gray-700 bg-amber-50 border border-amber-100 rounded p-3">
+                                {unit.extracted_summary}
+                              </p>
+                            )}
+
+                            <div>
+                              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
+                                Topics
+                              </p>
+                              {unit.topic_assignments.length > 0 ? (
+                                <div className="flex flex-wrap gap-2">
+                                  {unit.topic_assignments.map((assignment) => (
+                                    <span
+                                      key={assignment.id}
+                                      title={assignment.rationale ?? undefined}
+                                      className="px-2 py-1 rounded-full bg-indigo-50 text-indigo-700 text-xs"
+                                    >
+                                      {assignment.topic_title ?? assignment.topic_slug}
+                                      {assignment.confidence !== null &&
+                                        ` · ${(assignment.confidence * 100).toFixed(0)}%`}
+                                    </span>
+                                  ))}
+                                </div>
+                              ) : (
+                                <p className="text-sm text-gray-500">No topic assignment.</p>
+                              )}
+                              {unit.proposal && (
+                                <div className="mt-2">
+                                  <span
+                                    className="px-2 py-1 rounded-full bg-orange-50 text-orange-700 text-xs"
+                                    title={unit.proposal.rationale ?? undefined}
+                                  >
+                                    Proposed: {unit.proposal.proposed_title} · {unit.proposal.proposal_status}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+
+                            <div>
+                              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
+                                Entities
+                              </p>
+                              {unit.entities.length > 0 ? (
+                                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                                  {unit.entities.map((entity) => (
+                                    <div key={entity.id} className="border rounded p-2 bg-white">
+                                      <p className="text-xs text-gray-500">{entity.entity_type}</p>
+                                      <p className="text-sm text-gray-900 truncate" title={entity.entity_value}>
+                                        {entity.entity_value}
+                                      </p>
+                                      {entity.normalized_value && (
+                                        <p className="text-xs text-gray-400 truncate" title={entity.normalized_value}>
+                                          {entity.normalized_value}
+                                        </p>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <p className="text-sm text-gray-500">No entities extracted.</p>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-gray-500">No knowledge result available yet.</p>
               )}
             </div>
           )}

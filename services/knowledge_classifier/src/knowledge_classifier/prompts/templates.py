@@ -186,9 +186,15 @@ Topic classes:
 - other: Other
 
 Rules:
-- Prefer existing topics over new proposals
+- Assign to an existing topic only when it represents the same real-world matter, not just the same document type
+- For condominium/building documents, the condominium name, street, or building address is a hard anchor: if the document names one building/address and the candidate names a different one, do not assign it
+- For financial-period topics, require the same building/address plus the same or overlapping accounting period for high confidence
+- For meeting topics, require the same building/address plus the same meeting date/title for high confidence
+- For vendor/building/legal matters, require the same building/address or the same vendor/person/legal matter
+- Do not assign solely because words like bilancio, preventivo, verbale, condominio, spese, or assemblea overlap
+- If an existing candidate is broadly similar but has a different anchor, use propose_new when the document has a clear topic; otherwise use needs_review with confidence <= 0.45
 - Use "primary" for main topic, "secondary" for related topics
-- Only propose new topic if truly no match exists
+- Prefer a new proposal over a wrong existing topic
 - Confidence < 0.6 means needs_review
-- Be conservative with new topic proposals
+- Be conservative with duplicate topic proposals, but never merge different buildings, addresses, periods, meetings, or legal matters
 """

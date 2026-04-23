@@ -66,3 +66,78 @@ export interface UploadResponse {
   sha256: string;
   size_bytes: number;
 }
+
+export interface KnowledgeEntity {
+  id: string;
+  entity_type: string;
+  entity_value: string;
+  normalized_value: string | null;
+  confidence: number | null;
+  page_from: number | null;
+  page_to: number | null;
+}
+
+export interface KnowledgeTopicAssignment {
+  id: string;
+  topic_id: string;
+  topic_slug: string | null;
+  topic_title: string | null;
+  topic_class: string | null;
+  assignment_role: string;
+  confidence: number | null;
+  rationale: string | null;
+}
+
+export interface KnowledgeTopicProposal {
+  id: string;
+  proposed_slug: string;
+  proposed_title: string;
+  topic_class: string;
+  description: string | null;
+  proposal_status: string;
+  matched_existing_topic_id: string | null;
+  confidence: number | null;
+  rationale: string | null;
+  created_at: string;
+  reviewed_at: string | null;
+}
+
+export interface KnowledgeDocumentUnit {
+  id: string;
+  scan_unit_id: string;
+  ordinal: number;
+  start_page: number;
+  end_page: number;
+  title: string | null;
+  document_type_code: string | null;
+  document_type_name: string | null;
+  document_type_confidence: number | null;
+  segmentation_confidence: number | null;
+  extracted_summary: string | null;
+  review_status: string;
+  entities: KnowledgeEntity[];
+  topic_assignments: KnowledgeTopicAssignment[];
+  proposal: KnowledgeTopicProposal | null;
+  created_at: string;
+  updated_at: string | null;
+}
+
+export interface KnowledgeScanUnit {
+  id: string;
+  source_document_id: string;
+  source_document_version_id: string | null;
+  source_ocr_result_id: string;
+  page_count: number;
+  status: string;
+  segmentation_confidence: number | null;
+  classification_confidence: number | null;
+  assignment_confidence: number | null;
+  created_at: string;
+  updated_at: string | null;
+  document_units: KnowledgeDocumentUnit[];
+}
+
+export interface DocumentKnowledge {
+  document_id: string;
+  scan_units: KnowledgeScanUnit[];
+}

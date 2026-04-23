@@ -1,4 +1,12 @@
-import type { Document, DocumentVersion, DocumentAsset, OCRResult, Job, UploadResponse } from '../types';
+import type {
+  Document,
+  DocumentVersion,
+  DocumentAsset,
+  OCRResult,
+  Job,
+  UploadResponse,
+  DocumentKnowledge,
+} from '../types';
 
 const API_BASE = '';
 
@@ -33,6 +41,11 @@ export async function getDocumentAssets(documentId: string): Promise<DocumentAss
 export async function getDocumentOCR(documentId: string): Promise<OCRResult> {
   const response = await fetch(`${API_BASE}/documents/${documentId}/ocr`);
   return handleResponse<OCRResult>(response);
+}
+
+export async function getDocumentKnowledge(documentId: string): Promise<DocumentKnowledge> {
+  const response = await fetch(`${API_BASE}/knowledge/documents/${documentId}`);
+  return handleResponse<DocumentKnowledge>(response);
 }
 
 export async function downloadDocument(documentId: string, versionId?: string): Promise<Blob> {

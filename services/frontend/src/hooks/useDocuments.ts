@@ -1,11 +1,19 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import type { Document, DocumentVersion, DocumentAsset, OCRResult, UploadResponse } from '../types';
+import type {
+  Document,
+  DocumentVersion,
+  DocumentAsset,
+  OCRResult,
+  UploadResponse,
+  DocumentKnowledge,
+} from '../types';
 import {
   getDocuments,
   getDocument,
   getDocumentVersions,
   getDocumentAssets,
   getDocumentOCR,
+  getDocumentKnowledge,
   uploadDocument,
 } from '../api/client';
 
@@ -44,6 +52,14 @@ export function useDocumentOCR(documentId: string | null) {
   return useQuery<OCRResult | null>({
     queryKey: ['ocr', documentId],
     queryFn: () => getDocumentOCR(documentId!),
+    enabled: !!documentId,
+  });
+}
+
+export function useDocumentKnowledge(documentId: string | null) {
+  return useQuery<DocumentKnowledge | null>({
+    queryKey: ['knowledge', documentId],
+    queryFn: () => getDocumentKnowledge(documentId!),
     enabled: !!documentId,
   });
 }
