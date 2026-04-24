@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -18,6 +19,11 @@ class OrientationPreprocessResult:
 
 
 class OrientationPreprocessService:
+    _classifier = None
+    _classifier_model_id: str | None = None
+    _warmup_lock_path = Path("/tmp/megadoc-paddle-orientation-init.lock")
+    _warmup_ready_prefix = "megadoc-paddle-orientation-init"
+
     def __init__(self, settings: Settings | None = None) -> None:
         self._settings = settings or get_settings()
 
@@ -81,14 +87,9 @@ class OrientationPreprocessService:
         except ImportError:
             logger.warning("orientation_preprocess_missing_pymupdf")
             return []
-        try:
-            from paddleocr import DocImgOrientationClassification
-        except ImportError:
-            logger.warning("orientation_preprocess_missing_paddleocr")
+        classifier = self._get_classifier()
+        if classifier is None:
             return []
-
-        model_name = self._settings.rotation_detector_model_id or "PP-LCNet_x1_0_doc_ori"
-        classifier = DocImgOrientationClassification(model_name=model_name)
 
         document = fitz.open(source)
         try:
@@ -157,6 +158,35 @@ class OrientationPreprocessService:
             "confidence": confidence,
         }
 
+    def _get_classifier(self):
+        model_name = self._settings.rotation_detector_model_id or "PP-LCNet_x1_0_doc_ori"
+        if self._classifier is not None and self._classifier_model_id == model_name:
+            return self._classifier
+
+        try:
+            from paddleocr import DocImgOrientationClassification
+        except ImportError:
+            logger.warning("orientation_preprocess_missing_paddleocr")
+            return None
+
+        ready_path = Path(f"/tmp/{self._warmup_ready_prefix}-{self._sanitize_model_name(model_name)}.ready")
+        if ready_path.exists():
+            self._classifier = DocImgOrientationClassification(model_name=model_name)
+            self._classifier_model_id = model_name
+            return self._classifier
+
+        with self._warmup_lock():
+            if ready_path.exists():
+                self._classifier = DocImgOrientationClassification(model_name=model_name)
+                self._classifier_model_id = model_name
+                return self._classifier
+
+            classifier = DocImgOrientationClassification(model_name=model_name)
+            ready_path.touch()
+            self._classifier = classifier
+            self._classifier_model_id = model_name
+            return classifier
+
     def _sample_page_numbers(self, page_count: int) -> list[int]:
         sample_count = min(max(self._settings.rotation_detector_sample_pages, 1), max(page_count, 1))
         if page_count <= sample_count:
@@ -213,3 +243,18 @@ class OrientationPreprocessService:
         finally:
             document.close()
         return target
+
+    @contextmanager
+    def _warmup_lock(self):
+        self._warmup_lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with self._warmup_lock_path.open("a+b") as handle:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+    def _sanitize_model_name(self, model_name: str) -> str:
+        return "".join(ch if ch.isalnum() else "-" for ch in model_name).strip("-") or "default"
