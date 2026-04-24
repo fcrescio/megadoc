@@ -2,11 +2,14 @@
 
 import logging
 import os
+from datetime import datetime, timezone
 
 from celery import shared_task
+from sqlalchemy import select
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
+from common.db.models import KnowledgeJob
 from knowledge_classifier.config import get_settings
 from knowledge_classifier.llm.mock import MockDeterministicProvider
 from knowledge_classifier.llm.openai_compat import OpenAICompatibleProvider
@@ -34,6 +37,14 @@ def process_scan_unit_task(self, scan_unit_id: str):
     
     with Session(engine) as session:
         try:
+            knowledge_job = _get_latest_knowledge_job(session, scan_unit_id)
+            if knowledge_job is not None:
+                knowledge_job.status = "processing"
+                knowledge_job.started_at = datetime.now(timezone.utc)
+                knowledge_job.attempt_count += 1
+                knowledge_job.error_message = None
+                session.flush()
+
             # Initialize LLM provider
             if settings.use_mock_llm:
                 llm_provider = MockDeterministicProvider(model=settings.llm_model)
@@ -51,6 +62,11 @@ def process_scan_unit_task(self, scan_unit_id: str):
             
             # Process scan unit (sync)
             result = pipeline.process_scan_unit(scan_unit_id)
+
+            if knowledge_job is not None:
+                knowledge_job.status = "succeeded"
+                knowledge_job.finished_at = datetime.now(timezone.utc)
+                knowledge_job.error_message = None
             
             # Commit changes
             session.commit()
@@ -61,6 +77,20 @@ def process_scan_unit_task(self, scan_unit_id: str):
         except Exception as e:
             logger.error(f"Task failed: {e}", exc_info=True)
             session.rollback()
+            knowledge_job = _get_latest_knowledge_job(session, scan_unit_id)
+            if knowledge_job is not None:
+                knowledge_job.status = "failed"
+                knowledge_job.finished_at = datetime.now(timezone.utc)
+                knowledge_job.error_message = str(e)
+                session.commit()
             raise self.retry(exc=e, countdown=60 * (2 ** self.request.retries))
         finally:
             session.close()
+
+
+def _get_latest_knowledge_job(session: Session, scan_unit_id: str) -> KnowledgeJob | None:
+    return session.execute(
+        select(KnowledgeJob)
+        .where(KnowledgeJob.scan_unit_id == scan_unit_id)
+        .order_by(KnowledgeJob.created_at.desc())
+    ).scalar_one_or_none()
