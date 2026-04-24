@@ -23,6 +23,7 @@ from common.domain.models import OCRResultModel
 from common.infrastructure.security import sha256_file, validate_pdf_magic_bytes
 from common.logging import get_logger
 from common.processing.backends import DocumentProcessingBackend, get_processing_backend
+from common.processing.orientation import OrientationPreprocessService
 from common.processing.preflight import PDFPreflightReport, PDFPreflightService
 from common.processing.refinement import OCRRefinementService
 from common.storage.backends import StorageBackend, get_storage_backend
@@ -196,6 +197,7 @@ class OCRService:
         self.storage = storage or get_storage_backend(self.settings)
         self.processor = processor or get_processing_backend(self.settings)
         self.preflight = PDFPreflightService(self.settings)
+        self.orientation = OrientationPreprocessService(self.settings)
         self.refinement = OCRRefinementService(self.settings)
         self.documents = DocumentRepository(session)
         self.versions = DocumentVersionRepository(session)
@@ -215,6 +217,7 @@ class OCRService:
             raise NotFoundError(f"No version found for document {document.id}.")
 
         temp_path: Path | None = None
+        normalized_path: Path | None = None
         try:
             with NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
                 temp_path = Path(tmp.name)
@@ -222,15 +225,30 @@ class OCRService:
             preflight_report = self.preflight.analyze(temp_path)
             if not preflight_report.valid_pdf:
                 raise ProcessingError(preflight_report.error or "PDF preflight failed.")
-            ocr_result_model = self.processor.process(temp_path, preflight=preflight_report)
+            orientation_result = self.orientation.preprocess(temp_path, preflight_report)
+            processing_source = temp_path
+            if orientation_result and orientation_result.normalized_path is not None:
+                normalized_path = orientation_result.normalized_path
+                processing_source = normalized_path
+            ocr_result_model = self.processor.process(processing_source, preflight=preflight_report)
             ocr_result_model.structured_json = {
                 **ocr_result_model.structured_json,
                 "preflight": preflight_report.model_dump(mode="json"),
             }
+            if orientation_result is not None:
+                ocr_result_model.structured_json = {
+                    **ocr_result_model.structured_json,
+                    "orientation_preprocess": orientation_result.metadata,
+                }
             ocr_result_model.confidence_summary = self._merge_confidence_summary(
                 ocr_result_model.confidence_summary,
                 preflight_report,
             )
+            if orientation_result is not None:
+                ocr_result_model.confidence_summary = self._merge_orientation_summary(
+                    ocr_result_model.confidence_summary,
+                    orientation_result.metadata,
+                )
             refinement_payload = self.refinement.refine(temp_path, ocr_result_model, preflight_report)
             if refinement_payload is not None:
                 ocr_result_model.refinement_payload = refinement_payload
@@ -249,6 +267,8 @@ class OCRService:
                         ocr_result_model.markdown_text = refined_full_text
             return self._store_ocr_result(document.id, version.id, ocr_result_model)
         finally:
+            if normalized_path is not None:
+                normalized_path.unlink(missing_ok=True)
             if temp_path is not None:
                 temp_path.unlink(missing_ok=True)
 
@@ -375,6 +395,15 @@ class OCRService:
     ) -> dict:
         merged = dict(confidence_summary or {})
         merged["ocr_refinement"] = refinement_payload.get("summary", {})
+        return merged
+
+    def _merge_orientation_summary(
+        self,
+        confidence_summary: dict | None,
+        orientation_metadata: dict,
+    ) -> dict:
+        merged = dict(confidence_summary or {})
+        merged["orientation_preprocess"] = orientation_metadata
         return merged
 
 

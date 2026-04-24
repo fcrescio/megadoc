@@ -44,6 +44,18 @@ class Settings(BaseSettings):
     )
     rotation_detector_backend: str = Field(default="none", alias="ROTATION_DETECTOR_BACKEND")
     rotation_detector_model_id: str | None = Field(default=None, alias="ROTATION_DETECTOR_MODEL_ID")
+    rotation_detector_min_confidence: float = Field(
+        default=0.80,
+        alias="ROTATION_DETECTOR_MIN_CONFIDENCE",
+    )
+    rotation_detector_sample_pages: int = Field(
+        default=4,
+        alias="ROTATION_DETECTOR_SAMPLE_PAGES",
+    )
+    rotation_detector_min_consensus: float = Field(
+        default=0.75,
+        alias="ROTATION_DETECTOR_MIN_CONSENSUS",
+    )
     ocr_refinement_enabled: bool = Field(default=False, alias="OCR_REFINEMENT_ENABLED")
     ocr_refinement_endpoint: str = Field(
         default="http://10.89.0.3:8080/v1",

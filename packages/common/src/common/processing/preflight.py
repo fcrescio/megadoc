@@ -151,5 +151,12 @@ class PDFPreflightService:
                     f"rotation_detector_model:{self._settings.rotation_detector_model_id}"
                 )
             return
+        if backend == "paddle_doc_orientation":
+            report.warnings.append("rotation_detector_enabled_in_preprocess")
+            if self._settings.rotation_detector_model_id:
+                report.warnings.append(
+                    f"rotation_detector_model:{self._settings.rotation_detector_model_id}"
+                )
+            return
 
         report.warnings.append(f"unknown_rotation_detector_backend:{backend}")
