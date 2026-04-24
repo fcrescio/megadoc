@@ -118,8 +118,12 @@ services:
       args:
         INSTALL_PADDLE_OCR: ${WORKER_INSTALL_PADDLE_OCR:-false}
     restart: unless-stopped
+    gpus: all
     env_file:
       - .env
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
     depends_on:
       redis:
         condition: service_healthy

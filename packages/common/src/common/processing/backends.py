@@ -70,10 +70,32 @@ class DoclingProcessingBackend(DocumentProcessingBackend):
     def _convert(self, source: Path) -> OCRResultModel:
         try:
             from docling.document_converter import DocumentConverter
+            from docling.document_converter import PdfFormatOption
+            from docling.datamodel.base_models import InputFormat
+            from docling.datamodel.pipeline_options import (
+                AcceleratorOptions,
+                PdfPipelineOptions,
+                RapidOcrOptions,
+            )
         except ImportError as exc:
             raise ProcessingError("Docling is not installed in the runtime image.") from exc
 
-        converter = DocumentConverter()
+        pipeline_options = PdfPipelineOptions(
+            accelerator_options=AcceleratorOptions(
+                device=self._settings.ocr_accelerator_device,
+                num_threads=self._settings.ocr_accelerator_num_threads,
+            ),
+            ocr_options=RapidOcrOptions(
+                backend=self._settings.ocr_rapidocr_backend,
+            ),
+        )
+        converter = DocumentConverter(
+            format_options={
+                InputFormat.PDF: PdfFormatOption(
+                    pipeline_options=pipeline_options,
+                )
+            }
+        )
         result = converter.convert(source, raises_on_error=True)
         if result.document is None:
             raise ProcessingError("Docling returned no document.")
