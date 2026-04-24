@@ -44,6 +44,21 @@ class Settings(BaseSettings):
     )
     rotation_detector_backend: str = Field(default="none", alias="ROTATION_DETECTOR_BACKEND")
     rotation_detector_model_id: str | None = Field(default=None, alias="ROTATION_DETECTOR_MODEL_ID")
+    ocr_refinement_enabled: bool = Field(default=False, alias="OCR_REFINEMENT_ENABLED")
+    ocr_refinement_endpoint: str = Field(
+        default="http://10.89.0.3:8080/v1",
+        alias="OCR_REFINEMENT_ENDPOINT",
+    )
+    ocr_refinement_model: str = Field(default="qwen3.6-A3B", alias="OCR_REFINEMENT_MODEL")
+    ocr_refinement_api_key: str | None = Field(default=None, alias="OCR_REFINEMENT_API_KEY")
+    ocr_refinement_timeout: int = Field(default=180, alias="OCR_REFINEMENT_TIMEOUT")
+    ocr_refinement_max_tokens: int = Field(default=2048, alias="OCR_REFINEMENT_MAX_TOKENS")
+    ocr_refinement_max_pages: int = Field(default=3, alias="OCR_REFINEMENT_MAX_PAGES")
+    ocr_refinement_min_page_score: float = Field(
+        default=0.35,
+        alias="OCR_REFINEMENT_MIN_PAGE_SCORE",
+    )
+    ocr_refinement_promote_text: bool = Field(default=False, alias="OCR_REFINEMENT_PROMOTE_TEXT")
 
 
 @lru_cache

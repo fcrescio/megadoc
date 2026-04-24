@@ -24,6 +24,7 @@ from common.infrastructure.security import sha256_file, validate_pdf_magic_bytes
 from common.logging import get_logger
 from common.processing.backends import DocumentProcessingBackend, get_processing_backend
 from common.processing.preflight import PDFPreflightReport, PDFPreflightService
+from common.processing.refinement import OCRRefinementService
 from common.storage.backends import StorageBackend, get_storage_backend
 
 logger = get_logger(__name__)
@@ -195,6 +196,7 @@ class OCRService:
         self.storage = storage or get_storage_backend(self.settings)
         self.processor = processor or get_processing_backend(self.settings)
         self.preflight = PDFPreflightService(self.settings)
+        self.refinement = OCRRefinementService(self.settings)
         self.documents = DocumentRepository(session)
         self.versions = DocumentVersionRepository(session)
         self.results = OCRResultRepository(session)
@@ -229,6 +231,22 @@ class OCRService:
                 ocr_result_model.confidence_summary,
                 preflight_report,
             )
+            refinement_payload = self.refinement.refine(temp_path, ocr_result_model, preflight_report)
+            if refinement_payload is not None:
+                ocr_result_model.refinement_payload = refinement_payload
+                ocr_result_model.structured_json = {
+                    **ocr_result_model.structured_json,
+                    "ocr_refinement": refinement_payload.get("summary", {}),
+                }
+                ocr_result_model.confidence_summary = self._merge_refinement_summary(
+                    ocr_result_model.confidence_summary,
+                    refinement_payload,
+                )
+                if self.settings.ocr_refinement_promote_text:
+                    refined_full_text = refinement_payload.get("refined_full_text")
+                    if refined_full_text:
+                        ocr_result_model.full_text = refined_full_text
+                        ocr_result_model.markdown_text = refined_full_text
             return self._store_ocr_result(document.id, version.id, ocr_result_model)
         finally:
             if temp_path is not None:
@@ -268,6 +286,13 @@ class OCRService:
                 key=f"{base_key}/preflight.json",
                 content_type="application/json",
             )
+        if result_model.refinement_payload is not None:
+            self.storage.put_bytes(
+                json.dumps(result_model.refinement_payload, indent=2).encode("utf-8"),
+                bucket=self.settings.s3_bucket_derivatives,
+                key=f"{base_key}/ocr_refinement.json",
+                content_type="application/json",
+            )
 
         assets = [
             DocumentAsset(
@@ -302,6 +327,16 @@ class OCRService:
                     content_type="application/json",
                 )
             )
+        if result_model.refinement_payload is not None:
+            assets.append(
+                DocumentAsset(
+                    document_id=document_id,
+                    asset_type=AssetType.OCR_REFINEMENT_JSON.value,
+                    storage_bucket=self.settings.s3_bucket_derivatives,
+                    storage_object_key=f"{base_key}/ocr_refinement.json",
+                    content_type="application/json",
+                )
+            )
 
         self.session.add_all(assets)
 
@@ -331,6 +366,15 @@ class OCRService:
     ) -> dict:
         merged = dict(confidence_summary or {})
         merged["preflight"] = preflight_report.model_dump(mode="json")
+        return merged
+
+    def _merge_refinement_summary(
+        self,
+        confidence_summary: dict | None,
+        refinement_payload: dict,
+    ) -> dict:
+        merged = dict(confidence_summary or {})
+        merged["ocr_refinement"] = refinement_payload.get("summary", {})
         return merged
 
 

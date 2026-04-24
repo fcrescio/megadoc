@@ -53,6 +53,7 @@ class OCRResultModel(BaseModel):
     structured_json: dict[str, Any]
     page_count: int
     confidence_summary: dict[str, Any] | None = None
+    refinement_payload: dict[str, Any] | None = None
 
 
 class DocumentModel(BaseModel):
@@ -63,4 +64,3 @@ class DocumentModel(BaseModel):
     sha256: str
     size_bytes: int
     source_type: str
-

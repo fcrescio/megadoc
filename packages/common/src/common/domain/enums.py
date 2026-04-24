@@ -25,6 +25,7 @@ class OCRStatus(StrEnum):
 class AssetType(StrEnum):
     ORIGINAL_PDF = "original_pdf"
     OCR_JSON = "ocr_json"
+    OCR_REFINEMENT_JSON = "ocr_refinement_json"
     MARKDOWN = "markdown"
     TEXT = "text"
     PREFLIGHT_JSON = "preflight_json"

@@ -19,6 +19,7 @@ dependencies = [
   "pydantic>=2.11.0",
   "pydantic-settings>=2.10.0",
   "pypdf>=5.4.0",
+  "PyMuPDF>=1.26.0",
   "python-json-logger>=3.3.0",
   "python-multipart>=0.0.20",
   "redis>=6.0.0",
