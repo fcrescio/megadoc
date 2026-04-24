@@ -115,6 +115,8 @@ services:
     build:
       context: .
       dockerfile: infra/compose/Dockerfile.app
+      args:
+        INSTALL_PADDLE_OCR: ${WORKER_INSTALL_PADDLE_OCR:-false}
     restart: unless-stopped
     env_file:
       - .env
