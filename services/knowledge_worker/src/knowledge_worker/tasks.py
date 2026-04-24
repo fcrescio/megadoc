@@ -2,6 +2,7 @@
 
 import logging
 import os
+import uuid
 from datetime import datetime, timezone
 
 from celery import shared_task
@@ -89,6 +90,8 @@ def process_scan_unit_task(self, scan_unit_id: str):
 
 
 def _get_latest_knowledge_job(session: Session, scan_unit_id: str) -> KnowledgeJob | None:
+    if isinstance(scan_unit_id, str):
+        scan_unit_id = uuid.UUID(scan_unit_id)
     return session.execute(
         select(KnowledgeJob)
         .where(KnowledgeJob.scan_unit_id == scan_unit_id)
