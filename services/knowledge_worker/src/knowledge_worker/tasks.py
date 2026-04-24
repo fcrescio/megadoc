@@ -19,6 +19,10 @@ from knowledge_classifier.services.pipeline import KnowledgePipelineService
 logger = logging.getLogger(__name__)
 
 
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 @shared_task(bind=True, max_retries=3)
 def process_scan_unit_task(self, scan_unit_id: str):
     """Process a scan unit through the knowledge pipeline.
@@ -35,17 +39,18 @@ def process_scan_unit_task(self, scan_unit_id: str):
         os.getenv("DATABASE_URL", "postgresql+psycopg://megadoc:megadoc@postgres:5432/megadoc"),
         echo=False,
     )
+
+    _update_knowledge_job(
+        engine,
+        scan_unit_id,
+        status="processing",
+        started_at=_utcnow(),
+        increment_attempt=True,
+        error_message=None,
+    )
     
     with Session(engine) as session:
         try:
-            knowledge_job = _get_latest_knowledge_job(session, scan_unit_id)
-            if knowledge_job is not None:
-                knowledge_job.status = "processing"
-                knowledge_job.started_at = datetime.now(timezone.utc)
-                knowledge_job.attempt_count += 1
-                knowledge_job.error_message = None
-                session.flush()
-
             # Initialize LLM provider
             if settings.use_mock_llm:
                 llm_provider = MockDeterministicProvider(model=settings.llm_model)
@@ -63,14 +68,16 @@ def process_scan_unit_task(self, scan_unit_id: str):
             
             # Process scan unit (sync)
             result = pipeline.process_scan_unit(scan_unit_id)
-
-            if knowledge_job is not None:
-                knowledge_job.status = "succeeded"
-                knowledge_job.finished_at = datetime.now(timezone.utc)
-                knowledge_job.error_message = None
             
             # Commit changes
             session.commit()
+            _update_knowledge_job(
+                engine,
+                scan_unit_id,
+                status="succeeded",
+                finished_at=_utcnow(),
+                error_message=None,
+            )
             
             logger.info(f"Task completed: {result}")
             return result
@@ -78,12 +85,13 @@ def process_scan_unit_task(self, scan_unit_id: str):
         except Exception as e:
             logger.error(f"Task failed: {e}", exc_info=True)
             session.rollback()
-            knowledge_job = _get_latest_knowledge_job(session, scan_unit_id)
-            if knowledge_job is not None:
-                knowledge_job.status = "failed"
-                knowledge_job.finished_at = datetime.now(timezone.utc)
-                knowledge_job.error_message = str(e)
-                session.commit()
+            _update_knowledge_job(
+                engine,
+                scan_unit_id,
+                status="failed",
+                finished_at=_utcnow(),
+                error_message=str(e),
+            )
             raise self.retry(exc=e, countdown=60 * (2 ** self.request.retries))
         finally:
             session.close()
@@ -97,3 +105,28 @@ def _get_latest_knowledge_job(session: Session, scan_unit_id: str) -> KnowledgeJ
         .where(KnowledgeJob.scan_unit_id == scan_unit_id)
         .order_by(KnowledgeJob.created_at.desc())
     ).scalar_one_or_none()
+
+
+def _update_knowledge_job(
+    engine,
+    scan_unit_id: str,
+    *,
+    status: str,
+    started_at: datetime | None = None,
+    finished_at: datetime | None = None,
+    increment_attempt: bool = False,
+    error_message: str | None = None,
+) -> None:
+    with Session(engine) as status_session:
+        knowledge_job = _get_latest_knowledge_job(status_session, scan_unit_id)
+        if knowledge_job is None:
+            return
+        knowledge_job.status = status
+        if started_at is not None:
+            knowledge_job.started_at = started_at
+        if finished_at is not None:
+            knowledge_job.finished_at = finished_at
+        if increment_attempt:
+            knowledge_job.attempt_count += 1
+        knowledge_job.error_message = error_message
+        status_session.commit()
