@@ -68,6 +68,19 @@ def test_router_routes_noisy_invoice_ocr_to_financial_pipeline():
     assert decision.family == "financial"
 
 
+def test_router_routes_retail_receipt_to_financial_pipeline():
+    service = PipelineRouterService()
+    ocr_result = _ocr(
+        "UNIEURO S.P.A. Totale vendita 445,00. Acconto 400,00. "
+        "Cliente Crescioli Francesco. Pagamento contanti. Memoria di spesa."
+    )
+
+    decision = service.route_scan(ocr_result)
+
+    assert decision.pipeline_id == "financial_pipeline"
+    assert decision.family == "financial"
+
+
 def test_router_falls_back_to_general_pipeline_for_unknown_scans():
     service = PipelineRouterService()
     ocr_result = _ocr("Testo eterogeneo senza segnali forti e senza famiglia specializzata evidente.")

@@ -131,6 +131,16 @@ class PipelineRouterService:
             "importo fattura",
             "iva",
             "totale",
+            "totale vendita",
+            "totale articoli",
+            "acconto",
+            "saldo",
+            "pagamento",
+            "contanti",
+            "cliente",
+            "memoria di spesa",
+            "ordine n",
+            "ordine",
         ):
             if token in scan_text:
                 signals.append(token)
@@ -141,9 +151,25 @@ class PipelineRouterService:
             ("cedente_prestatore", "cedenteoprestatore"),
             ("dati_cliente", "datiidentificatividelcliente"),
             ("codice_fiscale_partita_iva", "codicefiscalepartitaiva"),
+            ("totale_vendita", "totalevendita"),
+            ("totale_articoli", "totalearticoli"),
+            ("memoria_di_spesa", "memoriadispesa"),
         ):
             if token in compact_text:
                 signals.append(label)
+
+        retail_brands = (
+            "unieuro",
+            "euronics",
+            "mediaworld",
+            "expert",
+            "trony",
+            "whirlpool",
+            "indesit",
+        )
+        matched_brands = [brand for brand in retail_brands if brand in compact_text]
+        if matched_brands:
+            signals.extend(f"brand:{brand}" for brand in matched_brands)
 
         if len(signals) < 2:
             return None
