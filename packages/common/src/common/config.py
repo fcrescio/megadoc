@@ -24,6 +24,11 @@ class Settings(BaseSettings):
         default="redis://redis:6379/2", alias="CELERY_RESULT_BACKEND"
     )
     celery_task_always_eager: bool = Field(default=False, alias="CELERY_TASK_ALWAYS_EAGER")
+    ingestion_queue_default: str = Field(default="ingestion", alias="INGESTION_QUEUE_DEFAULT")
+    ingestion_queue_llm_vision: str = Field(
+        default="ingestion_llm_vision",
+        alias="INGESTION_QUEUE_LLM_VISION",
+    )
     s3_endpoint_url: str = Field(default="http://minio:9000", alias="S3_ENDPOINT_URL")
     s3_access_key: str = Field(default="minioadmin", alias="S3_ACCESS_KEY")
     s3_secret_key: str = Field(default="minioadmin", alias="S3_SECRET_KEY")
@@ -36,6 +41,15 @@ class Settings(BaseSettings):
     ocr_accelerator_device: str = Field(default="auto", alias="OCR_ACCELERATOR_DEVICE")
     ocr_accelerator_num_threads: int = Field(default=4, alias="OCR_ACCELERATOR_NUM_THREADS")
     ocr_rapidocr_backend: str = Field(default="torch", alias="OCR_RAPIDOCR_BACKEND")
+    ocr_llm_vision_endpoint: str = Field(
+        default="http://10.89.0.3:8080/v1",
+        alias="OCR_LLM_VISION_ENDPOINT",
+    )
+    ocr_llm_vision_model: str = Field(default="qwen3.6-A3B", alias="OCR_LLM_VISION_MODEL")
+    ocr_llm_vision_api_key: str | None = Field(default=None, alias="OCR_LLM_VISION_API_KEY")
+    ocr_llm_vision_timeout: int = Field(default=240, alias="OCR_LLM_VISION_TIMEOUT")
+    ocr_llm_vision_max_tokens: int = Field(default=4096, alias="OCR_LLM_VISION_MAX_TOKENS")
+    ocr_llm_vision_render_scale: float = Field(default=1.5, alias="OCR_LLM_VISION_RENDER_SCALE")
     pipeline_version: str = Field(default="v1", alias="PIPELINE_VERSION")
     request_timeout_seconds: int = Field(default=30, alias="REQUEST_TIMEOUT_SECONDS")
     api_base_url: str = Field(default="http://api:8080", alias="API_BASE_URL")

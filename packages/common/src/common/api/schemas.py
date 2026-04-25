@@ -17,6 +17,7 @@ class UploadResponse(BaseModel):
 class CreateJobRequest(BaseModel):
     document_id: UUID
     priority: int = 5
+    ocr_backend: str | None = None
 
 
 class JobResponse(BaseModel):

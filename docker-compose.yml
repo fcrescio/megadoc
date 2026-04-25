@@ -143,7 +143,40 @@ services:
         "worker",
         "--loglevel=INFO",
         "-Q",
-        "ingestion"
+        "${INGESTION_QUEUE_DEFAULT:-ingestion}"
+      ]
+
+  worker_llm_vision:
+    build:
+      context: .
+      dockerfile: infra/compose/Dockerfile.app
+      args:
+        INSTALL_PADDLE_OCR: ${WORKER_INSTALL_PADDLE_OCR:-false}
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      OCR_BACKEND: llm_vision
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      mc-init:
+        condition: service_completed_successfully
+      migrate:
+        condition: service_completed_successfully
+    command:
+      [
+        "celery",
+        "-A",
+        "worker.celery_app:celery_app",
+        "worker",
+        "--loglevel=INFO",
+        "-Q",
+        "${INGESTION_QUEUE_LLM_VISION:-ingestion_llm_vision}"
       ]
 
   knowledge_worker:

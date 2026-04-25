@@ -16,5 +16,5 @@ celery_app.conf.update(
     accept_content=["json"],
     result_serializer="json",
     timezone="UTC",
-    task_routes={"worker.tasks.process_ingestion_job": {"queue": "ingestion"}},
+    task_routes={"worker.tasks.process_ingestion_job": {"queue": settings.ingestion_queue_default}},
 )

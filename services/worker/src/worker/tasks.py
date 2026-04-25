@@ -11,16 +11,26 @@ logger = get_task_logger(__name__)
 
 
 @celery_app.task(name="worker.tasks.process_ingestion_job", bind=True, autoretry_for=(), retry_backoff=False)
-def process_ingestion_job(self, job_id: str) -> dict[str, str]:
+def process_ingestion_job(self, job_id: str, backend_override: str | None = None) -> dict[str, str]:
     session = SessionLocal()
     try:
         job_service = JobService(session)
-        ocr_service = OCRService(session)
+        ocr_service = OCRService(
+            session,
+            settings=ocr_service_settings(backend_override),
+        )
         job = job_service.jobs.get(UUID(job_id))
         if job is None:
             raise ApplicationError(f"Job {job_id} does not exist.")
         job_service.mark_running(job)
-        logger.info("job_started", extra={"job_id": job_id, "document_id": str(job.document_id)})
+        logger.info(
+            "job_started",
+            extra={
+                "job_id": job_id,
+                "document_id": str(job.document_id),
+                "ocr_backend": backend_override or ocr_service.settings.ocr_backend,
+            },
+        )
         result = ocr_service.process_job(UUID(job_id))
         job_service.mark_succeeded(job)
         logger.info("job_succeeded", extra={"job_id": job_id, "ocr_result_id": str(result.id)})
@@ -35,3 +45,11 @@ def process_ingestion_job(self, job_id: str) -> dict[str, str]:
     finally:
         session.close()
 
+
+def ocr_service_settings(backend_override: str | None):
+    from common.config import get_settings
+
+    settings = get_settings()
+    if not backend_override:
+        return settings
+    return settings.model_copy(update={"ocr_backend": backend_override})

@@ -45,12 +45,22 @@ app.add_middleware(RequestContextMiddleware)
 app.include_router(knowledge.router)
 
 
-def dispatch_ingestion_job(job_id: uuid.UUID) -> None:
+def dispatch_ingestion_job(job_id: uuid.UUID, ocr_backend: str | None = None) -> None:
     settings = get_settings()
     if settings.celery_task_always_eager:
-        process_ingestion_job(str(job_id))
+        process_ingestion_job(str(job_id), backend_override=ocr_backend)
         return
-    process_ingestion_job.delay(str(job_id))
+    process_ingestion_job.apply_async(
+        args=[str(job_id)],
+        kwargs={"backend_override": ocr_backend},
+        queue=_ingestion_queue_for_backend(settings, ocr_backend),
+    )
+
+
+def _ingestion_queue_for_backend(settings: Settings, ocr_backend: str | None) -> str:
+    if (ocr_backend or "").strip().lower() == "llm_vision":
+        return settings.ingestion_queue_llm_vision
+    return settings.ingestion_queue_default
 
 
 def get_settings_dep() -> Settings:
@@ -87,6 +97,7 @@ async def upload_document(
     file: UploadFile = File(...),
     external_id: str | None = Form(default=None),
     auto_submit: bool = Query(default=True),
+    ocr_backend: str | None = Query(default=None),
     document_service: DocumentService = Depends(get_document_service_dep),
     job_service: JobService = Depends(get_job_service_dep),
 ) -> UploadResponse:
@@ -109,7 +120,7 @@ async def upload_document(
         status = "stored"
         if auto_submit:
             job = job_service.create_ingest_job(result.document.id)
-            dispatch_ingestion_job(job.id)
+            dispatch_ingestion_job(job.id, ocr_backend=ocr_backend)
             job_id = job.id
             status = job.status
         return UploadResponse(
@@ -134,7 +145,7 @@ def create_ingest_job(
         job = job_service.create_ingest_job(payload.document_id, payload.priority)
     except NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    dispatch_ingestion_job(job.id)
+    dispatch_ingestion_job(job.id, ocr_backend=payload.ocr_backend)
     return JobResponse.model_validate(job, from_attributes=True)
 
 

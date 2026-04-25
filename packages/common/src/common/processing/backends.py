@@ -5,6 +5,7 @@ from pathlib import Path
 from common.config import Settings, get_settings
 from common.domain.exceptions import ProcessingError
 from common.domain.models import OCRResultModel
+from common.processing.llm_vision import LLMVisionOCRService
 from common.processing.preflight import PDFPreflightReport
 
 
@@ -135,4 +136,15 @@ def get_processing_backend(settings: Settings | None = None) -> DocumentProcessi
     app_settings = settings or get_settings()
     if app_settings.ocr_backend == "fake":
         return FakeProcessingBackend(app_settings)
+    if app_settings.ocr_backend == "llm_vision":
+        return LLMVisionProcessingBackend(app_settings)
     return DoclingProcessingBackend(app_settings)
+
+
+class LLMVisionProcessingBackend(DocumentProcessingBackend):
+    def __init__(self, settings: Settings) -> None:
+        self._settings = settings
+        self._service = LLMVisionOCRService(settings)
+
+    def process(self, source: Path, preflight: PDFPreflightReport | None = None) -> OCRResultModel:
+        return self._service.process(source, preflight=preflight)
