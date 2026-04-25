@@ -156,7 +156,13 @@ services:
     env_file:
       - .env
     environment:
+      CELERY_BROKER_URL: redis://127.0.0.1:6379/1
+      CELERY_RESULT_BACKEND: redis://127.0.0.1:6379/2
+      DATABASE_URL: postgresql+psycopg://megadoc:megadoc@127.0.0.1:5432/megadoc
+      S3_ENDPOINT_URL: http://127.0.0.1:9000
       OCR_BACKEND: llm_vision
+      OCR_LLM_VISION_MODEL: ${OCR_LLM_VISION_MODEL:-devstral2}
+    network_mode: host
     depends_on:
       redis:
         condition: service_healthy
@@ -175,6 +181,7 @@ services:
         "worker.celery_app:celery_app",
         "worker",
         "--loglevel=INFO",
+        "--concurrency=${INGESTION_LLM_VISION_CONCURRENCY:-1}",
         "-Q",
         "${INGESTION_QUEUE_LLM_VISION:-ingestion_llm_vision}"
       ]
