@@ -35,6 +35,9 @@ DOTS_OCR_PROMPT = "Extract the text content from this image."
 
 
 class DotsNativeOCRService:
+    _SPARSE_PAGE_MEAN_THRESHOLD = 243.0
+    _SPARSE_PAGE_DARK220_THRESHOLD = 0.02
+
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
 
@@ -56,8 +59,7 @@ class DotsNativeOCRService:
             page_texts: list[str] = []
 
             for page_number in range(1, document.page_count + 1):
-                image_data_url = self._render_page_data_url(source, page_number)
-                page_result = self._process_page(page_number, image_data_url)
+                page_result = self._process_page(source, page_number)
                 page_structures.append(page_result["page"])
                 page_texts.append(page_result["page"]["text"])
                 page_markdown.append(page_result["page"]["markdown"])
@@ -86,6 +88,11 @@ class DotsNativeOCRService:
             for page in page_structures
             if page.get("metadata", {}).get("mode") == "ocr"
         ]
+        confidence_summary["dots_native"]["empty_pages"] = [
+            page["page_number"]
+            for page in page_structures
+            if page.get("metadata", {}).get("mode") == "empty"
+        ]
 
         return OCRResultModel(
             engine_name="dots_native",
@@ -98,8 +105,52 @@ class DotsNativeOCRService:
             confidence_summary=confidence_summary,
         )
 
-    def _process_page(self, page_number: int, image_data_url: str) -> dict[str, Any]:
+    def _process_page(self, source: Path, page_number: int) -> dict[str, Any]:
         usages: list[dict[str, Any]] = []
+        sparse_candidate: dict[str, Any] | None = None
+
+        for candidate in self._page_render_candidates():
+            rendered = self._render_page_candidate(
+                source,
+                page_number,
+                scale=candidate["scale"],
+                rotation=candidate["rotation"],
+            )
+            page_result = self._process_rendered_page(page_number, rendered)
+            usages.extend(page_result["usages"])
+
+            if page_result["page"] is not None:
+                page = page_result["page"]
+                metadata = dict(page.get("metadata") or {})
+                metadata.update(
+                    {
+                        "render_scale": rendered["scale"],
+                        "render_rotation": rendered["rotation"],
+                    }
+                )
+                page["metadata"] = metadata
+                return {"page": page, "usages": usages}
+
+            if sparse_candidate is None and self._is_sparse_page(rendered["stats"]):
+                sparse_candidate = rendered
+
+        if sparse_candidate is not None:
+            return {
+                "page": self._empty_page(
+                    page_number,
+                    scale=sparse_candidate["scale"],
+                    rotation=sparse_candidate["rotation"],
+                ),
+                "usages": usages,
+            }
+
+        raise ProcessingError(f"dots_native OCR failed for page {page_number}")
+
+    def _process_rendered_page(self, page_number: int, rendered: dict[str, Any]) -> dict[str, Any]:
+        usages: list[dict[str, Any]] = []
+        image_data_url = rendered["data_url"]
+        sparse_page = self._is_sparse_page(rendered["stats"])
+
         layout_response = self._request(
             self._build_payload(
                 prompt=DOTS_LAYOUT_PROMPT,
@@ -120,10 +171,22 @@ class DotsNativeOCRService:
                 max_tokens=self._settings.ocr_dots_native_ocr_max_tokens,
             )
         )
-        if ocr_response is None:
-            raise ProcessingError(f"dots_native OCR failed for page {page_number}")
-        usages.append(ocr_response["usage"] or {})
-        return {"page": self._ocr_page(page_number, ocr_response["content"]), "usages": usages}
+        if ocr_response is not None:
+            usages.append(ocr_response["usage"] or {})
+            text = ocr_response["content"].strip()
+            if text:
+                return {"page": self._ocr_page(page_number, text), "usages": usages}
+            if sparse_page:
+                return {
+                    "page": self._empty_page(
+                        page_number,
+                        scale=rendered["scale"],
+                        rotation=rendered["rotation"],
+                    ),
+                    "usages": usages,
+                }
+
+        return {"page": None, "usages": usages}
 
     def _build_payload(self, prompt: str, image_data_url: str, max_tokens: int) -> dict[str, Any]:
         return {
@@ -146,27 +209,73 @@ class DotsNativeOCRService:
         if self._settings.ocr_dots_native_api_key:
             headers["Authorization"] = f"Bearer {self._settings.ocr_dots_native_api_key}"
 
-        try:
-            with httpx.Client(
-                base_url=self._settings.ocr_dots_native_endpoint.rstrip("/"),
-                headers=headers,
-                timeout=httpx.Timeout(self._settings.ocr_dots_native_timeout),
-            ) as client:
-                response = client.post("/chat/completions", json=payload)
-                response.raise_for_status()
-                data = response.json()
-        except httpx.HTTPError:
-            logger.exception("dots_native_request_failed")
+        for attempt in range(1, max(1, self._settings.ocr_dots_native_request_retries) + 1):
+            try:
+                with httpx.Client(
+                    base_url=self._settings.ocr_dots_native_endpoint.rstrip("/"),
+                    headers=headers,
+                    timeout=httpx.Timeout(self._settings.ocr_dots_native_timeout),
+                ) as client:
+                    response = client.post("/chat/completions", json=payload)
+                    response.raise_for_status()
+                    data = response.json()
+                break
+            except httpx.HTTPError:
+                logger.warning(
+                    "dots_native_request_failed attempt=%s/%s",
+                    attempt,
+                    self._settings.ocr_dots_native_request_retries,
+                    exc_info=True,
+                )
+                data = None
+        else:
             return None
 
         try:
+            if data is None:
+                return None
             choice = data["choices"][0]
             return {"content": choice["message"]["content"], "usage": data.get("usage")}
         except (KeyError, IndexError, TypeError):
             logger.exception("dots_native_response_invalid")
             return None
 
-    def _render_page_data_url(self, source: Path, page_number: int) -> str:
+    def _page_render_candidates(self) -> list[dict[str, Any]]:
+        candidates = [
+            {"scale": self._settings.ocr_dots_native_render_scale, "rotation": 0},
+            {"scale": self._settings.ocr_dots_native_render_scale, "rotation": 180},
+            {"scale": self._settings.ocr_dots_native_render_scale, "rotation": 90},
+            {"scale": self._settings.ocr_dots_native_render_scale, "rotation": 270},
+        ]
+        fallback_scale = self._settings.ocr_dots_native_fallback_render_scale
+        if fallback_scale != self._settings.ocr_dots_native_render_scale:
+            candidates.extend(
+                [
+                    {"scale": fallback_scale, "rotation": 0},
+                    {"scale": fallback_scale, "rotation": 180},
+                    {"scale": fallback_scale, "rotation": 90},
+                    {"scale": fallback_scale, "rotation": 270},
+                ]
+            )
+
+        deduped: list[dict[str, Any]] = []
+        seen: set[tuple[float, int]] = set()
+        for candidate in candidates:
+            key = (candidate["scale"], candidate["rotation"])
+            if key in seen:
+                continue
+            deduped.append(candidate)
+            seen.add(key)
+        return deduped
+
+    def _render_page_candidate(
+        self,
+        source: Path,
+        page_number: int,
+        *,
+        scale: float,
+        rotation: int,
+    ) -> dict[str, Any]:
         import fitz
 
         document = fitz.open(source)
@@ -174,15 +283,21 @@ class DotsNativeOCRService:
             page = document.load_page(page_number - 1)
             pixmap = page.get_pixmap(
                 matrix=fitz.Matrix(
-                    self._settings.ocr_dots_native_render_scale,
-                    self._settings.ocr_dots_native_render_scale,
-                ),
+                    scale,
+                    scale,
+                ).prerotate(rotation),
                 alpha=False,
             )
             png_bytes = pixmap.tobytes("png")
+            stats = self._image_stats(pixmap)
         finally:
             document.close()
-        return f"data:image/png;base64,{base64.b64encode(png_bytes).decode('ascii')}"
+        return {
+            "data_url": f"data:image/png;base64,{base64.b64encode(png_bytes).decode('ascii')}",
+            "scale": scale,
+            "rotation": rotation,
+            "stats": stats,
+        }
 
     def _parse_layout_response(self, content: str) -> list[dict[str, Any]] | None:
         cleaned = content.strip()
@@ -306,6 +421,23 @@ class DotsNativeOCRService:
             "metadata": {"mode": "ocr"},
         }
 
+    def _empty_page(self, page_number: int, *, scale: float, rotation: int) -> dict[str, Any]:
+        return {
+            "page_number": page_number,
+            "page_no": page_number,
+            "text": "",
+            "markdown": "",
+            "blocks": [],
+            "tables": [],
+            "figures": [],
+            "metadata": {
+                "mode": "empty",
+                "reason": "sparse_image",
+                "render_scale": scale,
+                "render_rotation": rotation,
+            },
+        }
+
     def _bbox_dict(self, bbox: Any) -> dict[str, Any] | None:
         if not isinstance(bbox, list) or len(bbox) != 4:
             return None
@@ -336,3 +468,33 @@ class DotsNativeOCRService:
         if len(elements) != 1:
             return False
         return str(elements[0].get("category", "")).strip().lower() == "picture"
+
+    def _image_stats(self, pixmap: Any) -> dict[str, float]:
+        pixel_stride = max(1, int(getattr(pixmap, "n", 3)))
+        samples = pixmap.samples
+        pixel_count = max(1, len(samples) // pixel_stride)
+        step = max(1, pixel_count // 20_000)
+
+        total_luma = 0.0
+        dark_220 = 0
+        inspected = 0
+        for pixel_index in range(0, pixel_count, step):
+            offset = pixel_index * pixel_stride
+            red = samples[offset]
+            green = samples[offset + 1] if pixel_stride > 1 else red
+            blue = samples[offset + 2] if pixel_stride > 2 else red
+            luma = (red + green + blue) / 3.0
+            total_luma += luma
+            dark_220 += int(luma < 220.0)
+            inspected += 1
+
+        return {
+            "mean_luma": total_luma / max(1, inspected),
+            "dark_220_ratio": dark_220 / max(1, inspected),
+        }
+
+    def _is_sparse_page(self, stats: dict[str, float]) -> bool:
+        return (
+            float(stats.get("mean_luma", 0.0)) >= self._SPARSE_PAGE_MEAN_THRESHOLD
+            and float(stats.get("dark_220_ratio", 1.0)) <= self._SPARSE_PAGE_DARK220_THRESHOLD
+        )
