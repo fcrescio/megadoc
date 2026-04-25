@@ -58,7 +58,7 @@ def dispatch_ingestion_job(job_id: uuid.UUID, ocr_backend: str | None = None) ->
 
 
 def _ingestion_queue_for_backend(settings: Settings, ocr_backend: str | None) -> str:
-    if (ocr_backend or "").strip().lower() == "llm_vision":
+    if (ocr_backend or "").strip().lower() in {"llm_vision", "dots_native"}:
         return settings.ingestion_queue_llm_vision
     return settings.ingestion_queue_default
 

@@ -50,6 +50,19 @@ class Settings(BaseSettings):
     ocr_llm_vision_timeout: int = Field(default=240, alias="OCR_LLM_VISION_TIMEOUT")
     ocr_llm_vision_max_tokens: int = Field(default=4096, alias="OCR_LLM_VISION_MAX_TOKENS")
     ocr_llm_vision_render_scale: float = Field(default=1.5, alias="OCR_LLM_VISION_RENDER_SCALE")
+    ocr_dots_native_endpoint: str = Field(
+        default="http://10.89.0.3:8080/v1",
+        alias="OCR_DOTS_NATIVE_ENDPOINT",
+    )
+    ocr_dots_native_model: str = Field(
+        default="ggml-org/dots.ocr-GGUF:Q8_0",
+        alias="OCR_DOTS_NATIVE_MODEL",
+    )
+    ocr_dots_native_api_key: str | None = Field(default=None, alias="OCR_DOTS_NATIVE_API_KEY")
+    ocr_dots_native_timeout: int = Field(default=240, alias="OCR_DOTS_NATIVE_TIMEOUT")
+    ocr_dots_native_render_scale: float = Field(default=1.5, alias="OCR_DOTS_NATIVE_RENDER_SCALE")
+    ocr_dots_native_layout_max_tokens: int = Field(default=8192, alias="OCR_DOTS_NATIVE_LAYOUT_MAX_TOKENS")
+    ocr_dots_native_ocr_max_tokens: int = Field(default=4096, alias="OCR_DOTS_NATIVE_OCR_MAX_TOKENS")
     pipeline_version: str = Field(default="v1", alias="PIPELINE_VERSION")
     request_timeout_seconds: int = Field(default=30, alias="REQUEST_TIMEOUT_SECONDS")
     api_base_url: str = Field(default="http://api:8080", alias="API_BASE_URL")
