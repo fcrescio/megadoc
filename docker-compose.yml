@@ -213,6 +213,7 @@ services:
         "knowledge_worker.celery_app:celery_app",
         "worker",
         "--loglevel=INFO",
+        "--concurrency=${KNOWLEDGE_WORKER_CONCURRENCY:-1}",
         "-Q",
         "knowledge"
       ]
