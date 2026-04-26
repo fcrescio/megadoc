@@ -31,29 +31,29 @@ function DocumentList({ onSelectDocument }: Props) {
 
   return (
     <div className="mb-8">
-      <h2 className="text-xl font-semibold text-gray-900 mb-4">Documents</h2>
+      <h2 className="text-xl font-semibold text-white mb-4">Documents</h2>
       {documents && documents.length === 0 ? (
-        <p className="text-gray-500">No documents found.</p>
+        <p className="text-slate-400">No documents found.</p>
       ) : (
-        <div className="bg-white rounded-lg shadow divide-y">
+        <div className="bg-white/5 border border-white/10 rounded-[24px] shadow-[0_18px_60px_rgba(2,6,23,0.35)] divide-y divide-white/10 overflow-hidden backdrop-blur-md">
           {documents?.map((doc: Document) => (
             <button
               key={doc.id}
               onClick={() => onSelectDocument(doc.id)}
-              className="w-full p-4 hover:bg-gray-50 text-left transition-colors"
+              className="w-full p-4 hover:bg-white/5 text-left transition-colors"
             >
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="font-medium text-gray-900">{doc.original_filename}</p>
+                  <p className="font-medium text-slate-100">{doc.original_filename}</p>
                   {doc.external_id && (
-                    <p className="text-sm text-gray-500">ID: {doc.external_id}</p>
+                    <p className="text-sm text-slate-400">ID: {doc.external_id}</p>
                   )}
                 </div>
                 <div className="text-right">
-                  <p className="text-sm text-gray-500">
+                  <p className="text-sm text-slate-400">
                     {new Date(doc.created_at).toLocaleDateString()}
                   </p>
-                  <p className="text-xs text-gray-400">
+                  <p className="text-xs text-slate-500">
                     {(doc.size_bytes / 1024).toFixed(1)} KB
                   </p>
                 </div>

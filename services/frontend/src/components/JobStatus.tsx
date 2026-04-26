@@ -32,17 +32,17 @@ function JobStatus() {
 
   return (
     <div>
-      <h2 className="text-xl font-semibold text-gray-900 mb-4">Recent Jobs</h2>
+      <h2 className="text-xl font-semibold text-white mb-4">Recent Jobs</h2>
       {jobs && jobs.length === 0 ? (
-        <p className="text-gray-500">No jobs found.</p>
+        <p className="text-slate-400">No jobs found.</p>
       ) : (
-        <div className="bg-white rounded-lg shadow divide-y">
+        <div className="bg-white/5 border border-white/10 rounded-[24px] shadow-[0_18px_60px_rgba(2,6,23,0.35)] divide-y divide-white/10 overflow-hidden backdrop-blur-md">
           {jobs?.map((job: Job) => (
             <div key={job.id} className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="font-mono text-sm">{job.id}</p>
-                  <p className="text-xs text-gray-500">Document: {job.document_id}</p>
+                  <p className="font-mono text-sm text-slate-100">{job.id}</p>
+                  <p className="text-xs text-slate-400">Document: {job.document_id}</p>
                 </div>
                 <div className="text-right">
                   <span
@@ -55,7 +55,7 @@ function JobStatus() {
                   )}
                 </div>
               </div>
-              <p className="text-xs text-gray-400 mt-1">
+              <p className="text-xs text-slate-500 mt-1">
                 {new Date(job.created_at).toLocaleString()}
               </p>
             </div>
