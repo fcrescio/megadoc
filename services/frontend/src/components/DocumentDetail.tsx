@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { DocumentVersion, DocumentAsset, KnowledgeDocumentUnit } from '../types';
@@ -14,16 +14,21 @@ import { downloadDocument, downloadAsset } from '../api/client';
 interface Props {
   documentId: string;
   onBack: () => void;
+  initialTab?: 'info' | 'ocr' | 'knowledge' | 'versions' | 'assets';
 }
 
-function DocumentDetail({ documentId, onBack }: Props) {
-  const [activeTab, setActiveTab] = useState<'info' | 'ocr' | 'knowledge' | 'versions' | 'assets'>('info');
+function DocumentDetail({ documentId, onBack, initialTab = 'info' }: Props) {
+  const [activeTab, setActiveTab] = useState<'info' | 'ocr' | 'knowledge' | 'versions' | 'assets'>(initialTab);
 
   const { data: docData, isLoading: docLoading } = useDocument(documentId);
   const { data: versions } = useDocumentVersions(documentId);
   const { data: ocrResult, isLoading: ocrLoading } = useDocumentOCR(documentId);
   const { data: knowledge, isLoading: knowledgeLoading } = useDocumentKnowledge(documentId);
   const { data: assets } = useDocumentAssets(documentId);
+
+  useEffect(() => {
+    setActiveTab(initialTab);
+  }, [documentId, initialTab]);
 
   if (docLoading) {
     return (

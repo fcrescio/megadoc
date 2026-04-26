@@ -6,6 +6,9 @@ import type {
   OCRResult,
   UploadResponse,
   DocumentKnowledge,
+  KnowledgeTopicSummary,
+  KnowledgeTopicDetail,
+  KnowledgeConsolidationResult,
 } from '../types';
 import {
   getDocuments,
@@ -14,6 +17,9 @@ import {
   getDocumentAssets,
   getDocumentOCR,
   getDocumentKnowledge,
+  getKnowledgeTopic,
+  getKnowledgeTopics,
+  runKnowledgeConsolidation,
   uploadDocument,
 } from '../api/client';
 
@@ -61,6 +67,34 @@ export function useDocumentKnowledge(documentId: string | null) {
     queryKey: ['knowledge', documentId],
     queryFn: () => getDocumentKnowledge(documentId!),
     enabled: !!documentId,
+  });
+}
+
+export function useKnowledgeTopics(includeInactive = false) {
+  return useQuery<KnowledgeTopicSummary[]>({
+    queryKey: ['knowledge-topics', includeInactive],
+    queryFn: () => getKnowledgeTopics(includeInactive),
+  });
+}
+
+export function useKnowledgeTopic(topicId: string | null) {
+  return useQuery<KnowledgeTopicDetail | null>({
+    queryKey: ['knowledge-topic', topicId],
+    queryFn: () => getKnowledgeTopic(topicId!),
+    enabled: !!topicId,
+  });
+}
+
+export function useRunKnowledgeConsolidation() {
+  const queryClient = useQueryClient();
+
+  return useMutation<KnowledgeConsolidationResult, Error, void>({
+    mutationFn: () => runKnowledgeConsolidation(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['knowledge-topics'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-topic'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge'] });
+    },
   });
 }
 

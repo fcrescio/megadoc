@@ -3,12 +3,22 @@ import DocumentList from './components/DocumentList';
 import DocumentDetail from './components/DocumentDetail';
 import UploadForm from './components/UploadForm';
 import JobStatus from './components/JobStatus';
+import KnowledgeBase from './components/KnowledgeBase';
 
-type View = 'documents' | 'upload';
+type View = 'documents' | 'knowledge' | 'upload';
 
 function App() {
   const [selectedDoc, setSelectedDoc] = useState<string | null>(null);
+  const [selectedDocInitialTab, setSelectedDocInitialTab] = useState<'info' | 'ocr' | 'knowledge' | 'versions' | 'assets'>('info');
   const [view, setView] = useState<View>('documents');
+
+  const openDocument = (
+    documentId: string,
+    initialTab: 'info' | 'ocr' | 'knowledge' | 'versions' | 'assets' = 'info',
+  ) => {
+    setSelectedDocInitialTab(initialTab);
+    setSelectedDoc(documentId);
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -27,14 +37,14 @@ function App() {
               Documents
             </button>
             <button
-              onClick={() => { setSelectedDoc(null); setView('documents'); }}
+              onClick={() => { setSelectedDoc(null); setView('knowledge'); }}
               className={`px-3 py-2 rounded-md text-sm font-medium ${
-                view === 'documents' && !selectedDoc
+                view === 'knowledge' && !selectedDoc
                   ? 'bg-blue-50 text-blue-700'
                   : 'text-gray-700 hover:bg-gray-100'
               }`}
             >
-              Jobs
+              Knowledge
             </button>
             <button
               onClick={() => { setSelectedDoc(null); setView('upload'); }}
@@ -52,12 +62,18 @@ function App() {
 
       <main className="max-w-7xl mx-auto px-4 py-6">
         {selectedDoc ? (
-          <DocumentDetail documentId={selectedDoc} onBack={() => setSelectedDoc(null)} />
+          <DocumentDetail
+            documentId={selectedDoc}
+            initialTab={selectedDocInitialTab}
+            onBack={() => setSelectedDoc(null)}
+          />
         ) : view === 'upload' ? (
           <UploadForm />
+        ) : view === 'knowledge' ? (
+          <KnowledgeBase onOpenDocument={(documentId) => openDocument(documentId, 'knowledge')} />
         ) : (
           <>
-            <DocumentList onSelectDocument={setSelectedDoc} />
+            <DocumentList onSelectDocument={(documentId) => openDocument(documentId)} />
             <JobStatus />
           </>
         )}

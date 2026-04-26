@@ -141,3 +141,49 @@ export interface DocumentKnowledge {
   document_id: string;
   scan_units: KnowledgeScanUnit[];
 }
+
+export interface KnowledgeTopicSummary {
+  id: string;
+  slug: string;
+  title: string;
+  topic_class: string;
+  description: string | null;
+  canonical: boolean;
+  is_active: boolean;
+  assignment_count: number;
+  proposal_count: number;
+  related_document_count: number;
+  alias_count: number;
+  created_at: string;
+  updated_at: string | null;
+}
+
+export interface KnowledgeTopicRelatedDocument {
+  document_id: string;
+  external_id: string | null;
+  original_filename: string;
+  created_at: string;
+  document_unit_id: string;
+  document_type_code: string | null;
+  review_status: string;
+  topic_assignment_confidence: number | null;
+  assignment_role: string;
+  start_page: number;
+  end_page: number;
+  summary: string | null;
+}
+
+export interface KnowledgeTopicDetail {
+  topic: KnowledgeTopicSummary;
+  aliases: string[];
+  related_documents: KnowledgeTopicRelatedDocument[];
+}
+
+export interface KnowledgeConsolidationResult {
+  topics_before: number;
+  topics_after: number;
+  topics_merged: number;
+  aliases_created: number;
+  assignments_retargeted: number;
+  proposals_retargeted: number;
+}

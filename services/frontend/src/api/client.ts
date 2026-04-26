@@ -6,6 +6,9 @@ import type {
   Job,
   UploadResponse,
   DocumentKnowledge,
+  KnowledgeTopicSummary,
+  KnowledgeTopicDetail,
+  KnowledgeConsolidationResult,
 } from '../types';
 
 const API_BASE = '';
@@ -46,6 +49,23 @@ export async function getDocumentOCR(documentId: string): Promise<OCRResult> {
 export async function getDocumentKnowledge(documentId: string): Promise<DocumentKnowledge> {
   const response = await fetch(`${API_BASE}/knowledge/documents/${documentId}`);
   return handleResponse<DocumentKnowledge>(response);
+}
+
+export async function getKnowledgeTopics(includeInactive = false): Promise<KnowledgeTopicSummary[]> {
+  const response = await fetch(`${API_BASE}/knowledge/topics?include_inactive=${includeInactive}`);
+  return handleResponse<KnowledgeTopicSummary[]>(response);
+}
+
+export async function getKnowledgeTopic(topicId: string): Promise<KnowledgeTopicDetail> {
+  const response = await fetch(`${API_BASE}/knowledge/topics/${topicId}`);
+  return handleResponse<KnowledgeTopicDetail>(response);
+}
+
+export async function runKnowledgeConsolidation(): Promise<KnowledgeConsolidationResult> {
+  const response = await fetch(`${API_BASE}/knowledge/consolidate/run-sync`, {
+    method: 'POST',
+  });
+  return handleResponse<KnowledgeConsolidationResult>(response);
 }
 
 export async function downloadDocument(documentId: string, versionId?: string): Promise<Blob> {

@@ -5,7 +5,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from common.db.models import (
     DocumentType,
@@ -18,18 +18,23 @@ from common.db.models import (
     TopicProposal,
     KnowledgeJob,
 )
-from common.db.session import get_db_session
+from common.db.session import SessionLocal, get_db_session
 from knowledge_classifier.schemas import (
+    ConsolidationResponse,
     ScanUnitCreate,
     ScanUnitResponse,
     DocumentUnitResponse,
     TopicResponse,
+    TopicSummaryResponse,
+    TopicDetailResponse,
+    TopicRelatedDocumentResponse,
     TopicCreate,
     TopicProposalResponse,
     DocumentTypeResponse,
     KnowledgeJobResponse,
     ReviewUpdate,
 )
+from knowledge_classifier.services.consolidation import KnowledgeBaseConsolidationService
 from knowledge_worker.dispatch import dispatch_scan_unit_processing
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
@@ -102,6 +107,72 @@ def _serialize_document_unit(doc_unit: DocumentUnit) -> dict[str, Any]:
         "created_at": doc_unit.created_at,
         "updated_at": doc_unit.updated_at,
     }
+
+
+def _serialize_topic_summary(topic: Topic) -> TopicSummaryResponse:
+    related_document_ids = {
+        str(assignment.document_unit.scan_unit.source_document_id)
+        for assignment in topic.assignments
+        if assignment.document_unit and assignment.document_unit.scan_unit
+    }
+    return TopicSummaryResponse(
+        id=str(topic.id),
+        slug=topic.slug,
+        title=topic.title,
+        topic_class=topic.topic_class,
+        description=topic.description,
+        canonical=topic.canonical,
+        is_active=topic.is_active,
+        assignment_count=len(topic.assignments),
+        proposal_count=len(topic.proposals),
+        related_document_count=len(related_document_ids),
+        alias_count=len(topic.aliases),
+        created_at=topic.created_at,
+        updated_at=topic.updated_at,
+    )
+
+
+def _serialize_topic_detail(topic: Topic) -> TopicDetailResponse:
+    related_documents: list[TopicRelatedDocumentResponse] = []
+    seen_units: set[str] = set()
+    for assignment in sorted(
+        topic.assignments,
+        key=lambda item: (
+            item.document_unit.scan_unit.document.created_at if item.document_unit and item.document_unit.scan_unit and item.document_unit.scan_unit.document else item.created_at,
+            item.document_unit.ordinal if item.document_unit else 0,
+        ),
+        reverse=True,
+    ):
+        document_unit = assignment.document_unit
+        if document_unit is None or document_unit.scan_unit is None or document_unit.scan_unit.document is None:
+            continue
+        unit_id = str(document_unit.id)
+        if unit_id in seen_units:
+            continue
+        seen_units.add(unit_id)
+        document = document_unit.scan_unit.document
+        related_documents.append(
+            TopicRelatedDocumentResponse(
+                document_id=str(document.id),
+                external_id=document.external_id,
+                original_filename=document.original_filename,
+                created_at=document.created_at,
+                document_unit_id=unit_id,
+                document_type_code=document_unit.document_type.code if document_unit.document_type else None,
+                review_status=document_unit.review_status,
+                topic_assignment_confidence=assignment.confidence,
+                assignment_role=assignment.assignment_role,
+                start_page=document_unit.start_page,
+                end_page=document_unit.end_page,
+                summary=document_unit.extracted_summary,
+            )
+        )
+
+    return TopicDetailResponse(
+        topic=_serialize_topic_summary(topic),
+        aliases=sorted({alias.alias for alias in topic.aliases}),
+        related_documents=related_documents,
+    )
 
 
 def _serialize_scan_unit(scan_unit: ScanUnit, include_units: bool = False) -> dict[str, Any]:
@@ -364,26 +435,66 @@ def review_document_unit(
 
 
 # Topics
-@router.get("/topics", response_model=list[TopicResponse])
-def list_topics(db: Session = Depends(get_db_session)):
-    """List all topics."""
-    result = db.execute(select(Topic).where(Topic.is_active == True))
-    topics = result.scalars().all()
-    
-    return [
-        TopicResponse(
-            id=str(t.id),
-            slug=t.slug,
-            title=t.title,
-            topic_class=t.topic_class,
-            description=t.description,
-            canonical=t.canonical,
-            is_active=t.is_active,
-            created_at=t.created_at,
-            updated_at=t.updated_at,
+@router.get("/topics", response_model=list[TopicSummaryResponse])
+def list_topics(
+    include_inactive: bool = False,
+    db: Session = Depends(get_db_session),
+):
+    """List topics with aggregate counts for knowledge-base browsing."""
+    query = (
+        select(Topic)
+        .options(
+            selectinload(Topic.aliases),
+            selectinload(Topic.proposals),
+            selectinload(Topic.assignments)
+            .selectinload(DocumentUnitTopicAssignment.document_unit)
+            .selectinload(DocumentUnit.scan_unit),
         )
-        for t in topics
-    ]
+        .order_by(Topic.created_at.desc())
+    )
+    if not include_inactive:
+        query = query.where(Topic.is_active.is_(True))
+
+    topics = db.execute(query).scalars().unique().all()
+    summaries = [_serialize_topic_summary(topic) for topic in topics]
+    return sorted(
+        summaries,
+        key=lambda topic: (
+            topic.assignment_count,
+            topic.related_document_count,
+            topic.proposal_count,
+            topic.title.lower(),
+        ),
+        reverse=True,
+    )
+
+
+@router.get("/topics/{topic_id}", response_model=TopicDetailResponse)
+def get_topic(topic_id: str, db: Session = Depends(get_db_session)):
+    """Return a topic with aliases and related document units."""
+    try:
+        parsed_topic_id = uuid.UUID(topic_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid topic ID") from exc
+
+    topic = db.execute(
+        select(Topic)
+        .options(
+            selectinload(Topic.aliases),
+            selectinload(Topic.proposals),
+            selectinload(Topic.assignments)
+            .selectinload(DocumentUnitTopicAssignment.document_unit)
+            .selectinload(DocumentUnit.document_type),
+            selectinload(Topic.assignments)
+            .selectinload(DocumentUnitTopicAssignment.document_unit)
+            .selectinload(DocumentUnit.scan_unit)
+            .selectinload(ScanUnit.document),
+        )
+        .where(Topic.id == parsed_topic_id)
+    ).scalar_one_or_none()
+    if topic is None:
+        raise HTTPException(status_code=404, detail="Topic not found")
+    return _serialize_topic_detail(topic)
 
 
 @router.post("/topics", response_model=TopicResponse, status_code=status.HTTP_201_CREATED)
@@ -411,6 +522,26 @@ def create_topic(data: TopicCreate, db: Session = Depends(get_db_session)):
         created_at=topic.created_at,
         updated_at=topic.updated_at,
     )
+
+
+@router.post("/consolidate/run-sync", response_model=ConsolidationResponse)
+def run_consolidation_sync():
+    """Merge semantically near-duplicate topics across the current knowledge base."""
+    db = SessionLocal()
+    try:
+        service = KnowledgeBaseConsolidationService(db)
+        stats = service.consolidate_topics()
+        db.commit()
+        return ConsolidationResponse(
+            topics_before=stats.topics_before,
+            topics_after=stats.topics_after,
+            topics_merged=stats.topics_merged,
+            aliases_created=stats.aliases_created,
+            assignments_retargeted=stats.assignments_retargeted,
+            proposals_retargeted=stats.proposals_retargeted,
+        )
+    finally:
+        db.close()
 
 
 # Topic Proposals

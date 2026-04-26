@@ -197,6 +197,52 @@ class TopicProposalResponse(BaseModel):
     reviewed_at: Optional[datetime] = None
 
 
+class TopicSummaryResponse(BaseModel):
+    id: str
+    slug: str
+    title: str
+    topic_class: str
+    description: Optional[str] = None
+    canonical: bool
+    is_active: bool
+    assignment_count: int
+    proposal_count: int
+    related_document_count: int
+    alias_count: int
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+
+class TopicRelatedDocumentResponse(BaseModel):
+    document_id: str
+    external_id: Optional[str] = None
+    original_filename: str
+    created_at: datetime
+    document_unit_id: str
+    document_type_code: Optional[str] = None
+    review_status: str
+    topic_assignment_confidence: Optional[float] = None
+    assignment_role: str
+    start_page: int
+    end_page: int
+    summary: Optional[str] = None
+
+
+class TopicDetailResponse(BaseModel):
+    topic: TopicSummaryResponse
+    aliases: list[str] = Field(default_factory=list)
+    related_documents: list[TopicRelatedDocumentResponse] = Field(default_factory=list)
+
+
+class ConsolidationResponse(BaseModel):
+    topics_before: int
+    topics_after: int
+    topics_merged: int
+    aliases_created: int
+    assignments_retargeted: int
+    proposals_retargeted: int
+
+
 class ScanUnitCreate(BaseModel):
     """Request to create a scan unit from OCR result."""
     ocr_result_id: str
