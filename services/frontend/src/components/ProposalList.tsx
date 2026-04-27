@@ -4,7 +4,6 @@ import {
   useApproveTopicProposal,
   useRejectTopicProposal,
 } from '../hooks/useDocuments';
-import type { KnowledgeTopicProposal } from '../types';
 
 interface Props {
   onClose: () => void;
