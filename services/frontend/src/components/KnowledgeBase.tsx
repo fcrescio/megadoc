@@ -3,7 +3,9 @@ import {
   useKnowledgeTopic,
   useKnowledgeTopics,
   useRunKnowledgeConsolidation,
+  useTopicProposals,
 } from '../hooks/useDocuments';
+import ProposalList from './ProposalList';
 
 interface Props {
   onOpenDocument: (documentId: string) => void;
@@ -13,8 +15,10 @@ function KnowledgeBase({ onOpenDocument }: Props) {
   const [includeInactive, setIncludeInactive] = useState(false);
   const [selectedTopicId, setSelectedTopicId] = useState<string | null>(null);
   const [topicClassFilter, setTopicClassFilter] = useState<string>('all');
+  const [showProposals, setShowProposals] = useState(false);
   const { data: topics, isLoading, error } = useKnowledgeTopics(includeInactive);
   const { data: topicDetail, isLoading: topicLoading, error: topicError } = useKnowledgeTopic(selectedTopicId);
+  const { data: proposals } = useTopicProposals();
   const consolidate = useRunKnowledgeConsolidation();
 
   const visibleTopics = useMemo(() => {
@@ -132,6 +136,17 @@ function KnowledgeBase({ onOpenDocument }: Props) {
               </option>
             ))}
           </select>
+          <button
+            onClick={() => setShowProposals(true)}
+            className="px-4 py-2 rounded-full bg-amber-400/15 text-amber-200 text-sm font-medium border border-amber-300/25 hover:bg-amber-400/20 flex items-center gap-2"
+          >
+            Proposals
+            {proposals && proposals.length > 0 && (
+              <span className="px-1.5 py-0.5 rounded-full bg-amber-400/25 text-amber-100 text-xs">
+                {proposals.length}
+              </span>
+            )}
+          </button>
           <button
             onClick={() => consolidate.mutate()}
             disabled={consolidate.isPending}
@@ -280,6 +295,12 @@ function KnowledgeBase({ onOpenDocument }: Props) {
           ) : null}
         </div>
       </div>
+
+      {showProposals && (
+        <div className="bg-white/5 border border-white/10 rounded-[24px] shadow-[0_18px_60px_rgba(2,6,23,0.35)] backdrop-blur-md p-6">
+          <ProposalList onClose={() => setShowProposals(false)} />
+        </div>
+      )}
     </div>
   );
 }
