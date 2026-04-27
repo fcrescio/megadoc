@@ -9,6 +9,7 @@ import type {
   KnowledgeTopicSummary,
   KnowledgeTopicDetail,
   KnowledgeConsolidationResult,
+  KnowledgeTopicProposal,
 } from '../types';
 import {
   getDocuments,
@@ -21,6 +22,9 @@ import {
   getKnowledgeTopics,
   runKnowledgeConsolidation,
   uploadDocument,
+  getTopicProposals,
+  approveTopicProposal,
+  rejectTopicProposal,
 } from '../api/client';
 
 export function useDocuments(limit = 100) {
@@ -106,6 +110,37 @@ export function useUploadDocument() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['documents'] });
       queryClient.invalidateQueries({ queryKey: ['jobs'] });
+    },
+  });
+}
+
+export function useTopicProposals() {
+  return useQuery<KnowledgeTopicProposal[]>({
+    queryKey: ['topic-proposals'],
+    queryFn: getTopicProposals,
+  });
+}
+
+export function useApproveTopicProposal() {
+  const queryClient = useQueryClient();
+
+  return useMutation<KnowledgeTopicSummary, Error, string>({
+    mutationFn: (proposalId) => approveTopicProposal(proposalId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['topic-proposals'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-topics'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-topic'] });
+    },
+  });
+}
+
+export function useRejectTopicProposal() {
+  const queryClient = useQueryClient();
+
+  return useMutation<KnowledgeTopicProposal, Error, string>({
+    mutationFn: (proposalId) => rejectTopicProposal(proposalId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['topic-proposals'] });
     },
   });
 }
