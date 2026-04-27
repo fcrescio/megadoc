@@ -68,10 +68,14 @@ export async function runKnowledgeConsolidation(): Promise<KnowledgeConsolidatio
   return handleResponse<KnowledgeConsolidationResult>(response);
 }
 
-export async function downloadDocument(documentId: string, versionId?: string): Promise<Blob> {
-  const url = versionId
+export function getDocumentDownloadUrl(documentId: string, versionId?: string): string {
+  return versionId
     ? `${API_BASE}/documents/${documentId}/download?version_id=${versionId}`
     : `${API_BASE}/documents/${documentId}/download`;
+}
+
+export async function downloadDocument(documentId: string, versionId?: string): Promise<Blob> {
+  const url = getDocumentDownloadUrl(documentId, versionId);
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`HTTP ${response.status}`);

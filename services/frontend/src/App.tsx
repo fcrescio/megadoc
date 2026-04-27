@@ -6,7 +6,7 @@ import JobStatus from './components/JobStatus';
 import KnowledgeBase from './components/KnowledgeBase';
 
 type View = 'documents' | 'knowledge' | 'upload';
-type DocumentTab = 'info' | 'ocr' | 'knowledge' | 'versions' | 'assets';
+type DocumentTab = 'info' | 'pdf' | 'ocr' | 'knowledge' | 'versions' | 'assets';
 
 interface RouteState {
   view: View;

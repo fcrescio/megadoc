@@ -9,16 +9,17 @@ import {
   useDocumentAssets,
   useDocumentKnowledge,
 } from '../hooks/useDocuments';
-import { downloadDocument, downloadAsset } from '../api/client';
+import { downloadAsset, getDocumentDownloadUrl } from '../api/client';
 
 interface Props {
   documentId: string;
   onBack: () => void;
-  initialTab?: 'info' | 'ocr' | 'knowledge' | 'versions' | 'assets';
+  initialTab?: 'info' | 'pdf' | 'ocr' | 'knowledge' | 'versions' | 'assets';
 }
 
 function DocumentDetail({ documentId, onBack, initialTab = 'info' }: Props) {
-  const [activeTab, setActiveTab] = useState<'info' | 'ocr' | 'knowledge' | 'versions' | 'assets'>(initialTab);
+  const [activeTab, setActiveTab] = useState<'info' | 'pdf' | 'ocr' | 'knowledge' | 'versions' | 'assets'>(initialTab);
+  const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
 
   const { data: docData, isLoading: docLoading } = useDocument(documentId);
   const { data: versions } = useDocumentVersions(documentId);
@@ -30,6 +31,10 @@ function DocumentDetail({ documentId, onBack, initialTab = 'info' }: Props) {
     setActiveTab(initialTab);
   }, [documentId, initialTab]);
 
+  useEffect(() => {
+    setSelectedVersionId(null);
+  }, [documentId]);
+
   if (docLoading) {
     return (
       <div className="animate-pulse space-y-4">
@@ -38,20 +43,6 @@ function DocumentDetail({ documentId, onBack, initialTab = 'info' }: Props) {
       </div>
     );
   }
-
-  const handleDownload = async (versionId?: string) => {
-    try {
-      const blob = await downloadDocument(documentId, versionId);
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = docData?.original_filename ?? 'document.pdf';
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (err) {
-      alert('Download failed');
-    }
-  };
 
   const handleDownloadAsset = async (assetId: string) => {
     try {
@@ -67,6 +58,9 @@ function DocumentDetail({ documentId, onBack, initialTab = 'info' }: Props) {
     }
   };
 
+  const pdfUrl = getDocumentDownloadUrl(documentId, selectedVersionId ?? undefined);
+  const selectedVersion = versions?.find((version) => version.id === selectedVersionId) ?? null;
+
   return (
     <div>
       <button
@@ -79,7 +73,7 @@ function DocumentDetail({ documentId, onBack, initialTab = 'info' }: Props) {
       <div className="bg-white rounded-lg shadow">
         <div className="border-b">
           <nav className="flex -mb-px">
-            {(['info', 'ocr', 'knowledge', 'versions', 'assets'] as const).map((tab) => (
+            {(['info', 'pdf', 'ocr', 'knowledge', 'versions', 'assets'] as const).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
@@ -118,13 +112,59 @@ function DocumentDetail({ documentId, onBack, initialTab = 'info' }: Props) {
                   <span className="text-gray-500">Created:</span>
                   <p>{new Date(docData.created_at).toLocaleString()}</p>
                 </div>
+                <div>
+                  <span className="text-gray-500">Viewer:</span>
+                  <p>{selectedVersion ? `Version ${selectedVersion.version_number}` : 'Latest version'}</p>
+                </div>
               </div>
               <button
-                onClick={() => handleDownload()}
+                onClick={() => setActiveTab('pdf')}
                 className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
               >
-                Download PDF
+                Open PDF Viewer
               </button>
+            </div>
+          )}
+
+          {activeTab === 'pdf' && (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-xl font-semibold">
+                    {docData?.original_filename ?? 'PDF viewer'}
+                  </h2>
+                  <p className="text-sm text-gray-500">
+                    {selectedVersion ? `Viewing version ${selectedVersion.version_number}` : 'Viewing latest version'}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {selectedVersion && (
+                    <button
+                      onClick={() => setSelectedVersionId(null)}
+                      className="px-3 py-2 text-sm rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50"
+                    >
+                      Back to latest
+                    </button>
+                  )}
+                  <a
+                    href={pdfUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="px-3 py-2 text-sm rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50"
+                  >
+                    Open in new tab
+                  </a>
+                </div>
+              </div>
+
+              <div className="rounded-xl overflow-hidden border border-gray-200 bg-gray-950 shadow-inner">
+                <iframe
+                  key={pdfUrl}
+                  src={pdfUrl}
+                  title={docData?.original_filename ?? 'PDF document'}
+                  className="w-full h-[80vh] bg-white"
+                />
+              </div>
             </div>
           )}
 
@@ -300,10 +340,13 @@ function DocumentDetail({ documentId, onBack, initialTab = 'info' }: Props) {
                         </td>
                         <td className="px-4 py-2 text-sm">
                           <button
-                            onClick={() => handleDownload(v.id)}
+                            onClick={() => {
+                              setSelectedVersionId(v.id);
+                              setActiveTab('pdf');
+                            }}
                             className="text-blue-600 hover:text-blue-800"
                           >
-                            Download
+                            View
                           </button>
                         </td>
                       </tr>
