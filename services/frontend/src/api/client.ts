@@ -9,6 +9,7 @@ import type {
   KnowledgeTopicSummary,
   KnowledgeTopicDetail,
   KnowledgeConsolidationResult,
+  KnowledgeTopicProposal,
 } from '../types';
 
 const API_BASE = '/api';
@@ -126,4 +127,23 @@ export async function getJobs(limit = 100): Promise<Job[]> {
 export async function getJob(id: string): Promise<Job> {
   const response = await fetch(`${API_BASE}/jobs/${id}`);
   return handleResponse<Job>(response);
+}
+
+export async function getTopicProposals(): Promise<KnowledgeTopicProposal[]> {
+  const response = await fetch(`${API_BASE}/knowledge/topic-proposals`);
+  return handleResponse<KnowledgeTopicProposal[]>(response);
+}
+
+export async function approveTopicProposal(proposalId: string): Promise<KnowledgeTopicSummary> {
+  const response = await fetch(`${API_BASE}/knowledge/topic-proposals/${proposalId}/approve`, {
+    method: 'POST',
+  });
+  return handleResponse<KnowledgeTopicSummary>(response);
+}
+
+export async function rejectTopicProposal(proposalId: string): Promise<KnowledgeTopicProposal> {
+  const response = await fetch(`${API_BASE}/knowledge/topic-proposals/${proposalId}/reject`, {
+    method: 'POST',
+  });
+  return handleResponse<KnowledgeTopicProposal>(response);
 }
