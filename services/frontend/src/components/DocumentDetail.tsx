@@ -58,7 +58,7 @@ function DocumentDetail({ documentId, onBack, initialTab = 'info' }: Props) {
     }
   };
 
-  const pdfUrl = getDocumentDownloadUrl(documentId, selectedVersionId ?? undefined);
+  const pdfUrl = getDocumentDownloadUrl(documentId, selectedVersionId ?? undefined, 'inline');
   const selectedVersion = versions?.find((version) => version.id === selectedVersionId) ?? null;
 
   return (

@@ -217,6 +217,7 @@ def get_document_ocr(document_id: uuid.UUID, session: Session = Depends(db_sessi
 def download_document(
     document_id: uuid.UUID,
     version_id: uuid.UUID | None = None,
+    disposition: str = "attachment",
     session: Session = Depends(db_session_dep),
     storage: StorageBackend = Depends(get_storage_dep),
 ) -> Response:
@@ -230,7 +231,8 @@ def download_document(
         raise HTTPException(status_code=404, detail="Document version not found.")
 
     content = storage.read_bytes(version.storage_bucket, version.storage_object_key)
-    headers = {"Content-Disposition": f'attachment; filename="{document.original_filename}"'}
+    content_disposition = "inline" if disposition == "inline" else "attachment"
+    headers = {"Content-Disposition": f'{content_disposition}; filename="{document.original_filename}"'}
     return Response(content=content, media_type=document.mime_type, headers=headers)
 
 
