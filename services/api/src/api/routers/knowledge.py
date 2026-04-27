@@ -547,9 +547,11 @@ def run_consolidation_sync():
 # Topic Proposals
 @router.get("/topic-proposals", response_model=list[TopicProposalResponse])
 def list_topic_proposals(db: Session = Depends(get_db_session)):
-    """List topic proposals."""
+    """List topic proposals that need review."""
     result = db.execute(
-        select(TopicProposal).where(TopicProposal.proposal_status == "proposed")
+        select(TopicProposal).where(
+            TopicProposal.proposal_status.in_(["proposed", "merged_into_existing"])
+        )
     )
     proposals = result.scalars().all()
     
