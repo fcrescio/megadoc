@@ -360,6 +360,27 @@ export interface GraphConsolidationSuggestions {
   case_or_issue: GraphMergeSuggestion[];
 }
 
+export interface GraphConsolidationReviewPayload {
+  axis: 'subject' | 'document_family' | 'case_or_issue';
+  source_topic_id: string;
+  target_topic_id: string;
+  action:
+    | 'merge_into_target'
+    | 'dismiss'
+    | 'mark_same_subject_different_family'
+    | 'convert_to_secondary_relationship';
+  note?: string | null;
+  acted_by?: string | null;
+}
+
+export interface GraphConsolidationReviewResult {
+  status: string;
+  action: string;
+  source_topic_id: string;
+  target_topic_id: string;
+  affected_assignments: number;
+}
+
 export interface TopicCreatePayload {
   slug: string;
   title: string;

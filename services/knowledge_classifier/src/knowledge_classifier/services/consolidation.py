@@ -16,6 +16,7 @@ from common.db.models import (
     DocumentUnit,
     DocumentUnitEntity,
     DocumentUnitTopicAssignment,
+    GraphConsolidationReview,
     Topic,
     TopicAlias,
     TopicProposal,
@@ -338,16 +339,54 @@ class KnowledgeBaseConsolidationService:
                 grouped[profile["axis"]].append(profile)
 
         suggestions: dict[str, list[GraphMergeSuggestion]] = {}
+        reviewed_pairs = self._reviewed_graph_pairs()
         for axis, axis_profiles in grouped.items():
             axis_suggestions: list[GraphMergeSuggestion] = []
             for index, left in enumerate(axis_profiles):
                 for right in axis_profiles[index + 1 :]:
                     suggestion = self._build_graph_merge_suggestion(axis, left, right)
-                    if suggestion is not None:
+                    if suggestion is not None and not self._is_reviewed_pair(reviewed_pairs, suggestion):
                         axis_suggestions.append(suggestion)
             axis_suggestions.sort(key=lambda item: (-item.score, item.target_topic.title, item.source_topic.title))
             suggestions[axis] = axis_suggestions[:limit_per_axis]
         return suggestions
+
+    def review_graph_suggestion(
+        self,
+        *,
+        axis: str,
+        source_topic_id: str,
+        target_topic_id: str,
+        action: str,
+        note: str | None = None,
+        acted_by: str | None = None,
+    ) -> int:
+        source_topic = self.db.get(Topic, source_topic_id)
+        target_topic = self.db.get(Topic, target_topic_id)
+        if source_topic is None or target_topic is None:
+            raise ValueError("Source or target topic not found.")
+        affected_assignments = 0
+
+        if action == "merge_into_target":
+            stats = ConsolidationStats()
+            self._merge_topic_into(target_topic, source_topic, stats)
+            affected_assignments = stats.assignments_retargeted
+        elif action == "convert_to_secondary_relationship":
+            affected_assignments = self._convert_shared_assignments_to_secondary(source_topic, target_topic)
+        elif action not in {"dismiss", "mark_same_subject_different_family"}:
+            raise ValueError("Unsupported graph consolidation action.")
+
+        review = GraphConsolidationReview(
+            axis=axis,
+            source_topic_id=source_topic.id,
+            target_topic_id=target_topic.id,
+            action=action,
+            note=note,
+            acted_by=acted_by,
+        )
+        self.db.add(review)
+        self.db.flush()
+        return affected_assignments
 
     def _topic_query(self, active_only: bool) -> Any:
         query = (
@@ -364,6 +403,22 @@ class KnowledgeBaseConsolidationService:
         if active_only:
             query = query.where(Topic.is_active.is_(True))
         return query
+
+    def _reviewed_graph_pairs(self) -> set[tuple[str, str, str]]:
+        rows = self.db.execute(select(GraphConsolidationReview)).scalars().all()
+        return {
+            (row.axis, str(row.source_topic_id), str(row.target_topic_id))
+            for row in rows
+            if row.action in {
+                "dismiss",
+                "mark_same_subject_different_family",
+                "convert_to_secondary_relationship",
+                "merge_into_target",
+            }
+        }
+
+    def _is_reviewed_pair(self, reviewed_pairs: set[tuple[str, str, str]], suggestion: GraphMergeSuggestion) -> bool:
+        return (suggestion.axis, suggestion.source_topic.id, suggestion.target_topic.id) in reviewed_pairs
 
     def _canonical_entity_map(self) -> dict[tuple[str, str], str]:
         rows = self.db.execute(select(CanonicalEntityVariant)).scalars().all()
@@ -493,6 +548,26 @@ class KnowledgeBaseConsolidationService:
         if left_topic.created_at <= right_topic.created_at:
             return left, right
         return right, left
+
+    def _convert_shared_assignments_to_secondary(self, source_topic: Topic, target_topic: Topic) -> int:
+        target_document_ids = {
+            str(assignment.document_unit.scan_unit.source_document_id)
+            for assignment in target_topic.assignments
+            if assignment.document_unit and assignment.document_unit.scan_unit
+        }
+        affected = 0
+        for assignment in source_topic.assignments:
+            document_unit = assignment.document_unit
+            if document_unit is None or document_unit.scan_unit is None:
+                continue
+            document_id = str(document_unit.scan_unit.source_document_id)
+            if document_id not in target_document_ids:
+                continue
+            if assignment.assignment_role != "secondary":
+                assignment.assignment_role = "secondary"
+                affected += 1
+        source_topic.updated_at = _utcnow()
+        return affected
 
     def _set_similarity(self, left: set[str], right: set[str]) -> tuple[float, list[str]]:
         if not left or not right:

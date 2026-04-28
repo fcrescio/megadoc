@@ -8,6 +8,7 @@ import {
   useKnowledgeSearch,
   useKnowledgeTopic,
   useKnowledgeTopics,
+  useReviewGraphConsolidationSuggestion,
   useRunKnowledgeConsolidation,
   useTopicProposals,
 } from '../hooks/useDocuments';
@@ -58,6 +59,9 @@ function KnowledgeBase({ onOpenDocument }: Props) {
   });
   const consolidate = useRunKnowledgeConsolidation();
   const graphSuggestions = useGraphConsolidationSuggestions();
+  const reviewGraphSuggestion = useReviewGraphConsolidationSuggestion();
+  const [graphReviewAuthor, setGraphReviewAuthor] = useState('');
+  const [graphReviewNotes, setGraphReviewNotes] = useState<Record<string, string>>({});
 
   const topicClasses = useMemo(() => {
     return Array.from(new Set((topics ?? []).map((topic) => topic.topic_class))).sort();
@@ -382,12 +386,97 @@ function KnowledgeBase({ onOpenDocument }: Props) {
                           ))}
                         </div>
                       )}
+                      <textarea
+                        value={graphReviewNotes[`${group.axis}-${item.source_topic.id}-${item.target_topic.id}`] ?? ''}
+                        onChange={(event) =>
+                          setGraphReviewNotes((current) => ({
+                            ...current,
+                            [`${group.axis}-${item.source_topic.id}-${item.target_topic.id}`]: event.target.value,
+                          }))
+                        }
+                        placeholder="Optional note for this decision"
+                        className="w-full min-h-[5rem] rounded-2xl border border-white/10 bg-slate-900/70 px-3 py-3 text-sm text-slate-100 placeholder:text-slate-500"
+                      />
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          onClick={() =>
+                            reviewGraphSuggestion.mutate({
+                              axis: group.axis as 'subject' | 'document_family' | 'case_or_issue',
+                              source_topic_id: item.source_topic.id,
+                              target_topic_id: item.target_topic.id,
+                              action: 'merge_into_target',
+                              note: graphReviewNotes[`${group.axis}-${item.source_topic.id}-${item.target_topic.id}`] || null,
+                              acted_by: graphReviewAuthor || null,
+                            })
+                          }
+                          disabled={reviewGraphSuggestion.isPending}
+                          className="rounded-full border border-emerald-300/25 bg-emerald-400/20 px-3 py-2 text-xs text-emerald-50 hover:bg-emerald-400/25 disabled:opacity-60"
+                        >
+                          Merge into target
+                        </button>
+                        <button
+                          onClick={() =>
+                            reviewGraphSuggestion.mutate({
+                              axis: group.axis as 'subject' | 'document_family' | 'case_or_issue',
+                              source_topic_id: item.source_topic.id,
+                              target_topic_id: item.target_topic.id,
+                              action: 'dismiss',
+                              note: graphReviewNotes[`${group.axis}-${item.source_topic.id}-${item.target_topic.id}`] || null,
+                              acted_by: graphReviewAuthor || null,
+                            })
+                          }
+                          disabled={reviewGraphSuggestion.isPending}
+                          className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-200 hover:bg-white/10 disabled:opacity-60"
+                        >
+                          Dismiss
+                        </button>
+                        <button
+                          onClick={() =>
+                            reviewGraphSuggestion.mutate({
+                              axis: group.axis as 'subject' | 'document_family' | 'case_or_issue',
+                              source_topic_id: item.source_topic.id,
+                              target_topic_id: item.target_topic.id,
+                              action: 'mark_same_subject_different_family',
+                              note: graphReviewNotes[`${group.axis}-${item.source_topic.id}-${item.target_topic.id}`] || null,
+                              acted_by: graphReviewAuthor || null,
+                            })
+                          }
+                          disabled={reviewGraphSuggestion.isPending}
+                          className="rounded-full border border-amber-300/25 bg-amber-400/20 px-3 py-2 text-xs text-amber-50 hover:bg-amber-400/25 disabled:opacity-60"
+                        >
+                          Same subject, different family
+                        </button>
+                        <button
+                          onClick={() =>
+                            reviewGraphSuggestion.mutate({
+                              axis: group.axis as 'subject' | 'document_family' | 'case_or_issue',
+                              source_topic_id: item.source_topic.id,
+                              target_topic_id: item.target_topic.id,
+                              action: 'convert_to_secondary_relationship',
+                              note: graphReviewNotes[`${group.axis}-${item.source_topic.id}-${item.target_topic.id}`] || null,
+                              acted_by: graphReviewAuthor || null,
+                            })
+                          }
+                          disabled={reviewGraphSuggestion.isPending}
+                          className="rounded-full border border-fuchsia-300/25 bg-fuchsia-400/20 px-3 py-2 text-xs text-fuchsia-50 hover:bg-fuchsia-400/25 disabled:opacity-60"
+                        >
+                          Convert overlapping docs to secondary
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
               )}
             </div>
           ))}
+        </div>
+        <div className="border-t border-white/10 px-5 py-4 bg-slate-950/20">
+          <input
+            value={graphReviewAuthor}
+            onChange={(event) => setGraphReviewAuthor(event.target.value)}
+            placeholder="Reviewer name for graph decisions (optional)"
+            className="w-full rounded-xl border border-white/10 bg-slate-900/70 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500"
+          />
         </div>
       </div>
 

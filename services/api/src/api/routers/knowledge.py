@@ -27,6 +27,7 @@ from common.db.models import (
     TopicAlias,
     TopicProposal,
     KnowledgeJob,
+    GraphConsolidationReview,
 )
 from common.db.session import SessionLocal, get_db_session
 from knowledge_classifier.schemas import (
@@ -53,6 +54,8 @@ from knowledge_classifier.schemas import (
     DocumentTypeResponse,
     GraphConsolidationSuggestionsResponse,
     GraphMergeSuggestionResponse,
+    GraphConsolidationReviewRequest,
+    GraphConsolidationReviewResponse,
     GraphSuggestionTopicSummaryResponse,
     KnowledgeJobResponse,
     ReviewUpdate,
@@ -1497,5 +1500,32 @@ def get_graph_consolidation_suggestions(
         document_family=[serialize_suggestion(item) for item in suggestions.get("document_family", [])],
         case_or_issue=[serialize_suggestion(item) for item in suggestions.get("case_or_issue", [])],
     )
-    
-    return {"status": job.status, "result": result}
+
+
+@router.post("/consolidation/review", response_model=GraphConsolidationReviewResponse)
+def review_graph_consolidation_suggestion(
+    payload: GraphConsolidationReviewRequest,
+    db: Session = Depends(get_db_session),
+):
+    service = KnowledgeBaseConsolidationService(db)
+    try:
+        affected_assignments = service.review_graph_suggestion(
+            axis=payload.axis,
+            source_topic_id=payload.source_topic_id,
+            target_topic_id=payload.target_topic_id,
+            action=payload.action,
+            note=payload.note,
+            acted_by=payload.acted_by,
+        )
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return GraphConsolidationReviewResponse(
+        status="ok",
+        action=payload.action,
+        source_topic_id=payload.source_topic_id,
+        target_topic_id=payload.target_topic_id,
+        affected_assignments=affected_assignments,
+    )

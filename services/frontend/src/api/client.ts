@@ -20,6 +20,8 @@ import type {
   ManualCommentUpdatePayload,
   KnowledgeConsolidationResult,
   GraphConsolidationSuggestions,
+  GraphConsolidationReviewPayload,
+  GraphConsolidationReviewResult,
   KnowledgeDocumentUnit,
   KnowledgeTopicProposal,
   TopicAssignmentUpsertPayload,
@@ -205,6 +207,17 @@ export async function runKnowledgeConsolidation(): Promise<KnowledgeConsolidatio
 export async function getGraphConsolidationSuggestions(limitPerAxis = 12): Promise<GraphConsolidationSuggestions> {
   const response = await fetch(`${API_BASE}/knowledge/consolidation/suggestions?limit_per_axis=${limitPerAxis}`);
   return handleResponse<GraphConsolidationSuggestions>(response);
+}
+
+export async function reviewGraphConsolidationSuggestion(
+  payload: GraphConsolidationReviewPayload,
+): Promise<GraphConsolidationReviewResult> {
+  const response = await fetch(`${API_BASE}/knowledge/consolidation/review`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return handleResponse<GraphConsolidationReviewResult>(response);
 }
 
 export function getDocumentDownloadUrl(

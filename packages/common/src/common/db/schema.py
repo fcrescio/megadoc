@@ -72,6 +72,17 @@ def ensure_knowledge_schema(engine) -> None:
         "ALTER TABLE manual_comments ADD COLUMN IF NOT EXISTS resolved_by VARCHAR(255) NULL",
         "ALTER TABLE manual_comments ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ NULL",
         "CREATE INDEX IF NOT EXISTS ix_manual_comments_slug_created_at ON manual_comments(manual_slug, created_at)",
+        """CREATE TABLE IF NOT EXISTS graph_consolidation_reviews (
+            id UUID PRIMARY KEY,
+            axis VARCHAR(32) NOT NULL,
+            source_topic_id UUID NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
+            target_topic_id UUID NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
+            action VARCHAR(64) NOT NULL,
+            note TEXT NULL,
+            acted_by VARCHAR(255) NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )""",
+        "CREATE INDEX IF NOT EXISTS ix_graph_consolidation_reviews_pair ON graph_consolidation_reviews(axis, source_topic_id, target_topic_id, created_at)",
     ]
     with engine.begin() as conn:
         for statement in statements:

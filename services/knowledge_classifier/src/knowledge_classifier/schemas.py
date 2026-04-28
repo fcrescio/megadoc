@@ -499,3 +499,25 @@ class GraphConsolidationSuggestionsResponse(BaseModel):
     subject: list[GraphMergeSuggestionResponse] = Field(default_factory=list)
     document_family: list[GraphMergeSuggestionResponse] = Field(default_factory=list)
     case_or_issue: list[GraphMergeSuggestionResponse] = Field(default_factory=list)
+
+
+class GraphConsolidationReviewRequest(BaseModel):
+    axis: Literal["subject", "document_family", "case_or_issue"]
+    source_topic_id: str
+    target_topic_id: str
+    action: Literal[
+        "merge_into_target",
+        "dismiss",
+        "mark_same_subject_different_family",
+        "convert_to_secondary_relationship",
+    ]
+    note: Optional[str] = None
+    acted_by: Optional[str] = None
+
+
+class GraphConsolidationReviewResponse(BaseModel):
+    status: str
+    action: str
+    source_topic_id: str
+    target_topic_id: str
+    affected_assignments: int = 0

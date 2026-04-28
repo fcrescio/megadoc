@@ -164,6 +164,14 @@ class Topic(Base):
     proposals: Mapped[list["TopicProposal"]] = relationship(
         foreign_keys="TopicProposal.matched_existing_topic_id", back_populates="matched_topic"
     )
+    outgoing_graph_reviews: Mapped[list["GraphConsolidationReview"]] = relationship(
+        foreign_keys="GraphConsolidationReview.source_topic_id",
+        back_populates="source_topic",
+    )
+    incoming_graph_reviews: Mapped[list["GraphConsolidationReview"]] = relationship(
+        foreign_keys="GraphConsolidationReview.target_topic_id",
+        back_populates="target_topic",
+    )
 
 
 class TopicAlias(Base):
@@ -370,3 +378,25 @@ class ManualComment(Base):
     resolved_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class GraphConsolidationReview(Base):
+    __tablename__ = "graph_consolidation_reviews"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    axis: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_topic_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("topics.id", ondelete="CASCADE"), nullable=False)
+    target_topic_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("topics.id", ondelete="CASCADE"), nullable=False)
+    action: Mapped[str] = mapped_column(String(64), nullable=False)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    acted_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    source_topic: Mapped["Topic"] = relationship(
+        foreign_keys=[source_topic_id],
+        back_populates="outgoing_graph_reviews",
+    )
+    target_topic: Mapped["Topic"] = relationship(
+        foreign_keys=[target_topic_id],
+        back_populates="incoming_graph_reviews",
+    )

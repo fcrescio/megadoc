@@ -20,6 +20,8 @@ import type {
   ManualCommentUpdatePayload,
   KnowledgeConsolidationResult,
   GraphConsolidationSuggestions,
+  GraphConsolidationReviewPayload,
+  GraphConsolidationReviewResult,
   KnowledgeTopicProposal,
   TopicAssignmentUpsertPayload,
   TopicCreatePayload,
@@ -45,6 +47,7 @@ import {
   getKnowledgeTopics,
   runKnowledgeConsolidation,
   getGraphConsolidationSuggestions,
+  reviewGraphConsolidationSuggestion,
   uploadDocument,
   getTopicProposals,
   rejectTopicProposal,
@@ -227,6 +230,20 @@ export function useGraphConsolidationSuggestions(limitPerAxis = 12) {
   return useQuery<GraphConsolidationSuggestions>({
     queryKey: ['graph-consolidation-suggestions', limitPerAxis],
     queryFn: () => getGraphConsolidationSuggestions(limitPerAxis),
+  });
+}
+
+export function useReviewGraphConsolidationSuggestion() {
+  const queryClient = useQueryClient();
+  return useMutation<GraphConsolidationReviewResult, Error, GraphConsolidationReviewPayload>({
+    mutationFn: (payload) => reviewGraphConsolidationSuggestion(payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['graph-consolidation-suggestions'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-topics'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-topic'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-search'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge'] });
+    },
   });
 }
 
