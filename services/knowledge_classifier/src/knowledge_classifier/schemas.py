@@ -319,6 +319,43 @@ class KnowledgeEntityDetailResponse(BaseModel):
     documents: list[KnowledgeEntityDocumentHitResponse] = Field(default_factory=list)
 
 
+class CanonicalEntitySummaryResponse(BaseModel):
+    id: str
+    entity_type: str
+    canonical_value: str
+    display_value: str
+    review_status: str
+    variant_count: int
+    document_count: int
+
+
+class CanonicalEntityVariantResponse(BaseModel):
+    id: str
+    entity_type: str
+    entity_key: str
+    display_value: str
+    review_status: str
+
+
+class CanonicalEntityDetailResponse(BaseModel):
+    entity: CanonicalEntitySummaryResponse
+    variants: list[CanonicalEntityVariantResponse] = Field(default_factory=list)
+    documents: list[KnowledgeEntityDocumentHitResponse] = Field(default_factory=list)
+
+
+class CanonicalEntityCreate(BaseModel):
+    entity_type: str
+    canonical_value: str
+    display_value: str
+
+
+class CanonicalEntityMergeRequest(BaseModel):
+    entity_type: str
+    entity_keys: list[str] = Field(default_factory=list)
+    target_canonical_entity_id: str | None = None
+    create_canonical_entity: CanonicalEntityCreate | None = None
+
+
 class ConsolidationResponse(BaseModel):
     topics_before: int
     topics_after: int

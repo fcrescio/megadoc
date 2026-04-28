@@ -10,6 +10,8 @@ from sqlalchemy.orm import Session, selectinload
 
 from common.application.knowledge import ensure_scan_unit_for_ocr_result
 from common.db.models import (
+    CanonicalEntity,
+    CanonicalEntityVariant,
     Document,
     DocumentType,
     OCRResult,
@@ -38,6 +40,10 @@ from knowledge_classifier.schemas import (
     KnowledgeEntitySummaryResponse,
     KnowledgeEntityDetailResponse,
     KnowledgeEntityDocumentHitResponse,
+    CanonicalEntitySummaryResponse,
+    CanonicalEntityVariantResponse,
+    CanonicalEntityDetailResponse,
+    CanonicalEntityMergeRequest,
     TopicCreate,
     TopicProposalResponse,
     DocumentTypeResponse,
@@ -262,6 +268,18 @@ def _entity_key_expr():
     return func.coalesce(
         func.nullif(DocumentUnitEntity.normalized_value, ""),
         func.lower(DocumentUnitEntity.entity_value),
+    )
+
+
+def _serialize_canonical_entity_summary(entity: CanonicalEntity, document_count: int = 0) -> CanonicalEntitySummaryResponse:
+    return CanonicalEntitySummaryResponse(
+        id=str(entity.id),
+        entity_type=entity.entity_type,
+        canonical_value=entity.canonical_value,
+        display_value=entity.display_value,
+        review_status=entity.review_status,
+        variant_count=len(entity.variants),
+        document_count=document_count,
     )
 
 
@@ -964,6 +982,151 @@ def get_knowledge_entity_detail(
         mention_count=summary_row.mention_count,
         document_count=summary_row.document_count,
         topic_count=summary_row.topic_count,
+        documents=[
+            KnowledgeEntityDocumentHitResponse(
+                document_id=str(doc_unit.scan_unit.document.id),
+                document_unit_id=str(doc_unit.id),
+                original_filename=doc_unit.scan_unit.document.original_filename,
+                external_id=doc_unit.scan_unit.document.external_id,
+                title=doc_unit.title,
+                summary=doc_unit.extracted_summary,
+                review_status=doc_unit.review_status,
+                start_page=doc_unit.start_page,
+                end_page=doc_unit.end_page,
+                topic_titles=[
+                    assignment.topic.title
+                    for assignment in doc_unit.topic_assignments
+                    if assignment.topic is not None and assignment.topic.is_active
+                ],
+            )
+            for doc_unit in document_units
+            if doc_unit.scan_unit is not None and doc_unit.scan_unit.document is not None
+        ],
+    )
+
+
+@router.get("/canonical-entities", response_model=list[CanonicalEntitySummaryResponse])
+def list_canonical_entities(
+    q: str | None = None,
+    entity_type: str | None = None,
+    limit: int = 24,
+    db: Session = Depends(get_db_session),
+):
+    query = (
+        select(CanonicalEntity)
+        .options(selectinload(CanonicalEntity.variants))
+        .order_by(CanonicalEntity.created_at.desc())
+    )
+    if entity_type:
+        query = query.where(CanonicalEntity.entity_type == entity_type)
+    if q and q.strip():
+        pattern = f"%{q.strip()}%"
+        query = query.where(
+            or_(
+                CanonicalEntity.display_value.ilike(pattern),
+                CanonicalEntity.canonical_value.ilike(pattern),
+            )
+        )
+
+    entities = db.execute(query.limit(limit)).scalars().unique().all()
+    return [_serialize_canonical_entity_summary(entity) for entity in entities]
+
+
+@router.post("/canonical-entities/merge", response_model=CanonicalEntityDetailResponse)
+def merge_canonical_entities(
+    payload: CanonicalEntityMergeRequest,
+    db: Session = Depends(get_db_session),
+):
+    if not payload.entity_keys:
+        raise HTTPException(status_code=400, detail="entity_keys is required")
+
+    canonical_entity: CanonicalEntity | None = None
+    if payload.target_canonical_entity_id:
+        canonical_entity = db.execute(
+            select(CanonicalEntity)
+            .options(selectinload(CanonicalEntity.variants))
+            .where(CanonicalEntity.id == uuid.UUID(payload.target_canonical_entity_id))
+        ).scalar_one_or_none()
+        if canonical_entity is None:
+            raise HTTPException(status_code=404, detail="Canonical entity not found")
+    elif payload.create_canonical_entity is not None:
+        canonical_entity = CanonicalEntity(
+            entity_type=payload.create_canonical_entity.entity_type,
+            canonical_value=payload.create_canonical_entity.canonical_value,
+            display_value=payload.create_canonical_entity.display_value,
+            review_status="human_reviewed",
+        )
+        db.add(canonical_entity)
+        db.flush()
+    else:
+        raise HTTPException(status_code=400, detail="Provide target_canonical_entity_id or create_canonical_entity")
+
+    for entity_key in payload.entity_keys:
+        entity_key_normalized = entity_key.strip().lower()
+        if not entity_key_normalized:
+            continue
+        existing_variant = db.execute(
+            select(CanonicalEntityVariant).where(
+                CanonicalEntityVariant.entity_type == payload.entity_type,
+                CanonicalEntityVariant.entity_key == entity_key_normalized,
+            )
+        ).scalar_one_or_none()
+        if existing_variant is not None:
+            existing_variant.canonical_entity_id = canonical_entity.id
+            existing_variant.review_status = "human_reviewed"
+            existing_variant.updated_at = _utcnow()
+            continue
+
+        display_row = db.execute(
+            select(func.max(DocumentUnitEntity.entity_value))
+            .where(
+                DocumentUnitEntity.entity_type == payload.entity_type,
+                _entity_key_expr() == entity_key_normalized,
+            )
+        ).scalar_one_or_none()
+        db.add(
+            CanonicalEntityVariant(
+                canonical_entity_id=canonical_entity.id,
+                entity_type=payload.entity_type,
+                entity_key=entity_key_normalized,
+                display_value=display_row or entity_key_normalized,
+                review_status="human_reviewed",
+            )
+        )
+
+    canonical_entity.review_status = "human_reviewed"
+    canonical_entity.updated_at = _utcnow()
+    db.commit()
+
+    db.refresh(canonical_entity)
+    document_units = db.execute(
+        select(DocumentUnit)
+        .join(DocumentUnitEntity, DocumentUnitEntity.document_unit_id == DocumentUnit.id)
+        .join(ScanUnit, ScanUnit.id == DocumentUnit.scan_unit_id)
+        .join(Document, Document.id == ScanUnit.source_document_id)
+        .options(
+            selectinload(DocumentUnit.topic_assignments).selectinload(DocumentUnitTopicAssignment.topic),
+            selectinload(DocumentUnit.scan_unit).selectinload(ScanUnit.document),
+        )
+        .where(
+            DocumentUnitEntity.entity_type == canonical_entity.entity_type,
+            _entity_key_expr().in_([variant.entity_key for variant in canonical_entity.variants]),
+        )
+        .order_by(Document.created_at.desc(), DocumentUnit.start_page.asc())
+    ).scalars().unique().all()
+
+    return CanonicalEntityDetailResponse(
+        entity=_serialize_canonical_entity_summary(canonical_entity, document_count=len({str(d.scan_unit.document.id) for d in document_units if d.scan_unit and d.scan_unit.document})),
+        variants=[
+            CanonicalEntityVariantResponse(
+                id=str(variant.id),
+                entity_type=variant.entity_type,
+                entity_key=variant.entity_key,
+                display_value=variant.display_value,
+                review_status=variant.review_status,
+            )
+            for variant in canonical_entity.variants
+        ],
         documents=[
             KnowledgeEntityDocumentHitResponse(
                 document_id=str(doc_unit.scan_unit.document.id),

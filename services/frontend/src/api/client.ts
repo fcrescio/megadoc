@@ -11,6 +11,9 @@ import type {
   KnowledgeSearchResult,
   KnowledgeEntitySummary,
   KnowledgeEntityDetail,
+  CanonicalEntitySummary,
+  CanonicalEntityDetail,
+  CanonicalEntityMergePayload,
   KnowledgeConsolidationResult,
   KnowledgeDocumentUnit,
   KnowledgeTopicProposal,
@@ -129,6 +132,32 @@ export async function getKnowledgeEntityDetail(entityType: string, entityKey: st
   params.set('entity_key', entityKey);
   const response = await fetch(`${API_BASE}/knowledge/entities/detail?${params.toString()}`);
   return handleResponse<KnowledgeEntityDetail>(response);
+}
+
+export async function getCanonicalEntities(
+  options?: { query?: string; entityType?: string; limit?: number },
+): Promise<CanonicalEntitySummary[]> {
+  const params = new URLSearchParams();
+  if (options?.query) {
+    params.set('q', options.query);
+  }
+  if (options?.entityType && options.entityType !== 'all') {
+    params.set('entity_type', options.entityType);
+  }
+  if (options?.limit) {
+    params.set('limit', String(options.limit));
+  }
+  const response = await fetch(`${API_BASE}/knowledge/canonical-entities?${params.toString()}`);
+  return handleResponse<CanonicalEntitySummary[]>(response);
+}
+
+export async function mergeCanonicalEntity(payload: CanonicalEntityMergePayload): Promise<CanonicalEntityDetail> {
+  const response = await fetch(`${API_BASE}/knowledge/canonical-entities/merge`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return handleResponse<CanonicalEntityDetail>(response);
 }
 
 export async function runKnowledgeConsolidation(): Promise<KnowledgeConsolidationResult> {

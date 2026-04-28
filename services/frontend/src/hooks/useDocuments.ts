@@ -11,6 +11,9 @@ import type {
   KnowledgeSearchResult,
   KnowledgeEntitySummary,
   KnowledgeEntityDetail,
+  CanonicalEntitySummary,
+  CanonicalEntityDetail,
+  CanonicalEntityMergePayload,
   KnowledgeConsolidationResult,
   KnowledgeTopicProposal,
   TopicAssignmentUpsertPayload,
@@ -29,6 +32,8 @@ import {
   searchKnowledge,
   getKnowledgeEntities,
   getKnowledgeEntityDetail,
+  getCanonicalEntities,
+  mergeCanonicalEntity,
   getKnowledgeTopics,
   runKnowledgeConsolidation,
   uploadDocument,
@@ -142,6 +147,26 @@ export function useKnowledgeEntityDetail(entityType: string | null, entityKey: s
     queryKey: ['knowledge-entity-detail', entityType, entityKey],
     queryFn: () => getKnowledgeEntityDetail(entityType!, entityKey!),
     enabled: !!entityType && !!entityKey,
+  });
+}
+
+export function useCanonicalEntities(options?: { query?: string; entityType?: string; limit?: number }) {
+  return useQuery<CanonicalEntitySummary[]>({
+    queryKey: ['canonical-entities', options?.query, options?.entityType, options?.limit],
+    queryFn: () => getCanonicalEntities(options),
+  });
+}
+
+export function useMergeCanonicalEntity() {
+  const queryClient = useQueryClient();
+  return useMutation<CanonicalEntityDetail, Error, CanonicalEntityMergePayload>({
+    mutationFn: (payload) => mergeCanonicalEntity(payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['knowledge-entities'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-entity-detail'] });
+      queryClient.invalidateQueries({ queryKey: ['canonical-entities'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-search'] });
+    },
   });
 }
 

@@ -1,7 +1,9 @@
 import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import {
+  useCanonicalEntities,
   useKnowledgeEntities,
   useKnowledgeEntityDetail,
+  useMergeCanonicalEntity,
   useKnowledgeSearch,
   useKnowledgeTopic,
   useKnowledgeTopics,
@@ -22,6 +24,9 @@ function KnowledgeBase({ onOpenDocument }: Props) {
   const [entityTypeFilter, setEntityTypeFilter] = useState<string>('all');
   const [selectedEntityKey, setSelectedEntityKey] = useState<string | null>(null);
   const [selectedEntityType, setSelectedEntityType] = useState<string | null>(null);
+  const [canonicalEntityId, setCanonicalEntityId] = useState<string>('');
+  const [newCanonicalValue, setNewCanonicalValue] = useState('');
+  const [newCanonicalDisplay, setNewCanonicalDisplay] = useState('');
   const [searchInput, setSearchInput] = useState('');
   const [showProposals, setShowProposals] = useState(false);
   const deferredSearch = useDeferredValue(searchInput.trim());
@@ -33,10 +38,16 @@ function KnowledgeBase({ onOpenDocument }: Props) {
     entityType: entityTypeFilter,
     limit: 14,
   });
+  const { data: canonicalEntities = [] } = useCanonicalEntities({
+    query: deferredSearch || undefined,
+    entityType: entityTypeFilter,
+    limit: 20,
+  });
   const { data: entityDetail, isLoading: entityDetailLoading } = useKnowledgeEntityDetail(
     selectedEntityType,
     selectedEntityKey,
   );
+  const mergeCanonicalEntity = useMergeCanonicalEntity();
   const { data: proposals } = useTopicProposals();
   const search = useKnowledgeSearch(deferredSearch, {
     includeInactive,
@@ -114,6 +125,13 @@ function KnowledgeBase({ onOpenDocument }: Props) {
       setSelectedEntityType(entityMatches[0].entity_type);
     }
   }, [entityMatches, selectedEntityKey, selectedEntityType]);
+
+  useEffect(() => {
+    if (entityDetail) {
+      setNewCanonicalValue(entityDetail.entity_key);
+      setNewCanonicalDisplay(entityDetail.display_value);
+    }
+  }, [entityDetail]);
 
   if (isLoading) {
     return (
@@ -474,6 +492,62 @@ function KnowledgeBase({ onOpenDocument }: Props) {
                       <p className="text-sm text-slate-400">
                         {entityDetail.entity_type} · {entityDetail.document_count} documents · {entityDetail.mention_count} mentions
                       </p>
+                    </div>
+
+                    <div className="rounded-2xl border border-violet-300/20 bg-violet-400/10 p-4 space-y-3">
+                      <p className="text-xs uppercase tracking-[0.2em] text-violet-100/80">Canonicalize entity</p>
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <select
+                          value={canonicalEntityId}
+                          onChange={(event) => setCanonicalEntityId(event.target.value)}
+                          className="rounded-xl border border-white/10 bg-slate-900/70 px-3 py-2 text-sm text-slate-100"
+                        >
+                          <option value="">Create new canonical entity</option>
+                          {canonicalEntities
+                            .filter((item) => item.entity_type === entityDetail.entity_type)
+                            .map((item) => (
+                              <option key={item.id} value={item.id}>
+                                {item.display_value}
+                              </option>
+                            ))}
+                        </select>
+                        {!canonicalEntityId && (
+                          <>
+                            <input
+                              value={newCanonicalDisplay}
+                              onChange={(event) => setNewCanonicalDisplay(event.target.value)}
+                              placeholder="Canonical display"
+                              className="rounded-xl border border-white/10 bg-slate-900/70 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500"
+                            />
+                            <input
+                              value={newCanonicalValue}
+                              onChange={(event) => setNewCanonicalValue(event.target.value)}
+                              placeholder="Canonical key"
+                              className="rounded-xl border border-white/10 bg-slate-900/70 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 md:col-span-2"
+                            />
+                          </>
+                        )}
+                      </div>
+                      <button
+                        onClick={() =>
+                          mergeCanonicalEntity.mutate({
+                            entity_type: entityDetail.entity_type,
+                            entity_keys: [entityDetail.entity_key],
+                            target_canonical_entity_id: canonicalEntityId || undefined,
+                            create_canonical_entity: canonicalEntityId
+                              ? undefined
+                              : {
+                                  entity_type: entityDetail.entity_type,
+                                  canonical_value: newCanonicalValue || entityDetail.entity_key,
+                                  display_value: newCanonicalDisplay || entityDetail.display_value,
+                                },
+                          })
+                        }
+                        disabled={mergeCanonicalEntity.isPending}
+                        className="rounded-full border border-violet-300/25 bg-violet-400/20 px-4 py-2 text-sm text-violet-50 hover:bg-violet-400/25 disabled:opacity-60"
+                      >
+                        {mergeCanonicalEntity.isPending ? 'Saving entity merge...' : 'Promote to canonical entity'}
+                      </button>
                     </div>
                     <div className="space-y-3 max-h-[23rem] overflow-y-auto pr-1">
                       {entityDetail.documents.map((document) => (

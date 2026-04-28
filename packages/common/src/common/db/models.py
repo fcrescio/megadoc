@@ -271,6 +271,42 @@ class DocumentUnitEntity(Base):
     document_unit: Mapped["DocumentUnit"] = relationship(back_populates="entities")
 
 
+class CanonicalEntity(Base):
+    __tablename__ = "canonical_entities"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    entity_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    canonical_value: Mapped[str] = mapped_column(String(512), nullable=False)
+    display_value: Mapped[str] = mapped_column(String(512), nullable=False)
+    review_status: Mapped[str] = mapped_column(String(32), nullable=False, default="auto")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    variants: Mapped[list["CanonicalEntityVariant"]] = relationship(
+        back_populates="canonical_entity",
+        cascade="all, delete-orphan",
+    )
+
+
+class CanonicalEntityVariant(Base):
+    __tablename__ = "canonical_entity_variants"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    canonical_entity_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("canonical_entities.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    entity_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    entity_key: Mapped[str] = mapped_column(String(512), nullable=False)
+    display_value: Mapped[str] = mapped_column(String(512), nullable=False)
+    review_status: Mapped[str] = mapped_column(String(32), nullable=False, default="auto")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    canonical_entity: Mapped["CanonicalEntity"] = relationship(back_populates="variants")
+
+
 class DocumentUnitTopicAssignment(Base):
     __tablename__ = "document_unit_topic_assignments"
 

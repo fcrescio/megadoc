@@ -252,6 +252,43 @@ export interface KnowledgeEntityDetail {
   documents: KnowledgeEntityDocumentHit[];
 }
 
+export interface CanonicalEntitySummary {
+  id: string;
+  entity_type: string;
+  canonical_value: string;
+  display_value: string;
+  review_status: string;
+  variant_count: number;
+  document_count: number;
+}
+
+export interface CanonicalEntityVariant {
+  id: string;
+  entity_type: string;
+  entity_key: string;
+  display_value: string;
+  review_status: string;
+}
+
+export interface CanonicalEntityDetail {
+  entity: CanonicalEntitySummary;
+  variants: CanonicalEntityVariant[];
+  documents: KnowledgeEntityDocumentHit[];
+}
+
+export interface CanonicalEntityCreatePayload {
+  entity_type: string;
+  canonical_value: string;
+  display_value: string;
+}
+
+export interface CanonicalEntityMergePayload {
+  entity_type: string;
+  entity_keys: string[];
+  target_canonical_entity_id?: string;
+  create_canonical_entity?: CanonicalEntityCreatePayload;
+}
+
 export interface KnowledgeConsolidationResult {
   topics_before: number;
   topics_after: number;

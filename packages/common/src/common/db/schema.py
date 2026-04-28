@@ -32,6 +32,27 @@ def ensure_knowledge_schema(engine) -> None:
             ELSE 'entity'
         END
         WHERE proposed_topic_kind IS NULL OR proposed_topic_kind = 'entity'""",
+        """CREATE TABLE IF NOT EXISTS canonical_entities (
+            id UUID PRIMARY KEY,
+            entity_type VARCHAR(64) NOT NULL,
+            canonical_value VARCHAR(512) NOT NULL,
+            display_value VARCHAR(512) NOT NULL,
+            review_status VARCHAR(32) NOT NULL DEFAULT 'auto',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NULL
+        )""",
+        "CREATE INDEX IF NOT EXISTS ix_canonical_entities_type_value ON canonical_entities(entity_type, canonical_value)",
+        """CREATE TABLE IF NOT EXISTS canonical_entity_variants (
+            id UUID PRIMARY KEY,
+            canonical_entity_id UUID NOT NULL REFERENCES canonical_entities(id) ON DELETE CASCADE,
+            entity_type VARCHAR(64) NOT NULL,
+            entity_key VARCHAR(512) NOT NULL,
+            display_value VARCHAR(512) NOT NULL,
+            review_status VARCHAR(32) NOT NULL DEFAULT 'auto',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NULL
+        )""",
+        "CREATE INDEX IF NOT EXISTS ix_canonical_entity_variants_type_key ON canonical_entity_variants(entity_type, entity_key)",
     ]
     with engine.begin() as conn:
         for statement in statements:
