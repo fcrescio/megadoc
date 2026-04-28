@@ -1,5 +1,7 @@
 import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import {
+  useKnowledgeEntities,
+  useKnowledgeEntityDetail,
   useKnowledgeSearch,
   useKnowledgeTopic,
   useKnowledgeTopics,
@@ -17,12 +19,24 @@ function KnowledgeBase({ onOpenDocument }: Props) {
   const [selectedTopicId, setSelectedTopicId] = useState<string | null>(null);
   const [topicClassFilter, setTopicClassFilter] = useState<string>('all');
   const [topicKindFilter, setTopicKindFilter] = useState<string>('all');
+  const [entityTypeFilter, setEntityTypeFilter] = useState<string>('all');
+  const [selectedEntityKey, setSelectedEntityKey] = useState<string | null>(null);
+  const [selectedEntityType, setSelectedEntityType] = useState<string | null>(null);
   const [searchInput, setSearchInput] = useState('');
   const [showProposals, setShowProposals] = useState(false);
   const deferredSearch = useDeferredValue(searchInput.trim());
 
   const { data: topics, isLoading, error } = useKnowledgeTopics(includeInactive);
   const { data: topicDetail, isLoading: topicLoading, error: topicError } = useKnowledgeTopic(selectedTopicId);
+  const { data: entityMatches = [], isLoading: entitiesLoading } = useKnowledgeEntities({
+    query: deferredSearch || undefined,
+    entityType: entityTypeFilter,
+    limit: 14,
+  });
+  const { data: entityDetail, isLoading: entityDetailLoading } = useKnowledgeEntityDetail(
+    selectedEntityType,
+    selectedEntityKey,
+  );
   const { data: proposals } = useTopicProposals();
   const search = useKnowledgeSearch(deferredSearch, {
     includeInactive,
@@ -71,6 +85,9 @@ function KnowledgeBase({ onOpenDocument }: Props) {
   const searchActive = deferredSearch.length >= 2;
   const searchTopicHits = search.data?.topics ?? [];
   const searchDocumentHits = search.data?.document_units ?? [];
+  const entityTypes = useMemo(() => {
+    return Array.from(new Set(entityMatches.map((entity) => entity.entity_type))).sort();
+  }, [entityMatches]);
 
   useEffect(() => {
     if (!visibleTopics.length) {
@@ -81,6 +98,22 @@ function KnowledgeBase({ onOpenDocument }: Props) {
       setSelectedTopicId(visibleTopics[0].id);
     }
   }, [selectedTopicId, visibleTopics]);
+
+  useEffect(() => {
+    if (!entityMatches.length) {
+      setSelectedEntityKey(null);
+      setSelectedEntityType(null);
+      return;
+    }
+    if (
+      !selectedEntityKey ||
+      !selectedEntityType ||
+      !entityMatches.some((entity) => entity.entity_key === selectedEntityKey && entity.entity_type === selectedEntityType)
+    ) {
+      setSelectedEntityKey(entityMatches[0].entity_key);
+      setSelectedEntityType(entityMatches[0].entity_type);
+    }
+  }, [entityMatches, selectedEntityKey, selectedEntityType]);
 
   if (isLoading) {
     return (
@@ -136,6 +169,7 @@ function KnowledgeBase({ onOpenDocument }: Props) {
               <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-400">
                 <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1">topics</span>
                 <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1">document units</span>
+                <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1">entities</span>
                 <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1">aliases</span>
                 <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1">summaries</span>
                 {search.isFetching && searchActive && (
@@ -209,6 +243,18 @@ function KnowledgeBase({ onOpenDocument }: Props) {
               </option>
             ))}
           </select>
+          <select
+            value={entityTypeFilter}
+            onChange={(event) => setEntityTypeFilter(event.target.value)}
+            className="rounded-full border border-white/10 bg-slate-900/70 px-4 py-2 text-sm text-slate-100"
+          >
+            <option value="all">All entity types</option>
+            {entityTypes.map((entityType) => (
+              <option key={entityType} value={entityType}>
+                {entityType}
+              </option>
+            ))}
+          </select>
           <button
             onClick={() => setShowProposals(true)}
             className="px-4 py-2 rounded-full bg-amber-400/15 text-amber-200 text-sm font-medium border border-amber-300/25 hover:bg-amber-400/20 flex items-center gap-2"
@@ -239,7 +285,7 @@ function KnowledgeBase({ onOpenDocument }: Props) {
       )}
 
       {searchActive && (
-        <div className="grid gap-4 xl:grid-cols-[1fr_1fr]">
+        <div className="grid gap-4 xl:grid-cols-[0.95fr_0.95fr_1.1fr]">
           <div className="rounded-[24px] border border-cyan-300/15 bg-slate-950/50 p-5 shadow-[0_18px_60px_rgba(2,6,23,0.35)] backdrop-blur-md">
             <div className="flex items-center justify-between gap-3 mb-4">
               <div>
@@ -367,6 +413,104 @@ function KnowledgeBase({ onOpenDocument }: Props) {
                 ))}
               </div>
             )}
+          </div>
+
+          <div className="rounded-[24px] border border-violet-300/15 bg-slate-950/50 p-5 shadow-[0_18px_60px_rgba(2,6,23,0.35)] backdrop-blur-md">
+            <div className="flex items-center justify-between gap-3 mb-4">
+              <div>
+                <p className="text-xs uppercase tracking-[0.28em] text-violet-300/70">Entity Index</p>
+                <h4 className="text-lg font-semibold text-white">Canonicalized entity matches</h4>
+              </div>
+              <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-200">
+                {entityMatches.length} hits
+              </span>
+            </div>
+
+            <div className="grid gap-4 xl:grid-cols-[0.92fr_1.08fr]">
+              <div className="space-y-3 max-h-[28rem] overflow-y-auto pr-1">
+                {entitiesLoading ? (
+                  <div className="space-y-3 animate-pulse">
+                    <div className="h-16 rounded-2xl bg-white/5"></div>
+                    <div className="h-16 rounded-2xl bg-white/5"></div>
+                  </div>
+                ) : entityMatches.length === 0 ? (
+                  <p className="text-sm text-slate-400">No entities matched this query.</p>
+                ) : (
+                  entityMatches.map((entity) => (
+                    <button
+                      key={`${entity.entity_type}:${entity.entity_key}`}
+                      onClick={() => {
+                        setSelectedEntityType(entity.entity_type);
+                        setSelectedEntityKey(entity.entity_key);
+                      }}
+                      className={`w-full rounded-2xl border p-4 text-left transition-colors ${
+                        entity.entity_type === selectedEntityType && entity.entity_key === selectedEntityKey
+                          ? 'border-violet-300/35 bg-violet-400/10'
+                          : 'border-white/10 bg-white/5 hover:bg-white/10'
+                      }`}
+                    >
+                      <p className="font-medium text-slate-100">{entity.display_value}</p>
+                      <p className="text-xs text-slate-400 mt-1">
+                        {entity.entity_type} · {entity.document_count} documents · {entity.mention_count} mentions · {entity.topic_count}{' '}
+                        topics
+                      </p>
+                    </button>
+                  ))
+                )}
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-4 min-h-[16rem]">
+                {!selectedEntityKey || !selectedEntityType ? (
+                  <p className="text-sm text-slate-400">Select an entity to inspect its linked documents.</p>
+                ) : entityDetailLoading ? (
+                  <div className="space-y-3 animate-pulse">
+                    <div className="h-6 rounded bg-white/5 w-2/3"></div>
+                    <div className="h-24 rounded bg-white/5"></div>
+                  </div>
+                ) : entityDetail ? (
+                  <div className="space-y-4">
+                    <div>
+                      <p className="text-lg font-semibold text-white">{entityDetail.display_value}</p>
+                      <p className="text-sm text-slate-400">
+                        {entityDetail.entity_type} · {entityDetail.document_count} documents · {entityDetail.mention_count} mentions
+                      </p>
+                    </div>
+                    <div className="space-y-3 max-h-[23rem] overflow-y-auto pr-1">
+                      {entityDetail.documents.map((document) => (
+                        <div key={document.document_unit_id} className="rounded-2xl border border-white/10 bg-slate-950/40 p-4">
+                          <button
+                            onClick={() => onOpenDocument(document.document_id)}
+                            className="text-left font-medium text-cyan-200 hover:text-cyan-100"
+                          >
+                            {document.original_filename}
+                          </button>
+                          <p className="text-xs text-slate-400 mt-1">
+                            Pages {document.start_page}-{document.end_page}
+                            {document.external_id ? ` · ${document.external_id}` : ''}
+                          </p>
+                          {document.title && <p className="text-sm text-slate-200 mt-2">{document.title}</p>}
+                          {document.summary && <p className="text-sm text-slate-400 mt-2 line-clamp-3">{document.summary}</p>}
+                          {document.topic_titles.length > 0 && (
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              {document.topic_titles.slice(0, 3).map((topicTitle, index) => (
+                                <span
+                                  key={`${document.document_unit_id}-${topicTitle}-${index}`}
+                                  className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[11px] text-slate-300"
+                                >
+                                  {topicTitle}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-sm text-slate-400">No detail available for this entity.</p>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       )}

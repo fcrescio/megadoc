@@ -9,6 +9,8 @@ import type {
   KnowledgeTopicSummary,
   KnowledgeTopicDetail,
   KnowledgeSearchResult,
+  KnowledgeEntitySummary,
+  KnowledgeEntityDetail,
   KnowledgeConsolidationResult,
   KnowledgeTopicProposal,
   TopicAssignmentUpsertPayload,
@@ -25,6 +27,8 @@ import {
   ensureDocumentKnowledge,
   getKnowledgeTopic,
   searchKnowledge,
+  getKnowledgeEntities,
+  getKnowledgeEntityDetail,
   getKnowledgeTopics,
   runKnowledgeConsolidation,
   uploadDocument,
@@ -126,6 +130,21 @@ export function useKnowledgeSearch(
   });
 }
 
+export function useKnowledgeEntities(options?: { query?: string; entityType?: string; limit?: number }) {
+  return useQuery<KnowledgeEntitySummary[]>({
+    queryKey: ['knowledge-entities', options?.query, options?.entityType, options?.limit],
+    queryFn: () => getKnowledgeEntities(options),
+  });
+}
+
+export function useKnowledgeEntityDetail(entityType: string | null, entityKey: string | null) {
+  return useQuery<KnowledgeEntityDetail | null>({
+    queryKey: ['knowledge-entity-detail', entityType, entityKey],
+    queryFn: () => getKnowledgeEntityDetail(entityType!, entityKey!),
+    enabled: !!entityType && !!entityKey,
+  });
+}
+
 export function useRunKnowledgeConsolidation() {
   const queryClient = useQueryClient();
 
@@ -136,6 +155,8 @@ export function useRunKnowledgeConsolidation() {
       queryClient.invalidateQueries({ queryKey: ['knowledge-topic'] });
       queryClient.invalidateQueries({ queryKey: ['knowledge'] });
       queryClient.invalidateQueries({ queryKey: ['knowledge-search'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-entities'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-entity-detail'] });
     },
   });
 }
@@ -170,6 +191,8 @@ export function useApproveTopicProposal() {
       queryClient.invalidateQueries({ queryKey: ['knowledge-topic'] });
       queryClient.invalidateQueries({ queryKey: ['knowledge'] });
       queryClient.invalidateQueries({ queryKey: ['knowledge-search'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-entities'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-entity-detail'] });
     },
   });
 }
@@ -185,6 +208,8 @@ export function useRejectTopicProposal() {
       queryClient.invalidateQueries({ queryKey: ['knowledge-topic'] });
       queryClient.invalidateQueries({ queryKey: ['knowledge'] });
       queryClient.invalidateQueries({ queryKey: ['knowledge-search'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-entities'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-entity-detail'] });
     },
   });
 }
@@ -197,6 +222,8 @@ export function useCreateKnowledgeTopic() {
       queryClient.invalidateQueries({ queryKey: ['knowledge-topics'] });
       queryClient.invalidateQueries({ queryKey: ['topic-proposals'] });
       queryClient.invalidateQueries({ queryKey: ['knowledge-search'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-entities'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-entity-detail'] });
     },
   });
 }
@@ -211,6 +238,8 @@ export function useAddDocumentUnitTopicAssignment() {
       queryClient.invalidateQueries({ queryKey: ['knowledge-topics'] });
       queryClient.invalidateQueries({ queryKey: ['topic-proposals'] });
       queryClient.invalidateQueries({ queryKey: ['knowledge-search'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-entities'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-entity-detail'] });
     },
   });
 }
@@ -224,6 +253,8 @@ export function useDeleteDocumentUnitTopicAssignment() {
       queryClient.invalidateQueries({ queryKey: ['knowledge-topic'] });
       queryClient.invalidateQueries({ queryKey: ['knowledge-topics'] });
       queryClient.invalidateQueries({ queryKey: ['knowledge-search'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-entities'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-entity-detail'] });
     },
   });
 }

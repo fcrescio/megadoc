@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from common.application.knowledge import ensure_scan_unit_for_ocr_result
@@ -35,6 +35,9 @@ from knowledge_classifier.schemas import (
     KnowledgeSearchResponse,
     KnowledgeSearchTopicHit,
     KnowledgeSearchDocumentHit,
+    KnowledgeEntitySummaryResponse,
+    KnowledgeEntityDetailResponse,
+    KnowledgeEntityDocumentHitResponse,
     TopicCreate,
     TopicProposalResponse,
     DocumentTypeResponse,
@@ -253,6 +256,13 @@ def _document_unit_matched_fields(doc_unit: DocumentUnit, query: str) -> list[st
     ):
         matched_fields.append("topic")
     return matched_fields
+
+
+def _entity_key_expr():
+    return func.coalesce(
+        func.nullif(DocumentUnitEntity.normalized_value, ""),
+        func.lower(DocumentUnitEntity.entity_value),
+    )
 
 
 def _serialize_scan_unit(scan_unit: ScanUnit, include_units: bool = False) -> dict[str, Any]:
@@ -837,6 +847,143 @@ def search_knowledge(
         total_document_hits=len(document_hits),
         topics=topic_hits,
         document_units=document_hits,
+    )
+
+
+@router.get("/entities", response_model=list[KnowledgeEntitySummaryResponse])
+def list_knowledge_entities(
+    q: str | None = None,
+    entity_type: str | None = None,
+    limit: int = 24,
+    db: Session = Depends(get_db_session),
+):
+    pattern = f"%{q.strip()}%" if q and q.strip() else None
+    entity_key = _entity_key_expr().label("entity_key")
+
+    query = (
+        select(
+            DocumentUnitEntity.entity_type.label("entity_type"),
+            entity_key,
+            func.max(DocumentUnitEntity.entity_value).label("display_value"),
+            func.count(DocumentUnitEntity.id).label("mention_count"),
+            func.count(func.distinct(ScanUnit.source_document_id)).label("document_count"),
+            func.count(func.distinct(DocumentUnitTopicAssignment.topic_id)).label("topic_count"),
+        )
+        .join(DocumentUnit, DocumentUnit.id == DocumentUnitEntity.document_unit_id)
+        .join(ScanUnit, ScanUnit.id == DocumentUnit.scan_unit_id)
+        .outerjoin(
+            DocumentUnitTopicAssignment,
+            DocumentUnitTopicAssignment.document_unit_id == DocumentUnit.id,
+        )
+        .group_by(DocumentUnitEntity.entity_type, entity_key)
+        .order_by(
+            func.count(func.distinct(ScanUnit.source_document_id)).desc(),
+            func.count(DocumentUnitEntity.id).desc(),
+            func.max(DocumentUnitEntity.entity_value).asc(),
+        )
+    )
+    if entity_type:
+        query = query.where(DocumentUnitEntity.entity_type == entity_type)
+    if pattern:
+        query = query.where(
+            or_(
+                DocumentUnitEntity.entity_value.ilike(pattern),
+                DocumentUnitEntity.normalized_value.ilike(pattern),
+            )
+        )
+
+    rows = db.execute(query.limit(limit)).all()
+    return [
+        KnowledgeEntitySummaryResponse(
+            entity_type=row.entity_type,
+            entity_key=row.entity_key,
+            display_value=row.display_value,
+            mention_count=row.mention_count,
+            document_count=row.document_count,
+            topic_count=row.topic_count,
+        )
+        for row in rows
+    ]
+
+
+@router.get("/entities/detail", response_model=KnowledgeEntityDetailResponse)
+def get_knowledge_entity_detail(
+    entity_type: str,
+    entity_key: str,
+    db: Session = Depends(get_db_session),
+):
+    normalized_key = entity_key.strip().lower()
+    if not normalized_key:
+        raise HTTPException(status_code=400, detail="entity_key is required")
+
+    entity_key_sql = _entity_key_expr()
+    summary_row = db.execute(
+        select(
+            DocumentUnitEntity.entity_type.label("entity_type"),
+            entity_key_sql.label("entity_key"),
+            func.max(DocumentUnitEntity.entity_value).label("display_value"),
+            func.count(DocumentUnitEntity.id).label("mention_count"),
+            func.count(func.distinct(ScanUnit.source_document_id)).label("document_count"),
+            func.count(func.distinct(DocumentUnitTopicAssignment.topic_id)).label("topic_count"),
+        )
+        .join(DocumentUnit, DocumentUnit.id == DocumentUnitEntity.document_unit_id)
+        .join(ScanUnit, ScanUnit.id == DocumentUnit.scan_unit_id)
+        .outerjoin(
+            DocumentUnitTopicAssignment,
+            DocumentUnitTopicAssignment.document_unit_id == DocumentUnit.id,
+        )
+        .where(
+            DocumentUnitEntity.entity_type == entity_type,
+            entity_key_sql == normalized_key,
+        )
+        .group_by(DocumentUnitEntity.entity_type, entity_key_sql)
+    ).first()
+    if summary_row is None:
+        raise HTTPException(status_code=404, detail="Entity not found")
+
+    document_units = db.execute(
+        select(DocumentUnit)
+        .join(DocumentUnitEntity, DocumentUnitEntity.document_unit_id == DocumentUnit.id)
+        .join(ScanUnit, ScanUnit.id == DocumentUnit.scan_unit_id)
+        .join(Document, Document.id == ScanUnit.source_document_id)
+        .options(
+            selectinload(DocumentUnit.topic_assignments).selectinload(DocumentUnitTopicAssignment.topic),
+            selectinload(DocumentUnit.scan_unit).selectinload(ScanUnit.document),
+        )
+        .where(
+            DocumentUnitEntity.entity_type == entity_type,
+            entity_key_sql == normalized_key,
+        )
+        .order_by(Document.created_at.desc(), DocumentUnit.start_page.asc())
+    ).scalars().unique().all()
+
+    return KnowledgeEntityDetailResponse(
+        entity_type=summary_row.entity_type,
+        entity_key=summary_row.entity_key,
+        display_value=summary_row.display_value,
+        mention_count=summary_row.mention_count,
+        document_count=summary_row.document_count,
+        topic_count=summary_row.topic_count,
+        documents=[
+            KnowledgeEntityDocumentHitResponse(
+                document_id=str(doc_unit.scan_unit.document.id),
+                document_unit_id=str(doc_unit.id),
+                original_filename=doc_unit.scan_unit.document.original_filename,
+                external_id=doc_unit.scan_unit.document.external_id,
+                title=doc_unit.title,
+                summary=doc_unit.extracted_summary,
+                review_status=doc_unit.review_status,
+                start_page=doc_unit.start_page,
+                end_page=doc_unit.end_page,
+                topic_titles=[
+                    assignment.topic.title
+                    for assignment in doc_unit.topic_assignments
+                    if assignment.topic is not None and assignment.topic.is_active
+                ],
+            )
+            for doc_unit in document_units
+            if doc_unit.scan_unit is not None and doc_unit.scan_unit.document is not None
+        ],
     )
 
 

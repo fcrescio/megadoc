@@ -287,6 +287,38 @@ class KnowledgeSearchResponse(BaseModel):
     document_units: list[KnowledgeSearchDocumentHit] = Field(default_factory=list)
 
 
+class KnowledgeEntitySummaryResponse(BaseModel):
+    entity_type: str
+    entity_key: str
+    display_value: str
+    mention_count: int
+    document_count: int
+    topic_count: int
+
+
+class KnowledgeEntityDocumentHitResponse(BaseModel):
+    document_id: str
+    document_unit_id: str
+    original_filename: str
+    external_id: Optional[str] = None
+    title: Optional[str] = None
+    summary: Optional[str] = None
+    review_status: str
+    start_page: int
+    end_page: int
+    topic_titles: list[str] = Field(default_factory=list)
+
+
+class KnowledgeEntityDetailResponse(BaseModel):
+    entity_type: str
+    entity_key: str
+    display_value: str
+    mention_count: int
+    document_count: int
+    topic_count: int
+    documents: list[KnowledgeEntityDocumentHitResponse] = Field(default_factory=list)
+
+
 class ConsolidationResponse(BaseModel):
     topics_before: int
     topics_after: int

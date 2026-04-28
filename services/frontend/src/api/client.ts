@@ -9,6 +9,8 @@ import type {
   KnowledgeTopicSummary,
   KnowledgeTopicDetail,
   KnowledgeSearchResult,
+  KnowledgeEntitySummary,
+  KnowledgeEntityDetail,
   KnowledgeConsolidationResult,
   KnowledgeDocumentUnit,
   KnowledgeTopicProposal,
@@ -102,6 +104,31 @@ export async function searchKnowledge(
   }
   const response = await fetch(`${API_BASE}/knowledge/search?${params.toString()}`);
   return handleResponse<KnowledgeSearchResult>(response);
+}
+
+export async function getKnowledgeEntities(
+  options?: { query?: string; entityType?: string; limit?: number },
+): Promise<KnowledgeEntitySummary[]> {
+  const params = new URLSearchParams();
+  if (options?.query) {
+    params.set('q', options.query);
+  }
+  if (options?.entityType && options.entityType !== 'all') {
+    params.set('entity_type', options.entityType);
+  }
+  if (options?.limit) {
+    params.set('limit', String(options.limit));
+  }
+  const response = await fetch(`${API_BASE}/knowledge/entities?${params.toString()}`);
+  return handleResponse<KnowledgeEntitySummary[]>(response);
+}
+
+export async function getKnowledgeEntityDetail(entityType: string, entityKey: string): Promise<KnowledgeEntityDetail> {
+  const params = new URLSearchParams();
+  params.set('entity_type', entityType);
+  params.set('entity_key', entityKey);
+  const response = await fetch(`${API_BASE}/knowledge/entities/detail?${params.toString()}`);
+  return handleResponse<KnowledgeEntityDetail>(response);
 }
 
 export async function runKnowledgeConsolidation(): Promise<KnowledgeConsolidationResult> {

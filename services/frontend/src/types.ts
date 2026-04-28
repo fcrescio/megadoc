@@ -220,6 +220,38 @@ export interface KnowledgeSearchResult {
   document_units: KnowledgeSearchDocumentHit[];
 }
 
+export interface KnowledgeEntitySummary {
+  entity_type: string;
+  entity_key: string;
+  display_value: string;
+  mention_count: number;
+  document_count: number;
+  topic_count: number;
+}
+
+export interface KnowledgeEntityDocumentHit {
+  document_id: string;
+  document_unit_id: string;
+  original_filename: string;
+  external_id: string | null;
+  title: string | null;
+  summary: string | null;
+  review_status: string;
+  start_page: number;
+  end_page: number;
+  topic_titles: string[];
+}
+
+export interface KnowledgeEntityDetail {
+  entity_type: string;
+  entity_key: string;
+  display_value: string;
+  mention_count: number;
+  document_count: number;
+  topic_count: number;
+  documents: KnowledgeEntityDocumentHit[];
+}
+
 export interface KnowledgeConsolidationResult {
   topics_before: number;
   topics_after: number;
