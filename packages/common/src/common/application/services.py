@@ -1,7 +1,7 @@
 import shutil
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -140,12 +140,14 @@ class DocumentService:
 
 
 class JobService:
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, settings: Settings | None = None) -> None:
         self.session = session
+        self.settings = settings or get_settings()
         self.jobs = JobRepository(session)
         self.documents = DocumentRepository(session)
 
     def create_ingest_job(self, document_id: UUID, priority: int = 5) -> IngestionJob:
+        self.reconcile_stale_jobs(document_id=document_id)
         document = self.documents.get(document_id)
         if document is None:
             raise NotFoundError(f"Document {document_id} not found.")
@@ -182,6 +184,68 @@ class JobService:
         job.error_message = None
         job.finished_at = datetime.now(timezone.utc)
         self.session.commit()
+
+    def reconcile_stale_jobs(self, document_id: UUID | None = None) -> int:
+        now = datetime.now(timezone.utc)
+        stale_count = 0
+        running_cutoff = now - timedelta(seconds=self.settings.ingestion_job_running_timeout_seconds)
+        queued_cutoff = now - timedelta(seconds=self.settings.ingestion_job_queued_timeout_seconds)
+
+        running_stmt = self.session.query(IngestionJob).filter(
+            IngestionJob.job_type == JobType.INGEST.value,
+            IngestionJob.status == JobStatus.RUNNING.value,
+            IngestionJob.started_at.is_not(None),
+            IngestionJob.started_at < running_cutoff,
+        )
+        queued_stmt = self.session.query(IngestionJob).filter(
+            IngestionJob.job_type == JobType.INGEST.value,
+            IngestionJob.status == JobStatus.QUEUED.value,
+            IngestionJob.created_at < queued_cutoff,
+        )
+        if document_id is not None:
+            running_stmt = running_stmt.filter(IngestionJob.document_id == document_id)
+            queued_stmt = queued_stmt.filter(IngestionJob.document_id == document_id)
+
+        stale_count += self._mark_stale_failed(
+            running_stmt.all(),
+            now=now,
+            reason="Stale running ingestion job reconciled automatically.",
+        )
+        stale_count += self._mark_stale_failed(
+            queued_stmt.all(),
+            now=now,
+            reason="Stale queued ingestion job reconciled automatically.",
+        )
+        if stale_count:
+            self.session.commit()
+        return stale_count
+
+    def _mark_stale_failed(
+        self,
+        jobs: list[IngestionJob],
+        *,
+        now: datetime,
+        reason: str,
+    ) -> int:
+        updated = 0
+        for job in jobs:
+            job.status = JobStatus.FAILED.value
+            job.error_message = reason
+            job.finished_at = now
+            updated += 1
+        return updated
+
+    def is_job_stale(self, job: IngestionJob, now: datetime | None = None) -> tuple[bool, str | None]:
+        now = now or datetime.now(timezone.utc)
+        if job.status == JobStatus.RUNNING.value and job.started_at is not None:
+            cutoff = now - timedelta(seconds=self.settings.ingestion_job_running_timeout_seconds)
+            if job.started_at < cutoff:
+                return True, "running timeout exceeded"
+        if job.status == JobStatus.QUEUED.value:
+            cutoff = now - timedelta(seconds=self.settings.ingestion_job_queued_timeout_seconds)
+            if job.created_at < cutoff:
+                return True, "queue timeout exceeded"
+        return False, None
 
 
 class OCRService:

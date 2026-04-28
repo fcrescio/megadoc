@@ -55,6 +55,8 @@ export interface Job {
   created_at: string;
   started_at: string | null;
   finished_at: string | null;
+  is_stale: boolean;
+  stale_reason: string | null;
 }
 
 export interface UploadResponse {

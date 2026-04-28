@@ -31,6 +31,8 @@ class JobResponse(BaseModel):
     created_at: datetime
     started_at: datetime | None
     finished_at: datetime | None
+    is_stale: bool = False
+    stale_reason: str | None = None
 
 
 class DocumentResponse(BaseModel):

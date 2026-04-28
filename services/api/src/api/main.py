@@ -43,9 +43,32 @@ app = FastAPI(title="megadoc api", version="0.1.0")
 app.add_middleware(RequestContextMiddleware)
 
 
+def _serialize_job(job, session: Session) -> JobResponse:
+    job_service = JobService(session)
+    is_stale, stale_reason = job_service.is_job_stale(job)
+    return JobResponse.model_validate(
+        {
+            "id": job.id,
+            "document_id": job.document_id,
+            "job_type": job.job_type,
+            "status": job.status,
+            "priority": job.priority,
+            "attempt_count": job.attempt_count,
+            "error_message": job.error_message,
+            "created_at": job.created_at,
+            "started_at": job.started_at,
+            "finished_at": job.finished_at,
+            "is_stale": is_stale,
+            "stale_reason": stale_reason,
+        }
+    )
+
+
 @app.on_event("startup")
 def ensure_database_schema() -> None:
     ensure_knowledge_schema(engine)
+    with Session(engine) as session:
+        JobService(session).reconcile_stale_jobs()
 
 # Include routers
 app.include_router(knowledge.router)
@@ -152,7 +175,7 @@ def create_ingest_job(
     except NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     dispatch_ingestion_job(job.id, ocr_backend=payload.ocr_backend)
-    return JobResponse.model_validate(job, from_attributes=True)
+    return _serialize_job(job, job_service.session)
 
 
 @app.get("/jobs", response_model=list[JobResponse])
@@ -160,16 +183,18 @@ def list_jobs(
     limit: int = Query(default=100, le=500),
     session: Session = Depends(db_session_dep),
 ) -> list[JobResponse]:
+    JobService(session).reconcile_stale_jobs()
     rows = JobRepository(session).list(limit)
-    return [JobResponse.model_validate(row, from_attributes=True) for row in rows]
+    return [_serialize_job(row, session) for row in rows]
 
 
 @app.get("/jobs/{job_id}", response_model=JobResponse)
 def get_job(job_id: uuid.UUID, session: Session = Depends(db_session_dep)) -> JobResponse:
+    JobService(session).reconcile_stale_jobs()
     job = JobRepository(session).get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found.")
-    return JobResponse.model_validate(job, from_attributes=True)
+    return _serialize_job(job, session)
 
 
 @app.get("/documents", response_model=list[DocumentResponse])

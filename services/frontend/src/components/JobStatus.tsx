@@ -4,19 +4,35 @@ import type { Job } from '../types';
 function JobStatus() {
   const { data: jobs, isLoading } = useJobs(20);
 
-  const getStatusColor = (status: Job['status']) => {
+  const getStatusColor = (job: Job) => {
+    if (job.is_stale) {
+      return 'bg-rose-500/15 text-rose-200 ring-1 ring-rose-400/40';
+    }
+    const status = job.status;
     switch (status) {
       case 'queued':
-        return 'bg-yellow-100 text-yellow-800';
+        return 'bg-amber-500/15 text-amber-100 ring-1 ring-amber-400/30';
       case 'running':
-        return 'bg-blue-100 text-blue-800';
+        return 'bg-sky-500/15 text-sky-100 ring-1 ring-sky-400/30';
       case 'succeeded':
-        return 'bg-green-100 text-green-800';
+        return 'bg-emerald-500/15 text-emerald-100 ring-1 ring-emerald-400/30';
       case 'failed':
-        return 'bg-red-100 text-red-800';
+        return 'bg-rose-500/15 text-rose-200 ring-1 ring-rose-400/40';
       default:
-        return 'bg-gray-100 text-gray-800';
+        return 'bg-slate-500/15 text-slate-100 ring-1 ring-slate-400/30';
     }
+  };
+
+  const getStatusLabel = (job: Job) => {
+    if (job.is_stale) {
+      return 'stale';
+    }
+    return job.status;
+  };
+
+  const formatActivityTime = (job: Job) => {
+    const timestamp = job.started_at ?? job.created_at;
+    return new Date(timestamp).toLocaleString();
   };
 
   if (isLoading) {
@@ -43,21 +59,24 @@ function JobStatus() {
                 <div>
                   <p className="font-mono text-sm text-slate-100">{job.id}</p>
                   <p className="text-xs text-slate-400">Document: {job.document_id}</p>
+                  <p className="text-xs text-slate-500 mt-1">
+                    {job.started_at ? 'Started' : 'Created'}: {formatActivityTime(job)}
+                  </p>
                 </div>
                 <div className="text-right">
                   <span
-                    className={`px-2 py-1 rounded text-xs font-medium ${getStatusColor(job.status)}`}
+                    className={`px-2 py-1 rounded text-xs font-medium uppercase tracking-[0.18em] ${getStatusColor(job)}`}
                   >
-                    {job.status}
+                    {getStatusLabel(job)}
                   </span>
+                  {job.is_stale && job.stale_reason && (
+                    <p className="text-xs text-rose-300 mt-1">{job.stale_reason}</p>
+                  )}
                   {job.error_message && (
-                    <p className="text-xs text-red-500 mt-1">{job.error_message}</p>
+                    <p className="text-xs text-rose-300 mt-1">{job.error_message}</p>
                   )}
                 </div>
               </div>
-              <p className="text-xs text-slate-500 mt-1">
-                {new Date(job.created_at).toLocaleString()}
-              </p>
             </div>
           ))}
         </div>

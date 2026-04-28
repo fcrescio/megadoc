@@ -29,6 +29,14 @@ class Settings(BaseSettings):
         default="ingestion_llm_vision",
         alias="INGESTION_QUEUE_LLM_VISION",
     )
+    ingestion_job_running_timeout_seconds: int = Field(
+        default=6 * 60 * 60,
+        alias="INGESTION_JOB_RUNNING_TIMEOUT_SECONDS",
+    )
+    ingestion_job_queued_timeout_seconds: int = Field(
+        default=24 * 60 * 60,
+        alias="INGESTION_JOB_QUEUED_TIMEOUT_SECONDS",
+    )
     s3_endpoint_url: str = Field(default="http://minio:9000", alias="S3_ENDPOINT_URL")
     s3_access_key: str = Field(default="minioadmin", alias="S3_ACCESS_KEY")
     s3_secret_key: str = Field(default="minioadmin", alias="S3_SECRET_KEY")
