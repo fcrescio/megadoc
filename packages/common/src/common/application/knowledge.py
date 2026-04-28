@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import uuid
 
+from sqlalchemy import func
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from common.db.models import KnowledgeJob, OCRResult, ScanUnit
+from common.db.models import IngestionJob, KnowledgeJob, OCRResult, ScanUnit
 
 
 def ensure_scan_unit_for_ocr_result(
@@ -63,6 +64,52 @@ def ensure_scan_unit_for_ocr_result(
         should_dispatch = True
 
     return scan_unit, knowledge_job, created_scan_unit, should_dispatch
+
+
+def has_active_ingestion_jobs(session: Session) -> bool:
+    active_count = session.execute(
+        select(func.count())
+        .select_from(IngestionJob)
+        .where(
+            IngestionJob.job_type == "ingest",
+            IngestionJob.status.in_(("queued", "running")),
+        )
+    ).scalar_one()
+    return bool(active_count)
+
+
+def get_dispatchable_knowledge_scan_unit_ids(session: Session) -> list[uuid.UUID]:
+    rows = session.execute(
+        select(KnowledgeJob)
+        .where(KnowledgeJob.status == "queued")
+        .order_by(KnowledgeJob.created_at.desc())
+    ).scalars().all()
+
+    seen: set[uuid.UUID] = set()
+    scan_unit_ids: list[uuid.UUID] = []
+    for job in rows:
+        if job.scan_unit_id in seen:
+            continue
+        seen.add(job.scan_unit_id)
+        scan_unit_ids.append(job.scan_unit_id)
+    scan_unit_ids.reverse()
+    return scan_unit_ids
+
+
+def mark_knowledge_job_pending_dispatch(session: Session, scan_unit_id: str | uuid.UUID) -> bool:
+    parsed_scan_unit_id = parse_uuid(scan_unit_id)
+    knowledge_job = session.execute(
+        select(KnowledgeJob)
+        .where(KnowledgeJob.scan_unit_id == parsed_scan_unit_id)
+        .order_by(KnowledgeJob.created_at.desc())
+    ).scalar_one_or_none()
+    if knowledge_job is None:
+        return False
+    if knowledge_job.status != "queued":
+        return False
+    knowledge_job.status = "pending"
+    session.flush()
+    return True
 
 
 def parse_uuid(value: str | uuid.UUID) -> uuid.UUID:

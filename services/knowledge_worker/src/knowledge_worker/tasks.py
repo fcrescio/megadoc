@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
+from common.application.knowledge import has_active_ingestion_jobs
 from common.db.models import KnowledgeJob
 from common.db.schema import ensure_knowledge_schema
 from knowledge_classifier.config import get_settings
@@ -41,6 +42,16 @@ def process_scan_unit_task(self, scan_unit_id: str):
         echo=False,
     )
     ensure_knowledge_schema(engine)
+
+    with Session(engine) as gate_session:
+        if has_active_ingestion_jobs(gate_session):
+            logger.info("knowledge_deferred_until_ocr_drain", extra={"scan_unit_id": scan_unit_id})
+            latest_job = _get_latest_knowledge_job(gate_session, scan_unit_id)
+            if latest_job is not None:
+                latest_job.status = "pending"
+                gate_session.commit()
+            self.apply_async(args=[scan_unit_id], countdown=180, queue=settings.celery_queue)
+            return {"scan_unit_id": scan_unit_id, "status": "deferred_for_ocr_priority"}
 
     _update_knowledge_job(
         engine,

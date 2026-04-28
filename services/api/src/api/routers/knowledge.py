@@ -8,7 +8,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
-from common.application.knowledge import ensure_scan_unit_for_ocr_result
+from common.application.knowledge import (
+    ensure_scan_unit_for_ocr_result,
+    has_active_ingestion_jobs,
+    mark_knowledge_job_pending_dispatch,
+)
 from common.db.models import (
     CanonicalEntity,
     CanonicalEntityVariant,
@@ -414,9 +418,12 @@ async def create_scan_unit_from_ocr(
         raise HTTPException(status_code=404, detail="OCR result not found")
 
     scan_unit, _, _, should_dispatch = ensure_scan_unit_for_ocr_result(db, ocr_result)
-    if should_dispatch:
+    if should_dispatch and not has_active_ingestion_jobs(db):
+        mark_knowledge_job_pending_dispatch(db, scan_unit.id)
+        db.commit()
         dispatch_scan_unit_processing(str(scan_unit.id))
-    db.commit()
+    else:
+        db.commit()
 
     return ScanUnitResponse(
         id=str(scan_unit.id),
@@ -452,9 +459,12 @@ def ensure_document_knowledge(
         raise HTTPException(status_code=409, detail="OCR result not available yet")
 
     scan_unit, _, _, should_dispatch = ensure_scan_unit_for_ocr_result(db, ocr_result)
-    if should_dispatch:
+    if should_dispatch and not has_active_ingestion_jobs(db):
+        mark_knowledge_job_pending_dispatch(db, scan_unit.id)
+        db.commit()
         dispatch_scan_unit_processing(str(scan_unit.id))
-    db.commit()
+    else:
+        db.commit()
 
     return ScanUnitResponse(
         id=str(scan_unit.id),
