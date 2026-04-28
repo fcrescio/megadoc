@@ -10,6 +10,9 @@ import type {
   KnowledgeTopicDetail,
   KnowledgeConsolidationResult,
   KnowledgeTopicProposal,
+  TopicAssignmentUpsertPayload,
+  TopicCreatePayload,
+  TopicProposalResolutionPayload,
 } from '../types';
 import {
   getDocuments,
@@ -23,8 +26,11 @@ import {
   runKnowledgeConsolidation,
   uploadDocument,
   getTopicProposals,
-  approveTopicProposal,
   rejectTopicProposal,
+  resolveTopicProposal,
+  createKnowledgeTopic,
+  addDocumentUnitTopicAssignment,
+  deleteDocumentUnitTopicAssignment,
 } from '../api/client';
 
 export function useDocuments(limit = 100) {
@@ -74,10 +80,10 @@ export function useDocumentKnowledge(documentId: string | null) {
   });
 }
 
-export function useKnowledgeTopics(includeInactive = false) {
+export function useKnowledgeTopics(includeInactive = false, topicKind?: string) {
   return useQuery<KnowledgeTopicSummary[]>({
-    queryKey: ['knowledge-topics', includeInactive],
-    queryFn: () => getKnowledgeTopics(includeInactive),
+    queryKey: ['knowledge-topics', includeInactive, topicKind],
+    queryFn: () => getKnowledgeTopics(includeInactive, topicKind),
   });
 }
 
@@ -124,8 +130,8 @@ export function useTopicProposals(includeConsolidated = false) {
 export function useApproveTopicProposal() {
   const queryClient = useQueryClient();
 
-  return useMutation<KnowledgeTopicSummary, Error, string>({
-    mutationFn: (proposalId) => approveTopicProposal(proposalId),
+  return useMutation<unknown, Error, { proposalId: string; payload: TopicProposalResolutionPayload }>({
+    mutationFn: ({ proposalId, payload }) => resolveTopicProposal(proposalId, payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['topic-proposals'] });
       queryClient.invalidateQueries({ queryKey: ['knowledge-topics'] });
@@ -145,6 +151,42 @@ export function useRejectTopicProposal() {
       queryClient.invalidateQueries({ queryKey: ['knowledge-topics'] });
       queryClient.invalidateQueries({ queryKey: ['knowledge-topic'] });
       queryClient.invalidateQueries({ queryKey: ['knowledge'] });
+    },
+  });
+}
+
+export function useCreateKnowledgeTopic() {
+  const queryClient = useQueryClient();
+  return useMutation<KnowledgeTopicSummary, Error, TopicCreatePayload>({
+    mutationFn: (payload) => createKnowledgeTopic(payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['knowledge-topics'] });
+      queryClient.invalidateQueries({ queryKey: ['topic-proposals'] });
+    },
+  });
+}
+
+export function useAddDocumentUnitTopicAssignment() {
+  const queryClient = useQueryClient();
+  return useMutation<unknown, Error, { documentUnitId: string; payload: TopicAssignmentUpsertPayload }>({
+    mutationFn: ({ documentUnitId, payload }) => addDocumentUnitTopicAssignment(documentUnitId, payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['knowledge'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-topic'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-topics'] });
+      queryClient.invalidateQueries({ queryKey: ['topic-proposals'] });
+    },
+  });
+}
+
+export function useDeleteDocumentUnitTopicAssignment() {
+  const queryClient = useQueryClient();
+  return useMutation<unknown, Error, { documentUnitId: string; assignmentId: string }>({
+    mutationFn: ({ documentUnitId, assignmentId }) => deleteDocumentUnitTopicAssignment(documentUnitId, assignmentId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['knowledge'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-topic'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-topics'] });
     },
   });
 }

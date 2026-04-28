@@ -82,6 +82,7 @@ export interface KnowledgeTopicAssignment {
   topic_id: string;
   topic_slug: string | null;
   topic_title: string | null;
+  topic_kind: string | null;
   topic_class: string | null;
   assignment_role: string;
   confidence: number | null;
@@ -93,6 +94,7 @@ export interface KnowledgeTopicProposal {
   proposed_slug: string;
   proposed_title: string;
   topic_class: string;
+  proposed_topic_kind: string;
   description: string | null;
   proposal_status: string;
   matched_existing_topic_id: string | null;
@@ -153,6 +155,7 @@ export interface KnowledgeTopicSummary {
   slug: string;
   title: string;
   topic_class: string;
+  topic_kind: string;
   description: string | null;
   canonical: boolean;
   is_active: boolean;
@@ -192,4 +195,28 @@ export interface KnowledgeConsolidationResult {
   aliases_created: number;
   assignments_retargeted: number;
   proposals_retargeted: number;
+}
+
+export interface TopicCreatePayload {
+  slug: string;
+  title: string;
+  topic_class: string;
+  topic_kind: string;
+  description?: string | null;
+  aliases?: string[];
+}
+
+export interface TopicAssignmentUpsertPayload {
+  topic_id?: string;
+  assignment_role: string;
+  confidence?: number | null;
+  rationale?: string | null;
+  create_topic?: TopicCreatePayload;
+}
+
+export interface TopicProposalResolutionPayload {
+  action: 'approve_new_topic' | 'merge_into_existing' | 'add_secondary_topic' | 'reject';
+  assignment_role: string;
+  target_topic_id?: string;
+  create_topic?: TopicCreatePayload;
 }

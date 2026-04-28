@@ -44,6 +44,18 @@ class ReviewStatus(str, Enum):
 class AssignmentRole(str, Enum):
     PRIMARY = "primary"
     SECONDARY = "secondary"
+    SUBJECT = "subject"
+    DOCUMENT_FAMILY = "document_family"
+    CASE_OR_ISSUE = "case_or_issue"
+    PERSON_OR_ORG_CONTEXT = "person_or_org_context"
+
+
+class TopicKind(str, Enum):
+    ENTITY = "entity"
+    FAMILY = "family"
+    ISSUE = "issue"
+    PROJECT = "project"
+    CONTEXT = "context"
 
 
 class TopicClass(str, Enum):
@@ -178,6 +190,8 @@ class TopicAssignmentResponse(BaseModel):
     topic_id: str
     topic_slug: str
     topic_title: str
+    topic_kind: Optional[str] = None
+    topic_class: Optional[str] = None
     assignment_role: str
     confidence: Optional[float] = None
     rationale: Optional[str] = None
@@ -189,6 +203,7 @@ class TopicProposalResponse(BaseModel):
     proposed_slug: str
     proposed_title: str
     topic_class: str
+    proposed_topic_kind: str = TopicKind.ENTITY.value
     description: Optional[str] = None
     proposal_status: str
     matched_existing_topic_id: Optional[str] = None
@@ -209,6 +224,7 @@ class TopicSummaryResponse(BaseModel):
     slug: str
     title: str
     topic_class: str
+    topic_kind: str = TopicKind.ENTITY.value
     description: Optional[str] = None
     canonical: bool
     is_active: bool
@@ -296,6 +312,7 @@ class TopicResponse(BaseModel):
     slug: str
     title: str
     topic_class: str
+    topic_kind: str = TopicKind.ENTITY.value
     description: Optional[str] = None
     canonical: bool
     is_active: bool
@@ -308,6 +325,7 @@ class TopicCreate(BaseModel):
     slug: str
     title: str
     topic_class: str
+    topic_kind: str = TopicKind.ENTITY.value
     description: Optional[str] = None
     aliases: list[str] = Field(default_factory=list)
 
@@ -341,3 +359,18 @@ class ReviewUpdate(BaseModel):
     document_type_code: Optional[str] = None
     title: Optional[str] = None
     review_status: Optional[str] = None
+
+
+class TopicAssignmentUpsert(BaseModel):
+    topic_id: Optional[str] = None
+    assignment_role: str = AssignmentRole.SECONDARY.value
+    confidence: Optional[float] = None
+    rationale: Optional[str] = None
+    create_topic: Optional[TopicCreate] = None
+
+
+class TopicProposalResolution(BaseModel):
+    action: Literal["approve_new_topic", "merge_into_existing", "add_secondary_topic", "reject"] = "merge_into_existing"
+    assignment_role: str = AssignmentRole.SECONDARY.value
+    target_topic_id: Optional[str] = None
+    create_topic: Optional[TopicCreate] = None

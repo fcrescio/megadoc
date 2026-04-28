@@ -11,6 +11,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from common.db.models import KnowledgeJob
+from common.db.schema import ensure_knowledge_schema
 from knowledge_classifier.config import get_settings
 from knowledge_classifier.llm.mock import MockDeterministicProvider
 from knowledge_classifier.llm.openai_compat import OpenAICompatibleProvider
@@ -39,6 +40,7 @@ def process_scan_unit_task(self, scan_unit_id: str):
         os.getenv("DATABASE_URL", "postgresql+psycopg://megadoc:megadoc@postgres:5432/megadoc"),
         echo=False,
     )
+    ensure_knowledge_schema(engine)
 
     _update_knowledge_job(
         engine,

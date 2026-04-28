@@ -15,6 +15,7 @@ function KnowledgeBase({ onOpenDocument }: Props) {
   const [includeInactive, setIncludeInactive] = useState(false);
   const [selectedTopicId, setSelectedTopicId] = useState<string | null>(null);
   const [topicClassFilter, setTopicClassFilter] = useState<string>('all');
+  const [topicKindFilter, setTopicKindFilter] = useState<string>('all');
   const [showProposals, setShowProposals] = useState(false);
   const { data: topics, isLoading, error } = useKnowledgeTopics(includeInactive);
   const { data: topicDetail, isLoading: topicLoading, error: topicError } = useKnowledgeTopic(selectedTopicId);
@@ -25,14 +26,19 @@ function KnowledgeBase({ onOpenDocument }: Props) {
     if (!topics) {
       return [];
     }
-    if (topicClassFilter === 'all') {
-      return topics;
-    }
-    return topics.filter((topic) => topic.topic_class === topicClassFilter);
-  }, [topicClassFilter, topics]);
+    return topics.filter((topic) => {
+      const classOk = topicClassFilter === 'all' || topic.topic_class === topicClassFilter;
+      const kindOk = topicKindFilter === 'all' || topic.topic_kind === topicKindFilter;
+      return classOk && kindOk;
+    });
+  }, [topicClassFilter, topicKindFilter, topics]);
 
   const topicClasses = useMemo(() => {
     return Array.from(new Set((topics ?? []).map((topic) => topic.topic_class))).sort();
+  }, [topics]);
+
+  const topicKinds = useMemo(() => {
+    return Array.from(new Set((topics ?? []).map((topic) => topic.topic_kind))).sort();
   }, [topics]);
 
   const stats = useMemo(() => {
@@ -136,6 +142,18 @@ function KnowledgeBase({ onOpenDocument }: Props) {
               </option>
             ))}
           </select>
+          <select
+            value={topicKindFilter}
+            onChange={(event) => setTopicKindFilter(event.target.value)}
+            className="rounded-full border border-white/10 bg-slate-900/70 px-4 py-2 text-sm text-slate-100"
+          >
+            <option value="all">All kinds</option>
+            {topicKinds.map((topicKind) => (
+              <option key={topicKind} value={topicKind}>
+                {topicKind}
+              </option>
+            ))}
+          </select>
           <button
             onClick={() => setShowProposals(true)}
             className="px-4 py-2 rounded-full bg-amber-400/15 text-amber-200 text-sm font-medium border border-amber-300/25 hover:bg-amber-400/20 flex items-center gap-2"
@@ -190,7 +208,7 @@ function KnowledgeBase({ onOpenDocument }: Props) {
                     <div className="min-w-0">
                       <p className="font-medium text-slate-100 truncate">{topic.title}</p>
                       <p className="text-xs text-slate-400 mt-1">
-                        {topic.topic_class} · {topic.assignment_count} assignments · {topic.related_document_count}{' '}
+                        {topic.topic_kind} · {topic.topic_class} · {topic.assignment_count} assignments · {topic.related_document_count}{' '}
                         documents
                       </p>
                     </div>
@@ -223,7 +241,7 @@ function KnowledgeBase({ onOpenDocument }: Props) {
                 <div>
                   <h3 className="text-xl font-semibold text-white">{topicDetail.topic.title}</h3>
                   <p className="text-sm text-slate-400 mt-1">
-                    {topicDetail.topic.topic_class} · {topicDetail.topic.assignment_count} assignments ·{' '}
+                    {topicDetail.topic.topic_kind} · {topicDetail.topic.topic_class} · {topicDetail.topic.assignment_count} assignments ·{' '}
                     {topicDetail.topic.related_document_count} documents
                   </p>
                   {topicDetail.topic.description && (

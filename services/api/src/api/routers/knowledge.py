@@ -35,6 +35,8 @@ from knowledge_classifier.schemas import (
     KnowledgeJobResponse,
     ReviewUpdate,
     ReviewStatus,
+    TopicAssignmentUpsert,
+    TopicProposalResolution,
 )
 from knowledge_classifier.services.consolidation import KnowledgeBaseConsolidationService
 from knowledge_worker.dispatch import dispatch_scan_unit_processing
@@ -65,6 +67,7 @@ def _serialize_topic_assignment(assignment: DocumentUnitTopicAssignment) -> dict
         "topic_id": str(assignment.topic_id),
         "topic_slug": topic.slug if topic else None,
         "topic_title": topic.title if topic else None,
+        "topic_kind": topic.topic_kind if topic else None,
         "topic_class": topic.topic_class if topic else None,
         "assignment_role": assignment.assignment_role,
         "confidence": assignment.confidence,
@@ -83,6 +86,7 @@ def _serialize_topic_proposal(proposal: TopicProposal | None) -> dict[str, Any] 
         "proposed_slug": proposal.proposed_slug,
         "proposed_title": proposal.proposed_title,
         "topic_class": proposal.topic_class,
+        "proposed_topic_kind": proposal.proposed_topic_kind,
         "description": proposal.description,
         "proposal_status": proposal.proposal_status,
         "matched_existing_topic_id": str(proposal.matched_existing_topic_id) if proposal.matched_existing_topic_id else None,
@@ -135,6 +139,7 @@ def _serialize_topic_summary(topic: Topic) -> TopicSummaryResponse:
         slug=topic.slug,
         title=topic.title,
         topic_class=topic.topic_class,
+        topic_kind=topic.topic_kind,
         description=topic.description,
         canonical=topic.canonical,
         is_active=topic.is_active,
@@ -212,6 +217,73 @@ def _serialize_scan_unit(scan_unit: ScanUnit, include_units: bool = False) -> di
             for doc_unit in sorted(scan_unit.document_units, key=lambda unit: unit.ordinal)
         ]
     return payload
+
+
+def _get_or_create_topic_from_payload(
+    payload: TopicCreate,
+    db: Session,
+) -> Topic:
+    existing = db.execute(select(Topic).where(Topic.slug == payload.slug)).scalar_one_or_none()
+    if existing is not None:
+        existing.title = payload.title
+        existing.topic_class = payload.topic_class
+        existing.topic_kind = payload.topic_kind
+        existing.description = payload.description
+        existing.canonical = True
+        existing.is_active = True
+        existing.updated_at = _utcnow()
+        topic = existing
+    else:
+        topic = Topic(
+            slug=payload.slug,
+            title=payload.title,
+            topic_class=payload.topic_class,
+            topic_kind=payload.topic_kind,
+            description=payload.description,
+            canonical=True,
+            is_active=True,
+        )
+        db.add(topic)
+        db.flush()
+    alias_values = {topic.slug.lower(), topic.title.lower()}
+    alias_values.update(alias.alias.lower() for alias in topic.aliases)
+    for candidate_alias in payload.aliases:
+        if candidate_alias.lower() not in alias_values:
+            db.add(TopicAlias(topic_id=topic.id, alias=candidate_alias))
+            alias_values.add(candidate_alias.lower())
+    return topic
+
+
+def _assign_topic_to_document_unit(
+    doc_unit: DocumentUnit,
+    topic: Topic,
+    assignment_role: str,
+    db: Session,
+    confidence: float | None = None,
+    rationale: str | None = None,
+) -> DocumentUnitTopicAssignment:
+    existing = next(
+        (
+            assignment
+            for assignment in doc_unit.topic_assignments
+            if assignment.topic_id == topic.id and assignment.assignment_role == assignment_role
+        ),
+        None,
+    )
+    if existing is not None:
+        existing.confidence = confidence if confidence is not None else existing.confidence
+        existing.rationale = rationale or existing.rationale
+        return existing
+    assignment = DocumentUnitTopicAssignment(
+        document_unit_id=doc_unit.id,
+        topic_id=topic.id,
+        assignment_role=assignment_role,
+        confidence=confidence,
+        rationale=rationale,
+    )
+    db.add(assignment)
+    doc_unit.topic_assignments.append(assignment)
+    return assignment
 
 
 @router.get("/documents/{document_id}")
@@ -346,65 +418,40 @@ def list_document_units(scan_unit_id: str, db: Session = Depends(get_db_session)
     """List document units for a scan unit."""
     result = db.execute(
         select(DocumentUnit)
+        .options(
+            selectinload(DocumentUnit.document_type),
+            selectinload(DocumentUnit.entities),
+            selectinload(DocumentUnit.topic_assignments).selectinload(DocumentUnitTopicAssignment.topic),
+            selectinload(DocumentUnit.proposal).selectinload(TopicProposal.matched_topic),
+            selectinload(DocumentUnit.scan_unit).selectinload(ScanUnit.document),
+        )
         .where(DocumentUnit.scan_unit_id == uuid.UUID(scan_unit_id))
         .order_by(DocumentUnit.ordinal)
     )
     doc_units = result.scalars().all()
-    
-    return [
-        DocumentUnitResponse(
-            id=str(du.id),
-            scan_unit_id=str(du.scan_unit_id),
-            ordinal=du.ordinal,
-            start_page=du.start_page,
-            end_page=du.end_page,
-            title=du.title,
-            document_type_code=du.document_type.code if du.document_type else None,
-            document_type_name=du.document_type.name if du.document_type else None,
-            document_type_confidence=du.document_type_confidence,
-            segmentation_confidence=du.segmentation_confidence,
-            extracted_summary=du.extracted_summary,
-            review_status=du.review_status,
-            entities=[],  # Simplified
-            topic_assignments=[],  # Simplified
-            proposal=None,
-            created_at=du.created_at,
-            updated_at=du.updated_at,
-        )
-        for du in doc_units
-    ]
+
+    return [DocumentUnitResponse(**_serialize_document_unit(du)) for du in doc_units]
 
 
 @router.get("/document-units/{document_unit_id}", response_model=DocumentUnitResponse)
 def get_document_unit(document_unit_id: str, db: Session = Depends(get_db_session)):
     """Get a document unit by ID."""
     result = db.execute(
-        select(DocumentUnit).where(DocumentUnit.id == uuid.UUID(document_unit_id))
+        select(DocumentUnit)
+        .options(
+            selectinload(DocumentUnit.document_type),
+            selectinload(DocumentUnit.entities),
+            selectinload(DocumentUnit.topic_assignments).selectinload(DocumentUnitTopicAssignment.topic),
+            selectinload(DocumentUnit.proposal).selectinload(TopicProposal.matched_topic),
+            selectinload(DocumentUnit.scan_unit).selectinload(ScanUnit.document),
+        )
+        .where(DocumentUnit.id == uuid.UUID(document_unit_id))
     )
     doc_unit = result.scalar_one_or_none()
     if not doc_unit:
         raise HTTPException(status_code=404, detail="Document unit not found")
-    
-    # Simplified response
-    return DocumentUnitResponse(
-        id=str(doc_unit.id),
-        scan_unit_id=str(doc_unit.scan_unit_id),
-        ordinal=doc_unit.ordinal,
-        start_page=doc_unit.start_page,
-        end_page=doc_unit.end_page,
-        title=doc_unit.title,
-        document_type_code=doc_unit.document_type.code if doc_unit.document_type else None,
-        document_type_name=doc_unit.document_type.name if doc_unit.document_type else None,
-        document_type_confidence=doc_unit.document_type_confidence,
-        segmentation_confidence=doc_unit.segmentation_confidence,
-        extracted_summary=doc_unit.extracted_summary,
-        review_status=doc_unit.review_status,
-        entities=[],
-        topic_assignments=[],
-        proposal=None,
-        created_at=doc_unit.created_at,
-        updated_at=doc_unit.updated_at,
-    )
+
+    return DocumentUnitResponse(**_serialize_document_unit(doc_unit))
 
 
 @router.post("/document-units/{document_unit_id}/review", response_model=DocumentUnitResponse)
@@ -415,7 +462,15 @@ def review_document_unit(
 ):
     """Update review status for a document unit."""
     result = db.execute(
-        select(DocumentUnit).where(DocumentUnit.id == uuid.UUID(document_unit_id))
+        select(DocumentUnit)
+        .options(
+            selectinload(DocumentUnit.document_type),
+            selectinload(DocumentUnit.entities),
+            selectinload(DocumentUnit.topic_assignments).selectinload(DocumentUnitTopicAssignment.topic),
+            selectinload(DocumentUnit.proposal).selectinload(TopicProposal.matched_topic),
+            selectinload(DocumentUnit.scan_unit).selectinload(ScanUnit.document),
+        )
+        .where(DocumentUnit.id == uuid.UUID(document_unit_id))
     )
     doc_unit = result.scalar_one_or_none()
     if not doc_unit:
@@ -427,32 +482,91 @@ def review_document_unit(
         doc_unit.title = update.title
     
     db.commit()
-    
-    return DocumentUnitResponse(
-        id=str(doc_unit.id),
-        scan_unit_id=str(doc_unit.scan_unit_id),
-        ordinal=doc_unit.ordinal,
-        start_page=doc_unit.start_page,
-        end_page=doc_unit.end_page,
-        title=doc_unit.title,
-        document_type_code=doc_unit.document_type.code if doc_unit.document_type else None,
-        document_type_name=doc_unit.document_type.name if doc_unit.document_type else None,
-        document_type_confidence=doc_unit.document_type_confidence,
-        segmentation_confidence=doc_unit.segmentation_confidence,
-        extracted_summary=doc_unit.extracted_summary,
-        review_status=doc_unit.review_status,
-        entities=[],
-        topic_assignments=[],
-        proposal=None,
-        created_at=doc_unit.created_at,
-        updated_at=doc_unit.updated_at,
+
+    return DocumentUnitResponse(**_serialize_document_unit(doc_unit))
+
+
+@router.post("/document-units/{document_unit_id}/topic-assignments", response_model=DocumentUnitResponse)
+def add_document_unit_topic_assignment(
+    document_unit_id: str,
+    payload: TopicAssignmentUpsert,
+    db: Session = Depends(get_db_session),
+):
+    result = db.execute(
+        select(DocumentUnit)
+        .options(
+            selectinload(DocumentUnit.document_type),
+            selectinload(DocumentUnit.entities),
+            selectinload(DocumentUnit.topic_assignments).selectinload(DocumentUnitTopicAssignment.topic),
+            selectinload(DocumentUnit.proposal).selectinload(TopicProposal.matched_topic),
+            selectinload(DocumentUnit.scan_unit).selectinload(ScanUnit.document),
+        )
+        .where(DocumentUnit.id == uuid.UUID(document_unit_id))
     )
+    doc_unit = result.scalar_one_or_none()
+    if doc_unit is None:
+        raise HTTPException(status_code=404, detail="Document unit not found")
+
+    topic: Topic | None = None
+    if payload.topic_id:
+        topic = db.execute(select(Topic).where(Topic.id == uuid.UUID(payload.topic_id))).scalar_one_or_none()
+        if topic is None:
+            raise HTTPException(status_code=404, detail="Topic not found")
+    elif payload.create_topic is not None:
+        topic = _get_or_create_topic_from_payload(payload.create_topic, db)
+    else:
+        raise HTTPException(status_code=400, detail="Either topic_id or create_topic is required")
+
+    _assign_topic_to_document_unit(
+        doc_unit,
+        topic,
+        payload.assignment_role,
+        db,
+        confidence=payload.confidence,
+        rationale=payload.rationale,
+    )
+    doc_unit.review_status = ReviewStatus.HUMAN_REVIEWED.value
+    db.commit()
+    db.refresh(doc_unit)
+    return DocumentUnitResponse(**_serialize_document_unit(doc_unit))
+
+
+@router.delete("/document-units/{document_unit_id}/topic-assignments/{assignment_id}", response_model=DocumentUnitResponse)
+def delete_document_unit_topic_assignment(
+    document_unit_id: str,
+    assignment_id: str,
+    db: Session = Depends(get_db_session),
+):
+    result = db.execute(
+        select(DocumentUnit)
+        .options(
+            selectinload(DocumentUnit.document_type),
+            selectinload(DocumentUnit.entities),
+            selectinload(DocumentUnit.topic_assignments).selectinload(DocumentUnitTopicAssignment.topic),
+            selectinload(DocumentUnit.proposal).selectinload(TopicProposal.matched_topic),
+            selectinload(DocumentUnit.scan_unit).selectinload(ScanUnit.document),
+        )
+        .where(DocumentUnit.id == uuid.UUID(document_unit_id))
+    )
+    doc_unit = result.scalar_one_or_none()
+    if doc_unit is None:
+        raise HTTPException(status_code=404, detail="Document unit not found")
+
+    assignment = next((item for item in doc_unit.topic_assignments if str(item.id) == assignment_id), None)
+    if assignment is None:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+    db.delete(assignment)
+    doc_unit.review_status = ReviewStatus.HUMAN_REVIEWED.value
+    db.commit()
+    db.refresh(doc_unit)
+    return DocumentUnitResponse(**_serialize_document_unit(doc_unit))
 
 
 # Topics
 @router.get("/topics", response_model=list[TopicSummaryResponse])
 def list_topics(
     include_inactive: bool = False,
+    topic_kind: str | None = None,
     db: Session = Depends(get_db_session),
 ):
     """List topics with aggregate counts for knowledge-base browsing."""
@@ -469,6 +583,8 @@ def list_topics(
     )
     if not include_inactive:
         query = query.where(Topic.is_active.is_(True))
+    if topic_kind:
+        query = query.where(Topic.topic_kind == topic_kind)
 
     topics = db.execute(query).scalars().unique().all()
     summaries = [_serialize_topic_summary(topic) for topic in topics]
@@ -515,15 +631,7 @@ def get_topic(topic_id: str, db: Session = Depends(get_db_session)):
 @router.post("/topics", response_model=TopicResponse, status_code=status.HTTP_201_CREATED)
 def create_topic(data: TopicCreate, db: Session = Depends(get_db_session)):
     """Create a new topic."""
-    topic = Topic(
-        slug=data.slug,
-        title=data.title,
-        topic_class=data.topic_class,
-        description=data.description,
-        canonical=True,
-        is_active=True,
-    )
-    db.add(topic)
+    topic = _get_or_create_topic_from_payload(data, db)
     db.commit()
     
     return TopicResponse(
@@ -531,6 +639,7 @@ def create_topic(data: TopicCreate, db: Session = Depends(get_db_session)):
         slug=topic.slug,
         title=topic.title,
         topic_class=topic.topic_class,
+        topic_kind=topic.topic_kind,
         description=topic.description,
         canonical=topic.canonical,
         is_active=topic.is_active,
@@ -583,15 +692,21 @@ def list_topic_proposals(
     return [TopicProposalResponse(**_serialize_topic_proposal(p)) for p in proposals]
 
 
-@router.post("/topic-proposals/{proposal_id}/approve", response_model=TopicResponse)
-def approve_topic_proposal(proposal_id: str, db: Session = Depends(get_db_session)):
-    """Approve a topic proposal and create the topic."""
+@router.post("/topic-proposals/{proposal_id}/approve", response_model=DocumentUnitResponse)
+def approve_topic_proposal(
+    proposal_id: str,
+    resolution: TopicProposalResolution | None = None,
+    db: Session = Depends(get_db_session),
+):
+    """Resolve a topic proposal by creating or merging topics and assignments."""
     result = db.execute(
         select(TopicProposal)
         .options(
             selectinload(TopicProposal.matched_topic),
-            selectinload(TopicProposal.source_document_unit).selectinload(DocumentUnit.topic_assignments),
-            selectinload(TopicProposal.source_document_unit).selectinload(DocumentUnit.scan_unit),
+            selectinload(TopicProposal.source_document_unit).selectinload(DocumentUnit.topic_assignments).selectinload(DocumentUnitTopicAssignment.topic),
+            selectinload(TopicProposal.source_document_unit).selectinload(DocumentUnit.document_type),
+            selectinload(TopicProposal.source_document_unit).selectinload(DocumentUnit.entities),
+            selectinload(TopicProposal.source_document_unit).selectinload(DocumentUnit.scan_unit).selectinload(ScanUnit.document),
         )
         .where(TopicProposal.id == uuid.UUID(proposal_id))
     )
@@ -602,67 +717,72 @@ def approve_topic_proposal(proposal_id: str, db: Session = Depends(get_db_sessio
     if proposal.proposal_status != "proposed":
         raise HTTPException(status_code=409, detail="Only pending proposals can be approved")
 
-    topic = proposal.matched_topic
-    if topic is None:
-        topic = Topic(
-            slug=proposal.proposed_slug,
-            title=proposal.proposed_title,
-            topic_class=proposal.topic_class,
-            description=proposal.description,
-            canonical=True,
-            is_active=True,
+    if resolution is None:
+        resolution = TopicProposalResolution(
+            action="merge_into_existing" if proposal.matched_existing_topic_id else "approve_new_topic",
+            assignment_role="subject",
         )
-        db.add(topic)
-        db.flush()
-    else:
-        topic.slug = proposal.proposed_slug
-        topic.title = proposal.proposed_title
-        topic.topic_class = proposal.topic_class
-        topic.description = proposal.description
+
+    if resolution.action in {"merge_into_existing", "add_secondary_topic"}:
+        target_topic_id = resolution.target_topic_id or (
+            str(proposal.matched_existing_topic_id) if proposal.matched_existing_topic_id else None
+        )
+        if target_topic_id is None:
+            raise HTTPException(status_code=400, detail="target_topic_id is required")
+        topic = db.execute(select(Topic).where(Topic.id == uuid.UUID(target_topic_id))).scalar_one_or_none()
+        if topic is None:
+            raise HTTPException(status_code=404, detail="Target topic not found")
         topic.canonical = True
         topic.is_active = True
         topic.updated_at = _utcnow()
+    else:
+        create_topic_payload = resolution.create_topic or TopicCreate(
+            slug=proposal.proposed_slug,
+            title=proposal.proposed_title,
+            topic_class=proposal.topic_class,
+            topic_kind=proposal.proposed_topic_kind,
+            description=proposal.description,
+            aliases=[],
+        )
+        topic = _get_or_create_topic_from_payload(create_topic_payload, db)
 
     if proposal.source_document_unit is not None:
-        matching_assignments = [
-            assignment
-            for assignment in proposal.source_document_unit.topic_assignments
-            if assignment.topic_id == topic.id
-        ]
-        if matching_assignments:
-            primary_assignment = matching_assignments[0]
-            primary_assignment.assignment_role = "primary"
-            primary_assignment.confidence = proposal.confidence
-            primary_assignment.rationale = proposal.rationale
-        else:
+        if resolution.action == "merge_into_existing":
             provisional_assignments = [
                 assignment
                 for assignment in proposal.source_document_unit.topic_assignments
-                if assignment.assignment_role == "primary"
-                and (
-                    assignment.topic_id == proposal.matched_existing_topic_id
-                    or assignment.topic is None
-                    or not assignment.topic.is_active
-                    or not assignment.topic.canonical
+                if assignment.topic_id == proposal.matched_existing_topic_id
+                or (
+                    assignment.assignment_role == "primary"
+                    and (assignment.topic is None or not assignment.topic.is_active or not assignment.topic.canonical)
                 )
             ]
             if provisional_assignments:
                 primary_assignment = provisional_assignments[0]
                 primary_assignment.topic_id = topic.id
+                primary_assignment.assignment_role = resolution.assignment_role
                 primary_assignment.confidence = proposal.confidence
                 primary_assignment.rationale = proposal.rationale
                 for duplicate_assignment in provisional_assignments[1:]:
                     db.delete(duplicate_assignment)
             else:
-                db.add(
-                    DocumentUnitTopicAssignment(
-                        document_unit_id=proposal.source_document_unit.id,
-                        topic_id=topic.id,
-                        assignment_role="primary",
-                        confidence=proposal.confidence,
-                        rationale=proposal.rationale,
-                    )
+                _assign_topic_to_document_unit(
+                    proposal.source_document_unit,
+                    topic,
+                    resolution.assignment_role,
+                    db,
+                    confidence=proposal.confidence,
+                    rationale=proposal.rationale,
                 )
+        else:
+            _assign_topic_to_document_unit(
+                proposal.source_document_unit,
+                topic,
+                resolution.assignment_role,
+                db,
+                confidence=proposal.confidence,
+                rationale=proposal.rationale,
+            )
         proposal.source_document_unit.review_status = ReviewStatus.HUMAN_REVIEWED.value
 
     proposal.proposal_status = "approved"
@@ -670,18 +790,10 @@ def approve_topic_proposal(proposal_id: str, db: Session = Depends(get_db_sessio
     proposal.reviewed_at = _utcnow()
 
     db.commit()
-
-    return TopicResponse(
-        id=str(topic.id),
-        slug=topic.slug,
-        title=topic.title,
-        topic_class=topic.topic_class,
-        description=topic.description,
-        canonical=topic.canonical,
-        is_active=topic.is_active,
-        created_at=topic.created_at,
-        updated_at=topic.updated_at,
-    )
+    if proposal.source_document_unit is None:
+        raise HTTPException(status_code=409, detail="Proposal has no source document unit")
+    db.refresh(proposal.source_document_unit)
+    return DocumentUnitResponse(**_serialize_document_unit(proposal.source_document_unit))
 
 
 @router.post("/topic-proposals/{proposal_id}/reject", response_model=TopicProposalResponse)

@@ -9,7 +9,11 @@ import type {
   KnowledgeTopicSummary,
   KnowledgeTopicDetail,
   KnowledgeConsolidationResult,
+  KnowledgeDocumentUnit,
   KnowledgeTopicProposal,
+  TopicAssignmentUpsertPayload,
+  TopicCreatePayload,
+  TopicProposalResolutionPayload,
 } from '../types';
 
 const API_BASE = '/api';
@@ -52,8 +56,13 @@ export async function getDocumentKnowledge(documentId: string): Promise<Document
   return handleResponse<DocumentKnowledge>(response);
 }
 
-export async function getKnowledgeTopics(includeInactive = false): Promise<KnowledgeTopicSummary[]> {
-  const response = await fetch(`${API_BASE}/knowledge/topics?include_inactive=${includeInactive}`);
+export async function getKnowledgeTopics(includeInactive = false, topicKind?: string): Promise<KnowledgeTopicSummary[]> {
+  const params = new URLSearchParams();
+  params.set('include_inactive', String(includeInactive));
+  if (topicKind) {
+    params.set('topic_kind', topicKind);
+  }
+  const response = await fetch(`${API_BASE}/knowledge/topics?${params.toString()}`);
   return handleResponse<KnowledgeTopicSummary[]>(response);
 }
 
@@ -136,16 +145,56 @@ export async function getTopicProposals(includeConsolidated = false): Promise<Kn
   return handleResponse<KnowledgeTopicProposal[]>(response);
 }
 
-export async function approveTopicProposal(proposalId: string): Promise<KnowledgeTopicSummary> {
-  const response = await fetch(`${API_BASE}/knowledge/topic-proposals/${proposalId}/approve`, {
-    method: 'POST',
-  });
-  return handleResponse<KnowledgeTopicSummary>(response);
-}
-
 export async function rejectTopicProposal(proposalId: string): Promise<KnowledgeTopicProposal> {
   const response = await fetch(`${API_BASE}/knowledge/topic-proposals/${proposalId}/reject`, {
     method: 'POST',
   });
   return handleResponse<KnowledgeTopicProposal>(response);
+}
+
+export async function resolveTopicProposal(
+  proposalId: string,
+  payload: TopicProposalResolutionPayload,
+): Promise<KnowledgeDocumentUnit | KnowledgeTopicProposal> {
+  if (payload.action === 'reject') {
+    return rejectTopicProposal(proposalId);
+  }
+  const response = await fetch(`${API_BASE}/knowledge/topic-proposals/${proposalId}/approve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return handleResponse<KnowledgeDocumentUnit>(response);
+}
+
+export async function createKnowledgeTopic(payload: TopicCreatePayload): Promise<KnowledgeTopicSummary> {
+  const response = await fetch(`${API_BASE}/knowledge/topics`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return handleResponse<KnowledgeTopicSummary>(response);
+}
+
+export async function addDocumentUnitTopicAssignment(
+  documentUnitId: string,
+  payload: TopicAssignmentUpsertPayload,
+): Promise<KnowledgeDocumentUnit> {
+  const response = await fetch(`${API_BASE}/knowledge/document-units/${documentUnitId}/topic-assignments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return handleResponse<KnowledgeDocumentUnit>(response);
+}
+
+export async function deleteDocumentUnitTopicAssignment(
+  documentUnitId: string,
+  assignmentId: string,
+): Promise<KnowledgeDocumentUnit> {
+  const response = await fetch(
+    `${API_BASE}/knowledge/document-units/${documentUnitId}/topic-assignments/${assignmentId}`,
+    { method: 'DELETE' },
+  );
+  return handleResponse<KnowledgeDocumentUnit>(response);
 }

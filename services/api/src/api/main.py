@@ -29,7 +29,8 @@ from common.application.repositories import (
 )
 from common.application.services import DocumentService, JobService, persist_upload_to_temp
 from common.config import Settings, get_settings
-from common.db.session import get_db_session
+from common.db.schema import ensure_knowledge_schema
+from common.db.session import engine, get_db_session
 from common.domain.enums import SourceType
 from common.domain.exceptions import NotFoundError, ValidationError
 from common.logging import configure_logging
@@ -40,6 +41,11 @@ configure_logging(get_settings().log_level)
 
 app = FastAPI(title="megadoc api", version="0.1.0")
 app.add_middleware(RequestContextMiddleware)
+
+
+@app.on_event("startup")
+def ensure_database_schema() -> None:
+    ensure_knowledge_schema(engine)
 
 # Include routers
 app.include_router(knowledge.router)

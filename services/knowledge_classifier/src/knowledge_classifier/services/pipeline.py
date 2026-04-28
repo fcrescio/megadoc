@@ -387,10 +387,11 @@ class KnowledgePipelineService:
     ):
         """Create topic assignments from decision."""
         for topic_id, role in zip(decision.topic_ids, decision.assignment_roles):
+            normalized_role = self._normalize_assignment_role(role)
             assignment = DBDocumentUnitTopicAssignment(
                 document_unit_id=doc_unit.id,
                 topic_id=uuid.UUID(topic_id),
-                assignment_role=role,
+                assignment_role=normalized_role,
                 confidence=decision.confidence,
                 rationale=decision.rationale,
             )
@@ -409,23 +410,31 @@ class KnowledgePipelineService:
 
         proposed_slug = decision.proposed_topic.get("proposed_slug", "unknown")
         proposed_title = decision.proposed_topic.get("proposed_title", "Unknown")
+        proposed_topic_kind = self._infer_topic_kind(
+            decision.proposed_topic.get("topic_kind"),
+            decision.proposed_topic.get("topic_class", "other"),
+        )
         provisional_topic = self._find_topic_by_slug(proposed_slug)
         if provisional_topic is None:
             provisional_topic = DBTopic(
                 slug=proposed_slug,
                 title=proposed_title,
                 topic_class=decision.proposed_topic.get("topic_class", "other"),
+                topic_kind=proposed_topic_kind,
                 description=decision.proposed_topic.get("description"),
                 canonical=False,
                 is_active=False,
             )
             self.db.add(provisional_topic)
             self.db.flush()
+        else:
+            provisional_topic.topic_kind = provisional_topic.topic_kind or proposed_topic_kind
 
         proposal = TopicProposal(
             proposed_slug=proposed_slug,
             proposed_title=proposed_title,
             topic_class=decision.proposed_topic.get("topic_class", "other"),
+            proposed_topic_kind=proposed_topic_kind,
             description=decision.proposed_topic.get("description"),
             proposal_status=TopicProposalStatus.PROPOSED.value,
             source_document_unit_id=doc_unit.id,
@@ -437,12 +446,44 @@ class KnowledgePipelineService:
         assignment = DBDocumentUnitTopicAssignment(
             document_unit_id=doc_unit.id,
             topic_id=provisional_topic.id,
-            assignment_role="primary",
+            assignment_role=self._default_assignment_role_for_topic_kind(proposed_topic_kind),
             confidence=decision.confidence,
             rationale=decision.rationale,
         )
         self.db.add(assignment)
         doc_unit.review_status = ReviewStatus.NEEDS_REVIEW.value
+
+    def _infer_topic_kind(self, topic_kind: str | None, topic_class: str) -> str:
+        if topic_kind:
+            return topic_kind
+        mapping = {
+            "vendor_relationship": "entity",
+            "financial_period": "family",
+            "meeting": "family",
+            "general_administration": "family",
+            "building_issue": "issue",
+            "case_file": "project",
+            "legal_matter": "issue",
+            "other": "context",
+        }
+        return mapping.get(topic_class, "entity")
+
+    def _default_assignment_role_for_topic_kind(self, topic_kind: str) -> str:
+        mapping = {
+            "entity": "subject",
+            "family": "document_family",
+            "issue": "case_or_issue",
+            "project": "case_or_issue",
+            "context": "person_or_org_context",
+        }
+        return mapping.get(topic_kind, "secondary")
+
+    def _normalize_assignment_role(self, role: str) -> str:
+        aliases = {
+            "primary": "subject",
+            "secondary": "document_family",
+        }
+        return aliases.get(role, role)
 
     def _extract_segment_text(
         self,

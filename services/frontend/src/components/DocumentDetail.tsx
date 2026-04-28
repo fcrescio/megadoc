@@ -1,13 +1,16 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import type { DocumentVersion, DocumentAsset, KnowledgeDocumentUnit } from '../types';
+import type { DocumentVersion, DocumentAsset, KnowledgeDocumentUnit, KnowledgeTopicSummary, TopicCreatePayload } from '../types';
 import {
   useDocument,
   useDocumentVersions,
   useDocumentOCR,
   useDocumentAssets,
   useDocumentKnowledge,
+  useKnowledgeTopics,
+  useAddDocumentUnitTopicAssignment,
+  useDeleteDocumentUnitTopicAssignment,
 } from '../hooks/useDocuments';
 import { downloadAsset, getDocumentDownloadUrl } from '../api/client';
 
@@ -15,6 +18,232 @@ interface Props {
   documentId: string;
   onBack: () => void;
   initialTab?: 'info' | 'pdf' | 'ocr' | 'knowledge' | 'versions' | 'assets';
+}
+
+const ASSIGNMENT_ROLES = [
+  { value: 'subject', label: 'Subject' },
+  { value: 'document_family', label: 'Document family' },
+  { value: 'case_or_issue', label: 'Case / issue' },
+  { value: 'person_or_org_context', label: 'Person / org context' },
+  { value: 'secondary', label: 'Secondary' },
+];
+
+const TOPIC_KINDS = ['entity', 'family', 'issue', 'project', 'context'];
+
+function slugify(value: string) {
+  return value
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 120);
+}
+
+function TopicAssignmentManager({
+  unit,
+  topics,
+}: {
+  unit: KnowledgeDocumentUnit;
+  topics: KnowledgeTopicSummary[];
+}) {
+  const addAssignment = useAddDocumentUnitTopicAssignment();
+  const deleteAssignment = useDeleteDocumentUnitTopicAssignment();
+  const [mode, setMode] = useState<'existing' | 'new'>('existing');
+  const [assignmentRole, setAssignmentRole] = useState('document_family');
+  const [topicSearch, setTopicSearch] = useState('');
+  const [selectedTopicId, setSelectedTopicId] = useState('');
+  const [newTitle, setNewTitle] = useState(unit.proposal?.proposed_title ?? unit.title ?? '');
+  const [newSlug, setNewSlug] = useState(unit.proposal?.proposed_slug ?? slugify(unit.title ?? ''));
+  const [newClass, setNewClass] = useState(unit.proposal?.topic_class ?? 'other');
+  const [newKind, setNewKind] = useState(unit.proposal?.proposed_topic_kind ?? 'entity');
+  const [description, setDescription] = useState(unit.extracted_summary ?? '');
+
+  const filteredTopics = useMemo(() => {
+    const query = topicSearch.trim().toLowerCase();
+    const source = topics.filter((topic) => topic.is_active);
+    if (!query) {
+      return source.slice(0, 6);
+    }
+    return source
+      .filter((topic: KnowledgeTopicSummary) =>
+        [topic.title, topic.slug, topic.topic_class, topic.topic_kind].join(' ').toLowerCase().includes(query),
+      )
+      .slice(0, 6);
+  }, [topicSearch, topics]);
+
+  const handleAdd = () => {
+    if (mode === 'existing') {
+      if (!selectedTopicId) {
+        return;
+      }
+      addAssignment.mutate({
+        documentUnitId: unit.id,
+        payload: {
+          topic_id: selectedTopicId,
+          assignment_role: assignmentRole,
+          rationale: 'Human review assignment',
+        },
+      });
+      return;
+    }
+    const createTopic: TopicCreatePayload = {
+      slug: newSlug || slugify(newTitle),
+      title: newTitle,
+      topic_class: newClass,
+      topic_kind: newKind,
+      description,
+      aliases: [],
+    };
+    addAssignment.mutate({
+      documentUnitId: unit.id,
+      payload: {
+        assignment_role: assignmentRole,
+        rationale: 'Human-created topic assignment',
+        create_topic: createTopic,
+      },
+    });
+  };
+
+  return (
+    <div className="border rounded-lg p-3 bg-slate-50 space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          onClick={() => setMode('existing')}
+          className={`px-2 py-1 rounded-full text-xs ${mode === 'existing' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 border'}`}
+        >
+          Add existing topic
+        </button>
+        <button
+          onClick={() => setMode('new')}
+          className={`px-2 py-1 rounded-full text-xs ${mode === 'new' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 border'}`}
+        >
+          Create manual topic
+        </button>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2">
+        <div>
+          <label className="text-xs uppercase tracking-wide text-gray-500">Assignment role</label>
+          <select
+            value={assignmentRole}
+            onChange={(event) => setAssignmentRole(event.target.value)}
+            className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+          >
+            {ASSIGNMENT_ROLES.map((role) => (
+              <option key={role.value} value={role.value}>
+                {role.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {mode === 'existing' ? (
+        <div className="space-y-2">
+          <input
+            value={topicSearch}
+            onChange={(event) => setTopicSearch(event.target.value)}
+            placeholder="Search existing topics"
+            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+          />
+          <div className="grid gap-2 max-h-40 overflow-y-auto">
+            {filteredTopics.map((topic) => (
+              <button
+                key={topic.id}
+                onClick={() => {
+                  setSelectedTopicId(topic.id);
+                  setTopicSearch(topic.title);
+                }}
+                className={`text-left rounded-md border px-3 py-2 text-sm ${
+                  selectedTopicId === topic.id ? 'border-blue-500 bg-blue-50' : 'border-gray-200 bg-white'
+                }`}
+              >
+                <div className="font-medium">{topic.title}</div>
+                <div className="text-xs text-gray-500">
+                  {topic.topic_kind} · {topic.topic_class}
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div className="grid gap-3 md:grid-cols-2">
+          <div>
+            <label className="text-xs uppercase tracking-wide text-gray-500">Title</label>
+            <input
+              value={newTitle}
+              onChange={(event) => {
+                setNewTitle(event.target.value);
+                setNewSlug(slugify(event.target.value));
+              }}
+              className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+            />
+          </div>
+          <div>
+            <label className="text-xs uppercase tracking-wide text-gray-500">Slug</label>
+            <input
+              value={newSlug}
+              onChange={(event) => setNewSlug(slugify(event.target.value))}
+              className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+            />
+          </div>
+          <div>
+            <label className="text-xs uppercase tracking-wide text-gray-500">Topic class</label>
+            <input
+              value={newClass}
+              onChange={(event) => setNewClass(event.target.value)}
+              className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+            />
+          </div>
+          <div>
+            <label className="text-xs uppercase tracking-wide text-gray-500">Topic kind</label>
+            <select
+              value={newKind}
+              onChange={(event) => setNewKind(event.target.value)}
+              className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+            >
+              {TOPIC_KINDS.map((kind) => (
+                <option key={kind} value={kind}>
+                  {kind}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="md:col-span-2">
+            <label className="text-xs uppercase tracking-wide text-gray-500">Description</label>
+            <textarea
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm min-h-[84px]"
+            />
+          </div>
+        </div>
+      )}
+
+      <button
+        onClick={handleAdd}
+        disabled={addAssignment.isPending || deleteAssignment.isPending}
+        className="px-3 py-2 rounded-md bg-blue-600 text-white text-sm hover:bg-blue-700 disabled:opacity-50"
+      >
+        Add assignment
+      </button>
+
+      {unit.topic_assignments.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {unit.topic_assignments.map((assignment) => (
+            <button
+              key={assignment.id}
+              onClick={() => deleteAssignment.mutate({ documentUnitId: unit.id, assignmentId: assignment.id })}
+              className="px-2 py-1 rounded-full bg-indigo-50 text-indigo-700 text-xs border border-indigo-100"
+              title="Remove assignment"
+            >
+              {assignment.assignment_role}: {assignment.topic_title ?? assignment.topic_slug} ×
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function DocumentDetail({ documentId, onBack, initialTab = 'info' }: Props) {
@@ -26,6 +255,7 @@ function DocumentDetail({ documentId, onBack, initialTab = 'info' }: Props) {
   const { data: ocrResult, isLoading: ocrLoading } = useDocumentOCR(documentId);
   const { data: knowledge, isLoading: knowledgeLoading } = useDocumentKnowledge(documentId);
   const { data: assets } = useDocumentAssets(documentId);
+  const { data: knowledgeTopics = [] } = useKnowledgeTopics(true);
 
   useEffect(() => {
     setActiveTab(initialTab);
@@ -261,7 +491,7 @@ function DocumentDetail({ documentId, onBack, initialTab = 'info' }: Props) {
                                       title={assignment.rationale ?? undefined}
                                       className="px-2 py-1 rounded-full bg-indigo-50 text-indigo-700 text-xs"
                                     >
-                                      {assignment.topic_title ?? assignment.topic_slug}
+                                      {assignment.assignment_role}: {assignment.topic_title ?? assignment.topic_slug}
                                       {assignment.confidence !== null &&
                                         ` · ${(assignment.confidence * 100).toFixed(0)}%`}
                                     </span>
@@ -280,6 +510,13 @@ function DocumentDetail({ documentId, onBack, initialTab = 'info' }: Props) {
                                   </span>
                                 </div>
                               )}
+                            </div>
+
+                            <div>
+                              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
+                                Review actions
+                              </p>
+                              <TopicAssignmentManager unit={unit} topics={knowledgeTopics} />
                             </div>
 
                             <div>
