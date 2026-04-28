@@ -24,50 +24,41 @@ L'obiettivo non è "fare OCR". L'OCR è solo il primo strato affidabile. Lo scop
 - consolidamento progressivo
 - intervento umano come parte nativa del sistema
 
-## Review Architetturale
+## Struttura Architetturale
 
-### Cosa funziona bene
+### Caratteristiche principali
 
-1. L'architettura è stratificata bene.
-   Il sistema non chiede a un solo modello di risolvere ingest, OCR, semantica, clustering e review in un unico passaggio. Questo riduce i fallimenti opachi e permette miglioramenti locali.
+1. Il sistema è stratificato.
+   Ingestione, OCR, segmentazione, classificazione, estrazione entità, assegnazione topic, consolidamento e review sono stadi distinti.
 
-2. Il dato sorgente viene preservato.
-   PDF originale, versioni, OCR e derivati restano separati dalla knowledge. Questo è corretto: gli strati semantici possono cambiare senza distruggere la prova documentale.
+2. Il dato sorgente è preservato.
+   PDF originale, versioni, OCR e knowledge restano separati. Gli strati semantici possono quindi evolvere senza alterare la prova documentale.
 
-3. Il progetto ha preso la direzione giusta verso il human-in-the-loop.
-   Topic proposals, multi-assign, canonical entities, review queue e commenti sul manuale sono tutti segnali di un sistema che non pretende un'automazione perfetta.
+3. Il modello di conoscenza è multi-asse.
+   Un documento può essere segmentato in più unità e ogni unità può avere più assegnazioni topic con ruoli distinti.
 
-4. La knowledge è navigabile da più assi.
-   Documento, OCR, topic, entità, canonical entities e ora search convivono nello stesso frontend. Questo è un vantaggio forte rispetto a pipeline che producono solo JSON o solo embedding.
+4. La navigazione è unificata.
+   Documento, PDF, OCR, knowledge, topic, entità e search sono esposti nello stesso frontend.
 
-5. La pipeline OCR è ormai realmente modulare.
-   Il sistema può usare backend diversi, includere preflight, normalizzazione orientamento, fallback e refinement.
+5. Il sistema è orientato al human-in-the-loop.
+   Proposal, topic manuali, multi-assign, canonical entities e commenti al manuale fanno parte del modello operativo, non di un percorso eccezionale.
 
-### Debolezze strutturali attuali
+### Vincoli e rischi aperti
 
 1. L'evoluzione schema è ancora in parte applicativa.
-   Oggi diverse tabelle e colonne vengono create o adattate allo startup con bootstrap SQL. È pragmatico, ma nel medio termine rende più fragile il governo del dato rispetto a vere migration versionate.
+   Diverse tabelle e colonne vengono create o adattate allo startup con bootstrap SQL. Nel medio termine converrà spostare più logica su migration versionate.
 
-2. Il modello knowledge è più ricco del consolidamento attuale.
-   Ora il sistema supporta topic multipli con ruoli diversi, ma buona parte della logica di consolidamento nasce ancora dal mondo precedente "un documento -> un topic principale". Serve evolvere il consolidamento in ottica grafo.
+2. Il consolidamento semantico è ancora parziale.
+   Il modello supporta relazioni più ricche di quelle sfruttate oggi dal consolidamento automatico. Il passo successivo è una logica più esplicitamente orientata a grafo.
 
-3. L'indice entità è utile ma ancora giovane.
-   L'estrazione per documento funziona, ma la canonicalizzazione globale è ancora un primo layer. Mancano ancora policy forti su merge, split, provenance e riuso nel routing semantico.
+3. La canonicalizzazione delle entità è ancora iniziale.
+   L'estrazione locale è buona, ma la fusione globale di varianti, alias e omonimie deve ancora maturare.
 
-4. La coordinazione tra worker e modelli è volutamente conservativa.
-   La scelta di serializzare alcune richieste al modello evita collisioni, ma riduce throughput. È accettabile in questa fase, ma andrà governata meglio se il corpus cresce.
+4. Il runtime LLM è seriale per vincolo infrastrutturale.
+   Il server di inferenza carica un modello per volta; per questo la pipeline deve orchestrare in sequenza OCR e knowledge.
 
-5. Il frontend è ormai ricco, ma la governance della review è ancora implicita.
-   Ci sono già ottime superfici di navigazione, ma mancano ancora workflow espliciti di priorità, ownership, auditing e risoluzione dei conflitti tra review diverse.
-
-### Giudizio complessivo
-
-L'architettura è buona e ha preso una direzione corretta: non è un demo OCR, ma un sistema di costruzione progressiva di knowledge base. Il rischio principale non è tecnico di base; è di modellazione e governance. Il prossimo salto di qualità non dipende solo da modelli migliori, ma da:
-
-- migliore struttura delle relazioni
-- migliore consolidamento
-- maggiore intervento umano guidato
-- regole più chiare su canonicalizzazione e review
+5. La governance della review è ancora leggera.
+   Esistono le superfici di review, ma mancano ancora ownership, stati di risoluzione articolati e audit più dettagliato.
 
 ## Principi Guida
 
@@ -127,7 +118,7 @@ Deve poter:
 - canonizzare entità
 - commentare il manuale
 
-### 5. Progettare per documenti brutti
+### 5. Progettare per documenti difficili
 
 La pipeline deve reggere:
 
@@ -149,7 +140,7 @@ Megadoc è composto da questi servizi principali:
 - `worker`: worker OCR / ingestion
 - `knowledge_worker`: worker semantico
 - `postgres`: sistema di record relazionale
-- `redis`: broker per i job
+- `redis`: broker Celery e coda dei job
 - `minio`: object storage
 
 Componenti ausiliari:
