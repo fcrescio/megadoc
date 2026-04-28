@@ -1,6 +1,7 @@
 """Knowledge classifier API router."""
 
 import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -33,11 +34,16 @@ from knowledge_classifier.schemas import (
     DocumentTypeResponse,
     KnowledgeJobResponse,
     ReviewUpdate,
+    ReviewStatus,
 )
 from knowledge_classifier.services.consolidation import KnowledgeBaseConsolidationService
 from knowledge_worker.dispatch import dispatch_scan_unit_processing
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 def _serialize_entity(entity: DocumentUnitEntity) -> dict[str, Any]:
@@ -69,6 +75,9 @@ def _serialize_topic_assignment(assignment: DocumentUnitTopicAssignment) -> dict
 def _serialize_topic_proposal(proposal: TopicProposal | None) -> dict[str, Any] | None:
     if proposal is None:
         return None
+    source_document_unit = proposal.source_document_unit
+    source_scan_unit = source_document_unit.scan_unit if source_document_unit else None
+    source_document = source_scan_unit.document if source_scan_unit else None
     return {
         "id": str(proposal.id),
         "proposed_slug": proposal.proposed_slug,
@@ -77,6 +86,12 @@ def _serialize_topic_proposal(proposal: TopicProposal | None) -> dict[str, Any] 
         "description": proposal.description,
         "proposal_status": proposal.proposal_status,
         "matched_existing_topic_id": str(proposal.matched_existing_topic_id) if proposal.matched_existing_topic_id else None,
+        "matched_existing_topic_title": proposal.matched_topic.title if proposal.matched_topic else None,
+        "source_document_unit_id": str(source_document_unit.id) if source_document_unit else None,
+        "source_document_id": str(source_document.id) if source_document else None,
+        "source_document_filename": source_document.original_filename if source_document else None,
+        "source_start_page": source_document_unit.start_page if source_document_unit else None,
+        "source_end_page": source_document_unit.end_page if source_document_unit else None,
         "confidence": proposal.confidence,
         "rationale": proposal.rationale,
         "created_at": proposal.created_at,
@@ -124,7 +139,7 @@ def _serialize_topic_summary(topic: Topic) -> TopicSummaryResponse:
         canonical=topic.canonical,
         is_active=topic.is_active,
         assignment_count=len(topic.assignments),
-        proposal_count=len(topic.proposals),
+        proposal_count=sum(1 for proposal in topic.proposals if proposal.proposal_status == "proposed"),
         related_document_count=len(related_document_ids),
         alias_count=len(topic.aliases),
         created_at=topic.created_at,
@@ -546,60 +561,116 @@ def run_consolidation_sync():
 
 # Topic Proposals
 @router.get("/topic-proposals", response_model=list[TopicProposalResponse])
-def list_topic_proposals(db: Session = Depends(get_db_session)):
+def list_topic_proposals(
+    include_consolidated: bool = False,
+    db: Session = Depends(get_db_session),
+):
     """List topic proposals that need review."""
+    statuses = ["proposed", "merged_into_existing"] if include_consolidated else ["proposed"]
     result = db.execute(
-        select(TopicProposal).where(
-            TopicProposal.proposal_status.in_(["proposed", "merged_into_existing"])
+        select(TopicProposal)
+        .options(
+            selectinload(TopicProposal.source_document_unit)
+            .selectinload(DocumentUnit.scan_unit)
+            .selectinload(ScanUnit.document),
+            selectinload(TopicProposal.matched_topic),
         )
+        .where(TopicProposal.proposal_status.in_(statuses))
+        .order_by(TopicProposal.created_at.desc())
     )
     proposals = result.scalars().all()
-    
-    return [
-        TopicProposalResponse(
-            id=str(p.id),
-            proposed_slug=p.proposed_slug,
-            proposed_title=p.proposed_title,
-            topic_class=p.topic_class,
-            description=p.description,
-            proposal_status=p.proposal_status,
-            confidence=p.confidence,
-            rationale=p.rationale,
-            created_at=p.created_at,
-            reviewed_at=p.reviewed_at,
-        )
-        for p in proposals
-    ]
+
+    return [TopicProposalResponse(**_serialize_topic_proposal(p)) for p in proposals]
 
 
 @router.post("/topic-proposals/{proposal_id}/approve", response_model=TopicResponse)
 def approve_topic_proposal(proposal_id: str, db: Session = Depends(get_db_session)):
     """Approve a topic proposal and create the topic."""
     result = db.execute(
-        select(TopicProposal).where(TopicProposal.id == uuid.UUID(proposal_id))
+        select(TopicProposal)
+        .options(
+            selectinload(TopicProposal.matched_topic),
+            selectinload(TopicProposal.source_document_unit).selectinload(DocumentUnit.topic_assignments),
+            selectinload(TopicProposal.source_document_unit).selectinload(DocumentUnit.scan_unit),
+        )
+        .where(TopicProposal.id == uuid.UUID(proposal_id))
     )
     proposal = result.scalar_one_or_none()
     if not proposal:
         raise HTTPException(status_code=404, detail="Proposal not found")
-    
-    # Create the topic
-    topic = Topic(
-        slug=proposal.proposed_slug,
-        title=proposal.proposed_title,
-        topic_class=proposal.topic_class,
-        description=proposal.description,
-        canonical=True,
-        is_active=True,
-    )
-    db.add(topic)
-    
-    # Update proposal
+
+    if proposal.proposal_status != "proposed":
+        raise HTTPException(status_code=409, detail="Only pending proposals can be approved")
+
+    topic = proposal.matched_topic
+    if topic is None:
+        topic = Topic(
+            slug=proposal.proposed_slug,
+            title=proposal.proposed_title,
+            topic_class=proposal.topic_class,
+            description=proposal.description,
+            canonical=True,
+            is_active=True,
+        )
+        db.add(topic)
+        db.flush()
+    else:
+        topic.slug = proposal.proposed_slug
+        topic.title = proposal.proposed_title
+        topic.topic_class = proposal.topic_class
+        topic.description = proposal.description
+        topic.canonical = True
+        topic.is_active = True
+        topic.updated_at = _utcnow()
+
+    if proposal.source_document_unit is not None:
+        matching_assignments = [
+            assignment
+            for assignment in proposal.source_document_unit.topic_assignments
+            if assignment.topic_id == topic.id
+        ]
+        if matching_assignments:
+            primary_assignment = matching_assignments[0]
+            primary_assignment.assignment_role = "primary"
+            primary_assignment.confidence = proposal.confidence
+            primary_assignment.rationale = proposal.rationale
+        else:
+            provisional_assignments = [
+                assignment
+                for assignment in proposal.source_document_unit.topic_assignments
+                if assignment.assignment_role == "primary"
+                and (
+                    assignment.topic_id == proposal.matched_existing_topic_id
+                    or assignment.topic is None
+                    or not assignment.topic.is_active
+                    or not assignment.topic.canonical
+                )
+            ]
+            if provisional_assignments:
+                primary_assignment = provisional_assignments[0]
+                primary_assignment.topic_id = topic.id
+                primary_assignment.confidence = proposal.confidence
+                primary_assignment.rationale = proposal.rationale
+                for duplicate_assignment in provisional_assignments[1:]:
+                    db.delete(duplicate_assignment)
+            else:
+                db.add(
+                    DocumentUnitTopicAssignment(
+                        document_unit_id=proposal.source_document_unit.id,
+                        topic_id=topic.id,
+                        assignment_role="primary",
+                        confidence=proposal.confidence,
+                        rationale=proposal.rationale,
+                    )
+                )
+        proposal.source_document_unit.review_status = ReviewStatus.HUMAN_REVIEWED.value
+
     proposal.proposal_status = "approved"
     proposal.matched_existing_topic_id = topic.id
-    proposal.reviewed_at = topic.created_at
-    
+    proposal.reviewed_at = _utcnow()
+
     db.commit()
-    
+
     return TopicResponse(
         id=str(topic.id),
         slug=topic.slug,
@@ -617,29 +688,54 @@ def approve_topic_proposal(proposal_id: str, db: Session = Depends(get_db_sessio
 def reject_topic_proposal(proposal_id: str, db: Session = Depends(get_db_session)):
     """Reject a topic proposal."""
     result = db.execute(
-        select(TopicProposal).where(TopicProposal.id == uuid.UUID(proposal_id))
+        select(TopicProposal)
+        .options(
+            selectinload(TopicProposal.matched_topic).selectinload(Topic.assignments),
+            selectinload(TopicProposal.source_document_unit).selectinload(DocumentUnit.topic_assignments),
+        )
+        .where(TopicProposal.id == uuid.UUID(proposal_id))
     )
     proposal = result.scalar_one_or_none()
     if not proposal:
         raise HTTPException(status_code=404, detail="Proposal not found")
-    
+
+    if proposal.proposal_status != "proposed":
+        raise HTTPException(status_code=409, detail="Only pending proposals can be rejected")
+
+    if proposal.source_document_unit is not None:
+        removable_assignments = [
+            assignment
+            for assignment in proposal.source_document_unit.topic_assignments
+            if assignment.topic_id == proposal.matched_existing_topic_id
+        ]
+        for assignment in removable_assignments:
+            db.delete(assignment)
+        proposal.source_document_unit.review_status = ReviewStatus.HUMAN_REVIEWED.value
+
+    provisional_topic = proposal.matched_topic
+    provisional_topic_id = provisional_topic.id if provisional_topic is not None else None
     proposal.proposal_status = "rejected"
-    proposal.reviewed_at = proposal.created_at  # Simplified
-    
+    proposal.reviewed_at = _utcnow()
+    db.flush()
+
+    if provisional_topic is not None and provisional_topic_id is not None:
+        has_assignments = db.execute(
+            select(DocumentUnitTopicAssignment).where(
+                DocumentUnitTopicAssignment.topic_id == provisional_topic_id
+            )
+        ).first() is not None
+        has_pending_proposals = db.execute(
+            select(TopicProposal).where(
+                TopicProposal.matched_existing_topic_id == provisional_topic_id,
+                TopicProposal.proposal_status == "proposed",
+            )
+        ).first() is not None
+        if not provisional_topic.is_active and not provisional_topic.canonical and not has_assignments and not has_pending_proposals:
+            db.delete(provisional_topic)
+
     db.commit()
-    
-    return TopicProposalResponse(
-        id=str(proposal.id),
-        proposed_slug=proposal.proposed_slug,
-        proposed_title=proposal.proposed_title,
-        topic_class=proposal.topic_class,
-        description=proposal.description,
-        proposal_status=proposal.proposal_status,
-        confidence=proposal.confidence,
-        rationale=proposal.rationale,
-        created_at=proposal.created_at,
-        reviewed_at=proposal.reviewed_at,
-    )
+
+    return TopicProposalResponse(**_serialize_topic_proposal(proposal))
 
 
 # Document Types

@@ -140,7 +140,7 @@ function KnowledgeBase({ onOpenDocument }: Props) {
             onClick={() => setShowProposals(true)}
             className="px-4 py-2 rounded-full bg-amber-400/15 text-amber-200 text-sm font-medium border border-amber-300/25 hover:bg-amber-400/20 flex items-center gap-2"
           >
-            Proposals
+            Pending proposals
             {proposals && proposals.length > 0 && (
               <span className="px-1.5 py-0.5 rounded-full bg-amber-400/25 text-amber-100 text-xs">
                 {proposals.length}

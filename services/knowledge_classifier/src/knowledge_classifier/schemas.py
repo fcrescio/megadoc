@@ -191,6 +191,13 @@ class TopicProposalResponse(BaseModel):
     topic_class: str
     description: Optional[str] = None
     proposal_status: str
+    matched_existing_topic_id: Optional[str] = None
+    matched_existing_topic_title: Optional[str] = None
+    source_document_unit_id: Optional[str] = None
+    source_document_id: Optional[str] = None
+    source_document_filename: Optional[str] = None
+    source_start_page: Optional[int] = None
+    source_end_page: Optional[int] = None
     confidence: Optional[float] = None
     rationale: Optional[str] = None
     created_at: datetime

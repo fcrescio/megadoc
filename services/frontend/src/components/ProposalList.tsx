@@ -10,7 +10,8 @@ interface Props {
 }
 
 function ProposalList({ onClose }: Props) {
-  const { data: proposals, isLoading, error } = useTopicProposals();
+  const [includeConsolidated, setIncludeConsolidated] = useState(false);
+  const { data: proposals, isLoading, error } = useTopicProposals(includeConsolidated);
   const approve = useApproveTopicProposal();
   const reject = useRejectTopicProposal();
 
@@ -60,20 +61,33 @@ function ProposalList({ onClose }: Props) {
         <div>
           <h3 className="text-lg font-semibold text-white">Topic Proposals</h3>
           <p className="text-sm text-slate-400">
-            Review and approve or reject proposed topics ({proposals?.length ?? 0})
+            Review only pending proposals. Consolidated items can be inspected separately.
           </p>
         </div>
-        <button
-          onClick={onClose}
-          className="px-3 py-1.5 rounded-full bg-white/10 text-slate-200 text-sm hover:bg-white/20"
-        >
-          Close
-        </button>
+        <div className="flex items-center gap-3">
+          <label className="text-sm text-slate-300 flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={includeConsolidated}
+              onChange={(event) => setIncludeConsolidated(event.target.checked)}
+              className="rounded border-white/20 bg-slate-900 text-cyan-400 focus:ring-cyan-400"
+            />
+            Show consolidated
+          </label>
+          <button
+            onClick={onClose}
+            className="px-3 py-1.5 rounded-full bg-white/10 text-slate-200 text-sm hover:bg-white/20"
+          >
+            Close
+          </button>
+        </div>
       </div>
 
       {proposals?.length === 0 ? (
         <div className="p-8 text-center bg-white/5 border border-white/10 rounded-2xl">
-          <p className="text-slate-400">No pending proposals.</p>
+          <p className="text-slate-400">
+            {includeConsolidated ? 'No proposals in this view.' : 'No pending proposals.'}
+          </p>
         </div>
       ) : (
         <div className="space-y-3">
@@ -89,6 +103,9 @@ function ProposalList({ onClose }: Props) {
                     <span className="px-2 py-0.5 rounded-full bg-cyan-400/10 text-cyan-200 text-xs border border-cyan-300/20">
                       {proposal.topic_class}
                     </span>
+                    <span className="px-2 py-0.5 rounded-full bg-white/10 text-slate-200 text-xs">
+                      {proposal.proposal_status}
+                    </span>
                     {proposal.confidence !== null && (
                       <span className="px-2 py-0.5 rounded-full bg-white/10 text-slate-200 text-xs">
                         {(proposal.confidence * 100).toFixed(0)}% confidence
@@ -96,6 +113,19 @@ function ProposalList({ onClose }: Props) {
                     )}
                   </div>
                   <p className="text-sm text-slate-400 mt-1">slug: {proposal.proposed_slug}</p>
+                  {proposal.matched_existing_topic_title && (
+                    <p className="text-sm text-slate-300 mt-2">
+                      Current matched topic: {proposal.matched_existing_topic_title}
+                    </p>
+                  )}
+                  {proposal.source_document_filename && (
+                    <p className="text-sm text-slate-300 mt-2">
+                      Source: {proposal.source_document_filename}
+                      {proposal.source_start_page !== null && proposal.source_end_page !== null
+                        ? ` · pages ${proposal.source_start_page}-${proposal.source_end_page}`
+                        : ''}
+                    </p>
+                  )}
                   {proposal.description && (
                     <p className="text-sm text-slate-300 mt-2">{proposal.description}</p>
                   )}
@@ -111,31 +141,42 @@ function ProposalList({ onClose }: Props) {
                 </div>
 
                 <div className="flex flex-col gap-2 shrink-0">
-                  <button
-                    onClick={() => handleApprove(proposal.id)}
-                    disabled={approve.isPending || reject.isPending}
-                    className="px-3 py-1.5 rounded-full bg-emerald-400/15 text-emerald-200 text-sm font-medium border border-emerald-300/25 hover:bg-emerald-400/25 disabled:opacity-50"
-                  >
-                    {approve.isPending && approve.variables === proposal.id ? 'Approving...' : 'Approve'}
-                  </button>
-                  {confirmId === proposal.id ? (
-                    <button
-                      onClick={() => {
-                        handleReject(proposal.id);
-                        setConfirmId(null);
-                      }}
-                      disabled={approve.isPending || reject.isPending}
-                      className="px-3 py-1.5 rounded-full bg-red-400/25 text-red-200 text-sm font-medium border border-red-300/35 hover:bg-red-400/35 disabled:opacity-50"
-                    >
-                      {reject.isPending && reject.variables === proposal.id ? 'Rejecting...' : 'Confirm Reject'}
-                    </button>
+                  {proposal.proposal_status === 'proposed' ? (
+                    <>
+                      <button
+                        onClick={() => handleApprove(proposal.id)}
+                        disabled={approve.isPending || reject.isPending}
+                        className="px-3 py-1.5 rounded-full bg-emerald-400/15 text-emerald-200 text-sm font-medium border border-emerald-300/25 hover:bg-emerald-400/25 disabled:opacity-50"
+                      >
+                        {approve.isPending && approve.variables === proposal.id ? 'Approving...' : 'Approve'}
+                      </button>
+                      {confirmId === proposal.id ? (
+                        <button
+                          onClick={() => {
+                            handleReject(proposal.id);
+                            setConfirmId(null);
+                          }}
+                          disabled={approve.isPending || reject.isPending}
+                          className="px-3 py-1.5 rounded-full bg-red-400/25 text-red-200 text-sm font-medium border border-red-300/35 hover:bg-red-400/35 disabled:opacity-50"
+                        >
+                          {reject.isPending && reject.variables === proposal.id ? 'Rejecting...' : 'Confirm Reject'}
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => handleConfirmReject(proposal.id)}
+                          disabled={approve.isPending || reject.isPending}
+                          className="px-3 py-1.5 rounded-full bg-red-400/10 text-red-200 text-sm font-medium border border-red-300/25 hover:bg-red-400/20 disabled:opacity-50"
+                        >
+                          Reject
+                        </button>
+                      )}
+                    </>
                   ) : (
                     <button
-                      onClick={() => handleConfirmReject(proposal.id)}
-                      disabled={approve.isPending || reject.isPending}
-                      className="px-3 py-1.5 rounded-full bg-red-400/10 text-red-200 text-sm font-medium border border-red-300/25 hover:bg-red-400/20 disabled:opacity-50"
+                      disabled
+                      className="px-3 py-1.5 rounded-full bg-white/10 text-slate-400 text-sm font-medium border border-white/10 cursor-not-allowed"
                     >
-                      Reject
+                      Already consolidated
                     </button>
                   )}
                 </div>

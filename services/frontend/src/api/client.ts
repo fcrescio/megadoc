@@ -129,8 +129,10 @@ export async function getJob(id: string): Promise<Job> {
   return handleResponse<Job>(response);
 }
 
-export async function getTopicProposals(): Promise<KnowledgeTopicProposal[]> {
-  const response = await fetch(`${API_BASE}/knowledge/topic-proposals`);
+export async function getTopicProposals(includeConsolidated = false): Promise<KnowledgeTopicProposal[]> {
+  const response = await fetch(
+    `${API_BASE}/knowledge/topic-proposals?include_consolidated=${includeConsolidated}`,
+  );
   return handleResponse<KnowledgeTopicProposal[]>(response);
 }
 

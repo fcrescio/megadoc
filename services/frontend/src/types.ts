@@ -96,6 +96,12 @@ export interface KnowledgeTopicProposal {
   description: string | null;
   proposal_status: string;
   matched_existing_topic_id: string | null;
+  matched_existing_topic_title: string | null;
+  source_document_unit_id: string | null;
+  source_document_id: string | null;
+  source_document_filename: string | null;
+  source_start_page: number | null;
+  source_end_page: number | null;
   confidence: number | null;
   rationale: string | null;
   created_at: string;

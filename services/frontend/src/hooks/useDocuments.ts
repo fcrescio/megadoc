@@ -114,10 +114,10 @@ export function useUploadDocument() {
   });
 }
 
-export function useTopicProposals() {
+export function useTopicProposals(includeConsolidated = false) {
   return useQuery<KnowledgeTopicProposal[]>({
-    queryKey: ['topic-proposals'],
-    queryFn: getTopicProposals,
+    queryKey: ['topic-proposals', includeConsolidated],
+    queryFn: () => getTopicProposals(includeConsolidated),
   });
 }
 
@@ -130,6 +130,7 @@ export function useApproveTopicProposal() {
       queryClient.invalidateQueries({ queryKey: ['topic-proposals'] });
       queryClient.invalidateQueries({ queryKey: ['knowledge-topics'] });
       queryClient.invalidateQueries({ queryKey: ['knowledge-topic'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge'] });
     },
   });
 }
@@ -141,6 +142,9 @@ export function useRejectTopicProposal() {
     mutationFn: (proposalId) => rejectTopicProposal(proposalId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['topic-proposals'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-topics'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-topic'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge'] });
     },
   });
 }
