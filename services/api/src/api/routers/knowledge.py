@@ -5,10 +5,11 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from common.db.models import (
+    Document,
     DocumentType,
     OCRResult,
     ScanUnit,
@@ -16,6 +17,7 @@ from common.db.models import (
     DocumentUnitEntity,
     DocumentUnitTopicAssignment,
     Topic,
+    TopicAlias,
     TopicProposal,
     KnowledgeJob,
 )
@@ -29,6 +31,9 @@ from knowledge_classifier.schemas import (
     TopicSummaryResponse,
     TopicDetailResponse,
     TopicRelatedDocumentResponse,
+    KnowledgeSearchResponse,
+    KnowledgeSearchTopicHit,
+    KnowledgeSearchDocumentHit,
     TopicCreate,
     TopicProposalResponse,
     DocumentTypeResponse,
@@ -193,6 +198,60 @@ def _serialize_topic_detail(topic: Topic) -> TopicDetailResponse:
         aliases=sorted({alias.alias for alias in topic.aliases}),
         related_documents=related_documents,
     )
+
+
+def _normalize_search_value(value: str | None) -> str:
+    return (value or "").strip().lower()
+
+
+def _topic_matched_fields(topic: Topic, query: str) -> list[str]:
+    matched_fields: list[str] = []
+    normalized_query = _normalize_search_value(query)
+    if not normalized_query:
+        return matched_fields
+    if normalized_query in _normalize_search_value(topic.title):
+        matched_fields.append("title")
+    if normalized_query in _normalize_search_value(topic.slug):
+        matched_fields.append("slug")
+    if normalized_query in _normalize_search_value(topic.description):
+        matched_fields.append("description")
+    if any(normalized_query in _normalize_search_value(alias.alias) for alias in topic.aliases):
+        matched_fields.append("alias")
+    return matched_fields
+
+
+def _document_unit_matched_fields(doc_unit: DocumentUnit, query: str) -> list[str]:
+    matched_fields: list[str] = []
+    normalized_query = _normalize_search_value(query)
+    if not normalized_query:
+        return matched_fields
+    scan_unit = doc_unit.scan_unit
+    document = scan_unit.document if scan_unit else None
+    if document is not None:
+        if normalized_query in _normalize_search_value(document.original_filename):
+            matched_fields.append("filename")
+        if normalized_query in _normalize_search_value(document.external_id):
+            matched_fields.append("external_id")
+    if normalized_query in _normalize_search_value(doc_unit.title):
+        matched_fields.append("title")
+    if normalized_query in _normalize_search_value(doc_unit.extracted_summary):
+        matched_fields.append("summary")
+    if (
+        doc_unit.scan_unit is not None
+        and doc_unit.scan_unit.ocr_result is not None
+        and (
+            normalized_query in _normalize_search_value(doc_unit.scan_unit.ocr_result.full_text)
+            or normalized_query in _normalize_search_value(doc_unit.scan_unit.ocr_result.markdown_text)
+        )
+    ):
+        matched_fields.append("ocr_text")
+    if any(
+        normalized_query in _normalize_search_value(assignment.topic.title if assignment.topic else None)
+        or normalized_query in _normalize_search_value(assignment.topic.slug if assignment.topic else None)
+        for assignment in doc_unit.topic_assignments
+    ):
+        matched_fields.append("topic")
+    return matched_fields
 
 
 def _serialize_scan_unit(scan_unit: ScanUnit, include_units: bool = False) -> dict[str, Any]:
@@ -626,6 +685,141 @@ def get_topic(topic_id: str, db: Session = Depends(get_db_session)):
     if topic is None:
         raise HTTPException(status_code=404, detail="Topic not found")
     return _serialize_topic_detail(topic)
+
+
+@router.get("/search", response_model=KnowledgeSearchResponse)
+def search_knowledge(
+    q: str,
+    include_inactive: bool = False,
+    topic_kind: str | None = None,
+    topic_class: str | None = None,
+    limit: int = 12,
+    db: Session = Depends(get_db_session),
+):
+    query = q.strip()
+    if len(query) < 2:
+        return KnowledgeSearchResponse(
+            query=query,
+            total_topic_hits=0,
+            total_document_hits=0,
+            topics=[],
+            document_units=[],
+        )
+
+    pattern = f"%{query}%"
+
+    topic_query = (
+        select(Topic)
+        .outerjoin(TopicAlias, TopicAlias.topic_id == Topic.id)
+        .options(
+            selectinload(Topic.aliases),
+            selectinload(Topic.proposals),
+            selectinload(Topic.assignments)
+            .selectinload(DocumentUnitTopicAssignment.document_unit)
+            .selectinload(DocumentUnit.scan_unit),
+        )
+        .where(
+            or_(
+                Topic.title.ilike(pattern),
+                Topic.slug.ilike(pattern),
+                Topic.description.ilike(pattern),
+                TopicAlias.alias.ilike(pattern),
+            )
+        )
+        .distinct()
+        .order_by(Topic.created_at.desc())
+    )
+    if not include_inactive:
+        topic_query = topic_query.where(Topic.is_active.is_(True))
+    if topic_kind:
+        topic_query = topic_query.where(Topic.topic_kind == topic_kind)
+    if topic_class:
+        topic_query = topic_query.where(Topic.topic_class == topic_class)
+
+    topic_rows = db.execute(topic_query.limit(limit)).scalars().unique().all()
+    topic_hits = [
+        KnowledgeSearchTopicHit(
+            topic=_serialize_topic_summary(topic),
+            aliases=sorted({alias.alias for alias in topic.aliases}),
+            matched_fields=_topic_matched_fields(topic, query),
+        )
+        for topic in topic_rows
+    ]
+
+    document_query = (
+        select(DocumentUnit)
+        .join(ScanUnit, ScanUnit.id == DocumentUnit.scan_unit_id)
+        .join(Document, Document.id == ScanUnit.source_document_id)
+        .join(OCRResult, OCRResult.id == ScanUnit.source_ocr_result_id)
+        .outerjoin(
+            DocumentUnitTopicAssignment,
+            DocumentUnitTopicAssignment.document_unit_id == DocumentUnit.id,
+        )
+        .outerjoin(Topic, Topic.id == DocumentUnitTopicAssignment.topic_id)
+        .options(
+            selectinload(DocumentUnit.document_type),
+            selectinload(DocumentUnit.topic_assignments).selectinload(DocumentUnitTopicAssignment.topic),
+            selectinload(DocumentUnit.scan_unit).selectinload(ScanUnit.document),
+            selectinload(DocumentUnit.scan_unit).selectinload(ScanUnit.ocr_result),
+        )
+        .where(
+            or_(
+                Document.original_filename.ilike(pattern),
+                Document.external_id.ilike(pattern),
+                DocumentUnit.title.ilike(pattern),
+                DocumentUnit.extracted_summary.ilike(pattern),
+                OCRResult.full_text.ilike(pattern),
+                OCRResult.markdown_text.ilike(pattern),
+                Topic.title.ilike(pattern),
+                Topic.slug.ilike(pattern),
+            )
+        )
+        .distinct()
+        .order_by(DocumentUnit.created_at.desc())
+    )
+    if not include_inactive:
+        document_query = document_query.where(or_(Topic.id.is_(None), Topic.is_active.is_(True)))
+    if topic_kind:
+        document_query = document_query.where(or_(Topic.id.is_(None), Topic.topic_kind == topic_kind))
+    if topic_class:
+        document_query = document_query.where(or_(Topic.id.is_(None), Topic.topic_class == topic_class))
+
+    document_rows = db.execute(document_query.limit(limit)).scalars().unique().all()
+    document_hits = [
+        KnowledgeSearchDocumentHit(
+            document_unit_id=str(doc_unit.id),
+            document_id=str(doc_unit.scan_unit.document.id),
+            original_filename=doc_unit.scan_unit.document.original_filename,
+            external_id=doc_unit.scan_unit.document.external_id,
+            title=doc_unit.title,
+            summary=doc_unit.extracted_summary,
+            start_page=doc_unit.start_page,
+            end_page=doc_unit.end_page,
+            review_status=doc_unit.review_status,
+            document_type_code=doc_unit.document_type.code if doc_unit.document_type else None,
+            topic_titles=[
+                assignment.topic.title
+                for assignment in doc_unit.topic_assignments
+                if assignment.topic is not None and assignment.topic.is_active
+            ],
+            topic_kinds=[
+                assignment.topic.topic_kind
+                for assignment in doc_unit.topic_assignments
+                if assignment.topic is not None and assignment.topic.is_active
+            ],
+            matched_fields=_document_unit_matched_fields(doc_unit, query),
+        )
+        for doc_unit in document_rows
+        if doc_unit.scan_unit is not None and doc_unit.scan_unit.document is not None
+    ]
+
+    return KnowledgeSearchResponse(
+        query=query,
+        total_topic_hits=len(topic_hits),
+        total_document_hits=len(document_hits),
+        topics=topic_hits,
+        document_units=document_hits,
+    )
 
 
 @router.post("/topics", response_model=TopicResponse, status_code=status.HTTP_201_CREATED)

@@ -257,6 +257,36 @@ class TopicDetailResponse(BaseModel):
     related_documents: list[TopicRelatedDocumentResponse] = Field(default_factory=list)
 
 
+class KnowledgeSearchTopicHit(BaseModel):
+    topic: TopicSummaryResponse
+    aliases: list[str] = Field(default_factory=list)
+    matched_fields: list[str] = Field(default_factory=list)
+
+
+class KnowledgeSearchDocumentHit(BaseModel):
+    document_unit_id: str
+    document_id: str
+    original_filename: str
+    external_id: Optional[str] = None
+    title: Optional[str] = None
+    summary: Optional[str] = None
+    start_page: int
+    end_page: int
+    review_status: str
+    document_type_code: Optional[str] = None
+    topic_titles: list[str] = Field(default_factory=list)
+    topic_kinds: list[str] = Field(default_factory=list)
+    matched_fields: list[str] = Field(default_factory=list)
+
+
+class KnowledgeSearchResponse(BaseModel):
+    query: str
+    total_topic_hits: int
+    total_document_hits: int
+    topics: list[KnowledgeSearchTopicHit] = Field(default_factory=list)
+    document_units: list[KnowledgeSearchDocumentHit] = Field(default_factory=list)
+
+
 class ConsolidationResponse(BaseModel):
     topics_before: int
     topics_after: int

@@ -190,6 +190,36 @@ export interface KnowledgeTopicDetail {
   related_documents: KnowledgeTopicRelatedDocument[];
 }
 
+export interface KnowledgeSearchTopicHit {
+  topic: KnowledgeTopicSummary;
+  aliases: string[];
+  matched_fields: string[];
+}
+
+export interface KnowledgeSearchDocumentHit {
+  document_unit_id: string;
+  document_id: string;
+  original_filename: string;
+  external_id: string | null;
+  title: string | null;
+  summary: string | null;
+  start_page: number;
+  end_page: number;
+  review_status: string;
+  document_type_code: string | null;
+  topic_titles: string[];
+  topic_kinds: string[];
+  matched_fields: string[];
+}
+
+export interface KnowledgeSearchResult {
+  query: string;
+  total_topic_hits: number;
+  total_document_hits: number;
+  topics: KnowledgeSearchTopicHit[];
+  document_units: KnowledgeSearchDocumentHit[];
+}
+
 export interface KnowledgeConsolidationResult {
   topics_before: number;
   topics_after: number;

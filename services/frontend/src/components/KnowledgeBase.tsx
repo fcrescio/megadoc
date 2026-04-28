@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import {
+  useKnowledgeSearch,
   useKnowledgeTopic,
   useKnowledgeTopics,
   useRunKnowledgeConsolidation,
@@ -16,22 +17,20 @@ function KnowledgeBase({ onOpenDocument }: Props) {
   const [selectedTopicId, setSelectedTopicId] = useState<string | null>(null);
   const [topicClassFilter, setTopicClassFilter] = useState<string>('all');
   const [topicKindFilter, setTopicKindFilter] = useState<string>('all');
+  const [searchInput, setSearchInput] = useState('');
   const [showProposals, setShowProposals] = useState(false);
+  const deferredSearch = useDeferredValue(searchInput.trim());
+
   const { data: topics, isLoading, error } = useKnowledgeTopics(includeInactive);
   const { data: topicDetail, isLoading: topicLoading, error: topicError } = useKnowledgeTopic(selectedTopicId);
   const { data: proposals } = useTopicProposals();
+  const search = useKnowledgeSearch(deferredSearch, {
+    includeInactive,
+    topicClass: topicClassFilter,
+    topicKind: topicKindFilter,
+    limit: 14,
+  });
   const consolidate = useRunKnowledgeConsolidation();
-
-  const visibleTopics = useMemo(() => {
-    if (!topics) {
-      return [];
-    }
-    return topics.filter((topic) => {
-      const classOk = topicClassFilter === 'all' || topic.topic_class === topicClassFilter;
-      const kindOk = topicKindFilter === 'all' || topic.topic_kind === topicKindFilter;
-      return classOk && kindOk;
-    });
-  }, [topicClassFilter, topicKindFilter, topics]);
 
   const topicClasses = useMemo(() => {
     return Array.from(new Set((topics ?? []).map((topic) => topic.topic_class))).sort();
@@ -40,6 +39,24 @@ function KnowledgeBase({ onOpenDocument }: Props) {
   const topicKinds = useMemo(() => {
     return Array.from(new Set((topics ?? []).map((topic) => topic.topic_kind))).sort();
   }, [topics]);
+
+  const visibleTopics = useMemo(() => {
+    if (!topics) {
+      return [];
+    }
+    const filtered = topics.filter((topic) => {
+      const classOk = topicClassFilter === 'all' || topic.topic_class === topicClassFilter;
+      const kindOk = topicKindFilter === 'all' || topic.topic_kind === topicKindFilter;
+      return classOk && kindOk;
+    });
+
+    if (deferredSearch.length >= 2 && search.data) {
+      const topicIds = new Set(search.data.topics.map((hit) => hit.topic.id));
+      return filtered.filter((topic) => topicIds.has(topic.id));
+    }
+
+    return filtered;
+  }, [deferredSearch.length, search.data, topicClassFilter, topicKindFilter, topics]);
 
   const stats = useMemo(() => {
     const source = topics ?? [];
@@ -50,6 +67,10 @@ function KnowledgeBase({ onOpenDocument }: Props) {
       topicClasses: topicClasses.length,
     };
   }, [topicClasses.length, topics]);
+
+  const searchActive = deferredSearch.length >= 2;
+  const searchTopicHits = search.data?.topics ?? [];
+  const searchDocumentHits = search.data?.document_units ?? [];
 
   useEffect(() => {
     if (!visibleTopics.length) {
@@ -83,15 +104,49 @@ function KnowledgeBase({ onOpenDocument }: Props) {
 
   return (
     <div className="space-y-6">
-      <div className="rounded-[28px] border border-cyan-300/15 bg-slate-950/45 backdrop-blur-xl shadow-[0_24px_80px_rgba(8,47,73,0.45)] overflow-hidden">
-        <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr] p-6 lg:p-8">
-          <div>
-            <p className="text-xs uppercase tracking-[0.35em] text-cyan-300/75 mb-3">Knowledge Atlas</p>
-            <h2 className="text-3xl lg:text-4xl font-semibold text-white">Consolidated topics across the whole corpus</h2>
-            <p className="text-sm text-slate-300 mt-3 max-w-2xl">
-              Browse consolidated topics, aliases and linked document units.
-            </p>
+      <div className="rounded-[32px] border border-cyan-300/15 bg-[radial-gradient(circle_at_top_left,_rgba(34,211,238,0.18),_transparent_36%),radial-gradient(circle_at_bottom_right,_rgba(56,189,248,0.12),_transparent_28%),rgba(2,6,23,0.82)] backdrop-blur-2xl shadow-[0_30px_120px_rgba(8,47,73,0.45)] overflow-hidden">
+        <div className="grid gap-8 lg:grid-cols-[1.15fr_0.85fr] p-6 lg:p-8">
+          <div className="space-y-5">
+            <div>
+              <p className="text-xs uppercase tracking-[0.35em] text-cyan-300/75 mb-3">Knowledge Atlas</p>
+              <h2 className="text-3xl lg:text-4xl font-semibold text-white">Search the corpus like a living graph</h2>
+              <p className="text-sm text-slate-300 mt-3 max-w-2xl">
+                Find topics, aliases and document fragments from the same console used to consolidate the knowledge base.
+              </p>
+            </div>
+
+            <div className="rounded-[24px] border border-cyan-300/20 bg-slate-950/65 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+              <div className="flex items-center gap-3 rounded-[20px] border border-white/10 bg-white/5 px-4 py-3">
+                <span className="text-cyan-200 text-lg">⌕</span>
+                <input
+                  value={searchInput}
+                  onChange={(event) => setSearchInput(event.target.value)}
+                  placeholder="Search by topic, alias, vendor, filename, issue, address..."
+                  className="w-full bg-transparent text-sm text-white placeholder:text-slate-500 outline-none"
+                />
+                {searchInput && (
+                  <button
+                    onClick={() => setSearchInput('')}
+                    className="rounded-full border border-white/10 px-2 py-1 text-xs text-slate-300 hover:bg-white/10"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1">topics</span>
+                <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1">document units</span>
+                <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1">aliases</span>
+                <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1">summaries</span>
+                {search.isFetching && searchActive && (
+                  <span className="rounded-full border border-cyan-400/25 bg-cyan-400/10 px-2 py-1 text-cyan-100">
+                    searching...
+                  </span>
+                )}
+              </div>
+            </div>
           </div>
+
           <div className="grid grid-cols-2 gap-3">
             <div className="rounded-2xl border border-cyan-300/15 bg-white/5 p-4">
               <p className="text-xs uppercase tracking-wide text-cyan-200/70">Topics</p>
@@ -117,7 +172,7 @@ function KnowledgeBase({ onOpenDocument }: Props) {
         <div>
           <h3 className="text-lg font-semibold text-white">Explore and refine</h3>
           <p className="text-sm text-slate-400">
-            Browse consolidated topics, aliases and linked document units.
+            Search first, then jump into the right topic or document unit to consolidate.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -183,6 +238,139 @@ function KnowledgeBase({ onOpenDocument }: Props) {
         </div>
       )}
 
+      {searchActive && (
+        <div className="grid gap-4 xl:grid-cols-[1fr_1fr]">
+          <div className="rounded-[24px] border border-cyan-300/15 bg-slate-950/50 p-5 shadow-[0_18px_60px_rgba(2,6,23,0.35)] backdrop-blur-md">
+            <div className="flex items-center justify-between gap-3 mb-4">
+              <div>
+                <p className="text-xs uppercase tracking-[0.28em] text-cyan-300/70">Search Topics</p>
+                <h4 className="text-lg font-semibold text-white">Topic matches</h4>
+              </div>
+              <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-200">
+                {search.data?.total_topic_hits ?? 0} hits
+              </span>
+            </div>
+
+            {search.isLoading ? (
+              <div className="space-y-3 animate-pulse">
+                <div className="h-16 rounded-2xl bg-white/5"></div>
+                <div className="h-16 rounded-2xl bg-white/5"></div>
+              </div>
+            ) : searchTopicHits.length === 0 ? (
+              <p className="text-sm text-slate-400">No topics matched this query.</p>
+            ) : (
+              <div className="space-y-3">
+                {searchTopicHits.map((hit) => (
+                  <button
+                    key={hit.topic.id}
+                    onClick={() => setSelectedTopicId(hit.topic.id)}
+                    className="w-full rounded-2xl border border-white/10 bg-white/5 p-4 text-left hover:bg-cyan-400/10 transition-colors"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-medium text-slate-100 truncate">{hit.topic.title}</p>
+                        <p className="text-xs text-slate-400 mt-1">
+                          {hit.topic.topic_kind} · {hit.topic.topic_class} · {hit.topic.assignment_count} assignments
+                        </p>
+                      </div>
+                      <span className="rounded-full border border-cyan-300/20 bg-cyan-400/10 px-2 py-1 text-[11px] uppercase tracking-[0.18em] text-cyan-100">
+                        inspect
+                      </span>
+                    </div>
+                    {(hit.aliases.length > 0 || hit.matched_fields.length > 0) && (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {hit.matched_fields.map((field) => (
+                          <span key={field} className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[11px] text-slate-300">
+                            {field}
+                          </span>
+                        ))}
+                        {hit.aliases.slice(0, 3).map((alias) => (
+                          <span key={alias} className="rounded-full border border-white/10 bg-slate-900/60 px-2 py-1 text-[11px] text-slate-300">
+                            {alias}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-[24px] border border-white/10 bg-slate-950/50 p-5 shadow-[0_18px_60px_rgba(2,6,23,0.35)] backdrop-blur-md">
+            <div className="flex items-center justify-between gap-3 mb-4">
+              <div>
+                <p className="text-xs uppercase tracking-[0.28em] text-cyan-300/70">Search Documents</p>
+                <h4 className="text-lg font-semibold text-white">Document-unit matches</h4>
+              </div>
+              <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-200">
+                {search.data?.total_document_hits ?? 0} hits
+              </span>
+            </div>
+
+            {search.isLoading ? (
+              <div className="space-y-3 animate-pulse">
+                <div className="h-20 rounded-2xl bg-white/5"></div>
+                <div className="h-20 rounded-2xl bg-white/5"></div>
+              </div>
+            ) : searchDocumentHits.length === 0 ? (
+              <p className="text-sm text-slate-400">No document units matched this query.</p>
+            ) : (
+              <div className="space-y-3 max-h-[28rem] overflow-y-auto pr-1">
+                {searchDocumentHits.map((hit) => (
+                  <div key={hit.document_unit_id} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <button
+                          onClick={() => onOpenDocument(hit.document_id)}
+                          className="text-left font-medium text-cyan-200 hover:text-cyan-100"
+                        >
+                          {hit.original_filename}
+                        </button>
+                        <p className="text-xs text-slate-400 mt-1">
+                          Pages {hit.start_page}-{hit.end_page}
+                          {hit.document_type_code ? ` · ${hit.document_type_code}` : ''}
+                          {hit.external_id ? ` · ${hit.external_id}` : ''}
+                        </p>
+                        {hit.title && <p className="text-sm text-slate-200 mt-3">{hit.title}</p>}
+                        {hit.summary && <p className="text-sm text-slate-400 mt-2 line-clamp-3">{hit.summary}</p>}
+                      </div>
+                      <span className="rounded-full border border-white/10 bg-slate-900/70 px-2 py-1 text-[11px] uppercase tracking-[0.18em] text-slate-200">
+                        {hit.review_status}
+                      </span>
+                    </div>
+
+                    {(hit.topic_titles.length > 0 || hit.matched_fields.length > 0) && (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {hit.matched_fields.map((field) => (
+                          <span key={field} className="rounded-full border border-cyan-300/20 bg-cyan-400/10 px-2 py-1 text-[11px] text-cyan-100">
+                            {field}
+                          </span>
+                        ))}
+                        {hit.topic_titles.slice(0, 3).map((topicTitle, index) => (
+                          <button
+                            key={`${hit.document_unit_id}-${topicTitle}-${index}`}
+                            onClick={() => {
+                              const matchedHit = searchTopicHits.find((item) => item.topic.title === topicTitle);
+                              if (matchedHit) {
+                                setSelectedTopicId(matchedHit.topic.id);
+                              }
+                            }}
+                            className="rounded-full border border-white/10 bg-slate-900/60 px-2 py-1 text-[11px] text-slate-300 hover:bg-white/10"
+                          >
+                            {topicTitle}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="grid gap-4 lg:grid-cols-[24rem_minmax(0,1fr)]">
         <div className="bg-white/5 border border-white/10 rounded-[24px] shadow-[0_18px_60px_rgba(2,6,23,0.35)] overflow-hidden backdrop-blur-md">
           <div className="border-b border-white/10 px-4 py-3">
@@ -192,7 +380,9 @@ function KnowledgeBase({ onOpenDocument }: Props) {
           </div>
           <div className="max-h-[70vh] overflow-y-auto divide-y">
             {visibleTopics.length === 0 ? (
-              <div className="p-4 text-sm text-slate-400">No topics match this filter.</div>
+              <div className="p-4 text-sm text-slate-400">
+                {searchActive ? 'No topics match this search and filter.' : 'No topics match this filter.'}
+              </div>
             ) : (
               visibleTopics.map((topic) => (
                 <button
@@ -266,9 +456,13 @@ function KnowledgeBase({ onOpenDocument }: Props) {
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">Aliases</p>
                   <div className="flex flex-wrap gap-2">
                     {topicDetail.aliases.map((alias) => (
-                      <span key={alias} className="px-2 py-1 rounded-full bg-white/8 text-slate-200 text-xs border border-white/10">
+                      <button
+                        key={alias}
+                        onClick={() => setSearchInput(alias)}
+                        className="px-2 py-1 rounded-full bg-white/8 text-slate-200 text-xs border border-white/10 hover:bg-white/12"
+                      >
                         {alias}
-                      </span>
+                      </button>
                     ))}
                   </div>
                 </div>

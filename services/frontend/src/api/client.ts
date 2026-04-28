@@ -8,6 +8,7 @@ import type {
   DocumentKnowledge,
   KnowledgeTopicSummary,
   KnowledgeTopicDetail,
+  KnowledgeSearchResult,
   KnowledgeConsolidationResult,
   KnowledgeDocumentUnit,
   KnowledgeTopicProposal,
@@ -69,6 +70,31 @@ export async function getKnowledgeTopics(includeInactive = false, topicKind?: st
 export async function getKnowledgeTopic(topicId: string): Promise<KnowledgeTopicDetail> {
   const response = await fetch(`${API_BASE}/knowledge/topics/${topicId}`);
   return handleResponse<KnowledgeTopicDetail>(response);
+}
+
+export async function searchKnowledge(
+  query: string,
+  options?: {
+    includeInactive?: boolean;
+    topicKind?: string;
+    topicClass?: string;
+    limit?: number;
+  },
+): Promise<KnowledgeSearchResult> {
+  const params = new URLSearchParams();
+  params.set('q', query);
+  params.set('include_inactive', String(options?.includeInactive ?? false));
+  if (options?.topicKind && options.topicKind !== 'all') {
+    params.set('topic_kind', options.topicKind);
+  }
+  if (options?.topicClass && options.topicClass !== 'all') {
+    params.set('topic_class', options.topicClass);
+  }
+  if (options?.limit) {
+    params.set('limit', String(options.limit));
+  }
+  const response = await fetch(`${API_BASE}/knowledge/search?${params.toString()}`);
+  return handleResponse<KnowledgeSearchResult>(response);
 }
 
 export async function runKnowledgeConsolidation(): Promise<KnowledgeConsolidationResult> {
