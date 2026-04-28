@@ -17,6 +17,7 @@ import type {
   ManualDocument,
   ManualComment,
   ManualCommentCreatePayload,
+  ManualCommentUpdatePayload,
   KnowledgeConsolidationResult,
   KnowledgeDocumentUnit,
   KnowledgeTopicProposal,
@@ -174,6 +175,19 @@ export async function createManualComment(
 ): Promise<ManualComment> {
   const response = await fetch(`${API_BASE}/manuals/${slug}/comments`, {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return handleResponse<ManualComment>(response);
+}
+
+export async function updateManualComment(
+  slug: string,
+  commentId: string,
+  payload: ManualCommentUpdatePayload,
+): Promise<ManualComment> {
+  const response = await fetch(`${API_BASE}/manuals/${slug}/comments/${commentId}`, {
+    method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });

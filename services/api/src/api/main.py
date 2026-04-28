@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Annotated
@@ -17,6 +18,7 @@ from common.api.schemas import (
     DocumentVersionResponse,
     JobResponse,
     ManualCommentCreate,
+    ManualCommentUpdate,
     ManualCommentResponse,
     ManualResponse,
     OCRResponse,
@@ -261,7 +263,12 @@ def get_manual(manual_slug: str, session: Session = Depends(db_session_dep)) -> 
     comments = (
         session.query(ManualComment)
         .filter(ManualComment.manual_slug == manual_slug)
-        .order_by(ManualComment.created_at.desc())
+        .order_by(
+            text(
+                "CASE status WHEN 'open' THEN 0 WHEN 'wontfix' THEN 1 WHEN 'resolved' THEN 2 ELSE 3 END"
+            ),
+            ManualComment.created_at.desc(),
+        )
         .all()
     )
     return ManualResponse(
@@ -292,6 +299,37 @@ def create_manual_comment(
     if not comment.comment_text:
         raise HTTPException(status_code=400, detail="comment_text is required.")
     session.add(comment)
+    session.commit()
+    session.refresh(comment)
+    return ManualCommentResponse.model_validate(comment, from_attributes=True)
+
+
+@app.patch("/manuals/{manual_slug}/comments/{comment_id}", response_model=ManualCommentResponse)
+def update_manual_comment(
+    manual_slug: str,
+    comment_id: uuid.UUID,
+    payload: ManualCommentUpdate,
+    session: Session = Depends(db_session_dep),
+) -> ManualCommentResponse:
+    _load_manual(manual_slug)
+    if payload.status not in {"open", "resolved", "wontfix"}:
+        raise HTTPException(status_code=400, detail="Invalid manual comment status.")
+    comment = (
+        session.query(ManualComment)
+        .filter(ManualComment.id == comment_id, ManualComment.manual_slug == manual_slug)
+        .one_or_none()
+    )
+    if comment is None:
+        raise HTTPException(status_code=404, detail="Manual comment not found.")
+
+    comment.status = payload.status
+    comment.resolution_note = (payload.resolution_note or "").strip() or None
+    if payload.status == "open":
+        comment.resolved_by = None
+        comment.resolved_at = None
+    else:
+        comment.resolved_by = (payload.resolved_by or "").strip() or None
+        comment.resolved_at = datetime.now(timezone.utc)
     session.commit()
     session.refresh(comment)
     return ManualCommentResponse.model_validate(comment, from_attributes=True)

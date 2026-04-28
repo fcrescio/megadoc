@@ -61,8 +61,16 @@ def ensure_knowledge_schema(engine) -> None:
             selection_end INTEGER NULL,
             comment_text TEXT NOT NULL,
             author_name VARCHAR(255) NULL,
+            status VARCHAR(32) NOT NULL DEFAULT 'open',
+            resolution_note TEXT NULL,
+            resolved_by VARCHAR(255) NULL,
+            resolved_at TIMESTAMPTZ NULL,
             created_at TIMESTAMPTZ NOT NULL DEFAULT now()
         )""",
+        "ALTER TABLE manual_comments ADD COLUMN IF NOT EXISTS status VARCHAR(32) NOT NULL DEFAULT 'open'",
+        "ALTER TABLE manual_comments ADD COLUMN IF NOT EXISTS resolution_note TEXT NULL",
+        "ALTER TABLE manual_comments ADD COLUMN IF NOT EXISTS resolved_by VARCHAR(255) NULL",
+        "ALTER TABLE manual_comments ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ NULL",
         "CREATE INDEX IF NOT EXISTS ix_manual_comments_slug_created_at ON manual_comments(manual_slug, created_at)",
     ]
     with engine.begin() as conn:

@@ -104,6 +104,10 @@ class ManualCommentResponse(BaseModel):
     selection_end: int | None
     comment_text: str
     author_name: str | None
+    status: str
+    resolution_note: str | None
+    resolved_by: str | None
+    resolved_at: datetime | None
     created_at: datetime
 
 
@@ -112,3 +116,9 @@ class ManualResponse(BaseModel):
     title: str
     markdown: str
     comments: list[ManualCommentResponse]
+
+
+class ManualCommentUpdate(BaseModel):
+    status: str
+    resolution_note: str | None = None
+    resolved_by: str | None = None

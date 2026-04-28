@@ -297,6 +297,10 @@ export interface ManualComment {
   selection_end: number | null;
   comment_text: string;
   author_name: string | null;
+  status: string;
+  resolution_note: string | null;
+  resolved_by: string | null;
+  resolved_at: string | null;
   created_at: string;
 }
 
@@ -313,6 +317,12 @@ export interface ManualCommentCreatePayload {
   selection_end?: number | null;
   comment_text: string;
   author_name?: string | null;
+}
+
+export interface ManualCommentUpdatePayload {
+  status: 'open' | 'resolved' | 'wontfix';
+  resolution_note?: string | null;
+  resolved_by?: string | null;
 }
 
 export interface KnowledgeConsolidationResult {

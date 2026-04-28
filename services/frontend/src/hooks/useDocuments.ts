@@ -17,6 +17,7 @@ import type {
   ManualDocument,
   ManualComment,
   ManualCommentCreatePayload,
+  ManualCommentUpdatePayload,
   KnowledgeConsolidationResult,
   KnowledgeTopicProposal,
   TopicAssignmentUpsertPayload,
@@ -39,6 +40,7 @@ import {
   mergeCanonicalEntity,
   getManual,
   createManualComment,
+  updateManualComment,
   getKnowledgeTopics,
   runKnowledgeConsolidation,
   uploadDocument,
@@ -187,6 +189,16 @@ export function useCreateManualComment() {
   const queryClient = useQueryClient();
   return useMutation<ManualComment, Error, { slug: string; payload: ManualCommentCreatePayload }>({
     mutationFn: ({ slug, payload }) => createManualComment(slug, payload),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['manual', variables.slug] });
+    },
+  });
+}
+
+export function useUpdateManualComment() {
+  const queryClient = useQueryClient();
+  return useMutation<ManualComment, Error, { slug: string; commentId: string; payload: ManualCommentUpdatePayload }>({
+    mutationFn: ({ slug, commentId, payload }) => updateManualComment(slug, commentId, payload),
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ['manual', variables.slug] });
     },

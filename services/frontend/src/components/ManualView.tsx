@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { useCreateManualComment, useManual } from '../hooks/useDocuments';
+import { useCreateManualComment, useManual, useUpdateManualComment } from '../hooks/useDocuments';
 
 interface TextSelectionState {
   text: string;
@@ -35,10 +35,13 @@ function getSelectionOffsets(container: HTMLElement): TextSelectionState | null 
 function ManualView() {
   const manual = useManual('system');
   const createComment = useCreateManualComment();
+  const updateComment = useUpdateManualComment();
   const articleRef = useRef<HTMLDivElement | null>(null);
   const [selection, setSelection] = useState<TextSelectionState | null>(null);
   const [authorName, setAuthorName] = useState('');
   const [commentText, setCommentText] = useState('');
+  const [resolutionAuthor, setResolutionAuthor] = useState('');
+  const [resolutionNotes, setResolutionNotes] = useState<Record<string, string>>({});
 
   const handleArticleSelection = () => {
     if (!articleRef.current) {
@@ -54,6 +57,7 @@ function ManualView() {
   const commentStats = useMemo(() => {
     return {
       total: architectureComments.length,
+      open: architectureComments.filter((comment) => comment.status === 'open').length,
       commentedPassages: new Set(architectureComments.map((comment) => comment.selected_text)).size,
     };
   }, [architectureComments]);
@@ -103,6 +107,38 @@ function ManualView() {
     );
   };
 
+  const submitResolution = (commentId: string, status: 'resolved' | 'wontfix') => {
+    updateComment.mutate({
+      slug: manualData.slug,
+      commentId,
+      payload: {
+        status,
+        resolution_note: resolutionNotes[commentId]?.trim() || null,
+        resolved_by: resolutionAuthor.trim() || null,
+      },
+    });
+  };
+
+  const reopenComment = (commentId: string) => {
+    updateComment.mutate({
+      slug: manualData.slug,
+      commentId,
+      payload: {
+        status: 'open',
+      },
+    });
+  };
+
+  const statusBadgeClass = (status: string) => {
+    if (status === 'resolved') {
+      return 'border-emerald-300/20 bg-emerald-400/15 text-emerald-100';
+    }
+    if (status === 'wontfix') {
+      return 'border-amber-300/20 bg-amber-400/15 text-amber-100';
+    }
+    return 'border-cyan-300/20 bg-cyan-400/15 text-cyan-100';
+  };
+
   return (
     <div className="space-y-6">
       <div className="rounded-[32px] border border-fuchsia-300/15 bg-[radial-gradient(circle_at_top_left,_rgba(244,114,182,0.16),_transparent_34%),radial-gradient(circle_at_bottom_right,_rgba(14,165,233,0.16),_transparent_30%),rgba(2,6,23,0.84)] backdrop-blur-2xl shadow-[0_30px_120px_rgba(59,7,100,0.38)] overflow-hidden">
@@ -121,7 +157,11 @@ function ManualView() {
               <p className="mt-2 text-2xl font-semibold text-white">{commentStats.total}</p>
             </div>
             <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-              <p className="text-xs uppercase tracking-wide text-fuchsia-200/70">Passaggi</p>
+              <p className="text-xs uppercase tracking-wide text-fuchsia-200/70">Aperti</p>
+              <p className="mt-2 text-2xl font-semibold text-white">{commentStats.open}</p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-4 col-span-2">
+              <p className="text-xs uppercase tracking-wide text-fuchsia-200/70">Passaggi Annotati</p>
               <p className="mt-2 text-2xl font-semibold text-white">{commentStats.commentedPassages}</p>
             </div>
             <div className="rounded-2xl border border-white/10 bg-white/5 p-4 col-span-2">
@@ -214,16 +254,51 @@ function ManualView() {
               <p className="text-xs uppercase tracking-[0.28em] text-fuchsia-200/70">Flusso Commenti</p>
               <h3 className="text-lg font-semibold text-white mt-1">Feedback sul manuale</h3>
             </div>
+            <div className="border-b border-white/10 px-5 py-4 space-y-3 bg-slate-950/20">
+              <input
+                value={resolutionAuthor}
+                onChange={(event) => setResolutionAuthor(event.target.value)}
+                placeholder="Nome per risoluzioni e risposte (opzionale)"
+                className="w-full rounded-xl border border-white/10 bg-slate-900/70 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500"
+              />
+              {updateComment.error && (
+                <div className="rounded-2xl border border-rose-400/20 bg-rose-400/10 px-4 py-3 text-sm text-rose-100">
+                  Errore aggiornamento commento: {updateComment.error.message}
+                </div>
+              )}
+            </div>
             <div className="max-h-[52vh] overflow-y-auto divide-y divide-white/10">
               {architectureComments.length === 0 ? (
                 <div className="px-5 py-6 text-sm text-slate-400">Nessun commento ancora.</div>
               ) : (
                 architectureComments.map((comment) => (
                   <div key={comment.id} className="px-5 py-4 space-y-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className={`rounded-full border px-3 py-1 text-xs ${statusBadgeClass(comment.status)}`}>
+                        {comment.status}
+                      </span>
+                      {comment.resolved_at && (
+                        <span className="text-xs text-slate-400">
+                          aggiornato {new Date(comment.resolved_at).toLocaleString()}
+                        </span>
+                      )}
+                    </div>
                     <blockquote className="rounded-2xl border border-white/10 bg-slate-950/45 px-3 py-3 text-sm text-slate-200">
                       {comment.selected_text}
                     </blockquote>
                     <p className="text-sm text-slate-100">{comment.comment_text}</p>
+                    {comment.resolution_note && (
+                      <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-slate-200">
+                        <p className="text-xs uppercase tracking-wide text-fuchsia-200/70 mb-2">Nota di chiusura</p>
+                        <p>{comment.resolution_note}</p>
+                        {(comment.resolved_by || comment.resolved_at) && (
+                          <p className="mt-2 text-xs text-slate-400">
+                            {comment.resolved_by || 'Sistema'}
+                            {comment.resolved_at ? ` • ${new Date(comment.resolved_at).toLocaleString()}` : ''}
+                          </p>
+                        )}
+                      </div>
+                    )}
                     <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
                       <span>{comment.author_name || 'Anonimo'}</span>
                       <span>•</span>
@@ -237,6 +312,44 @@ function ManualView() {
                         </>
                       )}
                     </div>
+                    {comment.status === 'open' ? (
+                      <div className="space-y-3">
+                        <textarea
+                          value={resolutionNotes[comment.id] ?? ''}
+                          onChange={(event) =>
+                            setResolutionNotes((current) => ({ ...current, [comment.id]: event.target.value }))
+                          }
+                          placeholder="Nota di risoluzione o motivazione (opzionale)"
+                          className="w-full min-h-[6rem] rounded-2xl border border-white/10 bg-slate-900/70 px-3 py-3 text-sm text-slate-100 placeholder:text-slate-500"
+                        />
+                        <div className="flex flex-wrap items-center gap-3">
+                          <button
+                            onClick={() => submitResolution(comment.id, 'resolved')}
+                            disabled={updateComment.isPending}
+                            className="rounded-full border border-emerald-300/25 bg-emerald-400/20 px-4 py-2 text-sm text-emerald-50 hover:bg-emerald-400/25 disabled:opacity-60"
+                          >
+                            Segna come risolto
+                          </button>
+                          <button
+                            onClick={() => submitResolution(comment.id, 'wontfix')}
+                            disabled={updateComment.isPending}
+                            className="rounded-full border border-amber-300/25 bg-amber-400/20 px-4 py-2 text-sm text-amber-50 hover:bg-amber-400/25 disabled:opacity-60"
+                          >
+                            Segna come non risolto
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex flex-wrap items-center gap-3">
+                        <button
+                          onClick={() => reopenComment(comment.id)}
+                          disabled={updateComment.isPending}
+                          className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-slate-200 hover:bg-white/10 disabled:opacity-60"
+                        >
+                          Riapri commento
+                        </button>
+                      </div>
+                    )}
                   </div>
                 ))
               )}
