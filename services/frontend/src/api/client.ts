@@ -19,6 +19,7 @@ import type {
   ManualCommentCreatePayload,
   ManualCommentUpdatePayload,
   KnowledgeConsolidationResult,
+  GraphConsolidationSuggestions,
   KnowledgeDocumentUnit,
   KnowledgeTopicProposal,
   TopicAssignmentUpsertPayload,
@@ -199,6 +200,11 @@ export async function runKnowledgeConsolidation(): Promise<KnowledgeConsolidatio
     method: 'POST',
   });
   return handleResponse<KnowledgeConsolidationResult>(response);
+}
+
+export async function getGraphConsolidationSuggestions(limitPerAxis = 12): Promise<GraphConsolidationSuggestions> {
+  const response = await fetch(`${API_BASE}/knowledge/consolidation/suggestions?limit_per_axis=${limitPerAxis}`);
+  return handleResponse<GraphConsolidationSuggestions>(response);
 }
 
 export function getDocumentDownloadUrl(

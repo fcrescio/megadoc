@@ -19,6 +19,7 @@ import type {
   ManualCommentCreatePayload,
   ManualCommentUpdatePayload,
   KnowledgeConsolidationResult,
+  GraphConsolidationSuggestions,
   KnowledgeTopicProposal,
   TopicAssignmentUpsertPayload,
   TopicCreatePayload,
@@ -43,6 +44,7 @@ import {
   updateManualComment,
   getKnowledgeTopics,
   runKnowledgeConsolidation,
+  getGraphConsolidationSuggestions,
   uploadDocument,
   getTopicProposals,
   rejectTopicProposal,
@@ -218,6 +220,13 @@ export function useRunKnowledgeConsolidation() {
       queryClient.invalidateQueries({ queryKey: ['knowledge-entities'] });
       queryClient.invalidateQueries({ queryKey: ['knowledge-entity-detail'] });
     },
+  });
+}
+
+export function useGraphConsolidationSuggestions(limitPerAxis = 12) {
+  return useQuery<GraphConsolidationSuggestions>({
+    queryKey: ['graph-consolidation-suggestions', limitPerAxis],
+    queryFn: () => getGraphConsolidationSuggestions(limitPerAxis),
   });
 }
 

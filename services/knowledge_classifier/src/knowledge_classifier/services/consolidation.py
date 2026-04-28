@@ -12,6 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from common.db.models import (
+    CanonicalEntityVariant,
     DocumentUnit,
     DocumentUnitEntity,
     DocumentUnitTopicAssignment,
@@ -33,6 +34,28 @@ class ConsolidationStats:
     aliases_created: int = 0
     assignments_retargeted: int = 0
     proposals_retargeted: int = 0
+
+
+@dataclass
+class GraphSuggestionTopicSummary:
+    id: str
+    title: str
+    slug: str
+    topic_kind: str
+    topic_class: str
+    assignment_count: int
+    dominant_assignment_role: str
+
+
+@dataclass
+class GraphMergeSuggestion:
+    axis: str
+    score: float
+    rationale: str
+    shared_entity_keys: list[str]
+    shared_document_count: int
+    source_topic: GraphSuggestionTopicSummary
+    target_topic: GraphSuggestionTopicSummary
 
 
 class KnowledgeBaseConsolidationService:
@@ -244,6 +267,21 @@ class KnowledgeBaseConsolidationService:
         "building_issue": "matter",
     }
 
+    _AXIS_ROLE_MAP = {
+        "subject": "subject",
+        "person_or_org_context": "subject",
+        "document_family": "document_family",
+        "case_or_issue": "case_or_issue",
+    }
+
+    _AXIS_KIND_MAP = {
+        "entity": "subject",
+        "context": "subject",
+        "family": "document_family",
+        "issue": "case_or_issue",
+        "project": "case_or_issue",
+    }
+
     def __init__(self, db: Session) -> None:
         self.db = db
         self._signature_cache: dict[str, tuple[str, ...]] = {}
@@ -285,6 +323,32 @@ class KnowledgeBaseConsolidationService:
         )
         return stats
 
+    def suggest_graph_merges(self, limit_per_axis: int = 12) -> dict[str, list[GraphMergeSuggestion]]:
+        topics = self.db.execute(self._topic_query(active_only=True)).scalars().all()
+        canonical_map = self._canonical_entity_map()
+        profiles = [self._build_topic_profile(topic, canonical_map) for topic in topics if topic.is_active]
+
+        grouped: dict[str, list[dict[str, Any]]] = {
+            "subject": [],
+            "document_family": [],
+            "case_or_issue": [],
+        }
+        for profile in profiles:
+            if profile["axis"] in grouped:
+                grouped[profile["axis"]].append(profile)
+
+        suggestions: dict[str, list[GraphMergeSuggestion]] = {}
+        for axis, axis_profiles in grouped.items():
+            axis_suggestions: list[GraphMergeSuggestion] = []
+            for index, left in enumerate(axis_profiles):
+                for right in axis_profiles[index + 1 :]:
+                    suggestion = self._build_graph_merge_suggestion(axis, left, right)
+                    if suggestion is not None:
+                        axis_suggestions.append(suggestion)
+            axis_suggestions.sort(key=lambda item: (-item.score, item.target_topic.title, item.source_topic.title))
+            suggestions[axis] = axis_suggestions[:limit_per_axis]
+        return suggestions
+
     def _topic_query(self, active_only: bool) -> Any:
         query = (
             select(Topic)
@@ -300,6 +364,142 @@ class KnowledgeBaseConsolidationService:
         if active_only:
             query = query.where(Topic.is_active.is_(True))
         return query
+
+    def _canonical_entity_map(self) -> dict[tuple[str, str], str]:
+        rows = self.db.execute(select(CanonicalEntityVariant)).scalars().all()
+        mapping: dict[tuple[str, str], str] = {}
+        for row in rows:
+            mapping[(row.entity_type, row.entity_key)] = row.canonical_entity_id.hex
+        return mapping
+
+    def _build_topic_profile(self, topic: Topic, canonical_map: dict[tuple[str, str], str]) -> dict[str, Any]:
+        role_counts = Counter(assignment.assignment_role for assignment in topic.assignments if assignment.assignment_role)
+        dominant_role = role_counts.most_common(1)[0][0] if role_counts else "secondary"
+        axis = self._AXIS_KIND_MAP.get(topic.topic_kind) or self._AXIS_ROLE_MAP.get(dominant_role)
+        if axis is None:
+            axis = "subject"
+        family = self._topic_family(topic.title)
+
+        document_ids: set[str] = set()
+        entity_keys: set[str] = set()
+        raw_entity_keys: set[str] = set()
+        for assignment in topic.assignments:
+            document_unit = assignment.document_unit
+            if document_unit is None or document_unit.scan_unit is None:
+                continue
+            document_ids.add(str(document_unit.scan_unit.source_document_id))
+            for entity in document_unit.entities:
+                normalized = self._normalize_anchor_value(entity)
+                if not normalized:
+                    continue
+                raw_key = f"{entity.entity_type}:{normalized}"
+                raw_entity_keys.add(raw_key)
+                canonical_id = canonical_map.get((entity.entity_type, normalized))
+                if canonical_id:
+                    entity_keys.add(f"{entity.entity_type}:canonical:{canonical_id}")
+                else:
+                    entity_keys.add(raw_key)
+
+        return {
+            "topic": topic,
+            "axis": axis,
+            "dominant_role": dominant_role,
+            "family": family,
+            "title_tokens": self._title_tokens(topic.title),
+            "document_ids": document_ids,
+            "entity_keys": entity_keys,
+            "raw_entity_keys": raw_entity_keys,
+            "weight": self._topic_weight(topic),
+        }
+
+    def _build_graph_merge_suggestion(
+        self,
+        axis: str,
+        left: dict[str, Any],
+        right: dict[str, Any],
+    ) -> GraphMergeSuggestion | None:
+        entity_score, shared_entities = self._set_similarity(left["entity_keys"], right["entity_keys"])
+        title_score, _ = self._set_similarity(left["title_tokens"], right["title_tokens"])
+        doc_score, shared_docs = self._set_similarity(left["document_ids"], right["document_ids"])
+        family_match = 1.0 if left.get("family") and left.get("family") == right.get("family") else 0.0
+
+        if axis == "subject":
+            score = (0.60 * entity_score) + (0.25 * title_score) + (0.15 * doc_score)
+            threshold = 0.28
+        elif axis == "document_family":
+            score = (0.30 * entity_score) + (0.35 * title_score) + (0.20 * doc_score) + (0.15 * family_match)
+            threshold = 0.32
+        else:
+            score = (0.35 * entity_score) + (0.25 * title_score) + (0.40 * doc_score)
+            threshold = 0.30
+
+        if entity_score == 0.0 and title_score == 0.0:
+            return None
+        if axis == "subject" and entity_score < 0.08 and title_score < 0.34:
+            return None
+        if score < threshold:
+            return None
+
+        left_topic: Topic = left["topic"]
+        right_topic: Topic = right["topic"]
+        target_profile, source_profile = self._pick_target_source(left, right)
+        rationale_parts: list[str] = []
+        if shared_entities:
+            rationale_parts.append(f"shared entities: {', '.join(shared_entities[:3])}")
+        if family_match:
+            rationale_parts.append(f"same family {left['family']}")
+        if title_score:
+            rationale_parts.append(f"title overlap {title_score:.2f}")
+        if shared_docs:
+            rationale_parts.append(f"shared documents {len(shared_docs)}")
+
+        return GraphMergeSuggestion(
+            axis=axis,
+            score=round(score, 3),
+            rationale="; ".join(rationale_parts) or "graph similarity detected",
+            shared_entity_keys=shared_entities[:5],
+            shared_document_count=len(shared_docs),
+            target_topic=GraphSuggestionTopicSummary(
+                id=str(target_profile["topic"].id),
+                title=target_profile["topic"].title,
+                slug=target_profile["topic"].slug,
+                topic_kind=target_profile["topic"].topic_kind,
+                topic_class=target_profile["topic"].topic_class,
+                assignment_count=len(target_profile["topic"].assignments),
+                dominant_assignment_role=target_profile["dominant_role"],
+            ),
+            source_topic=GraphSuggestionTopicSummary(
+                id=str(source_profile["topic"].id),
+                title=source_profile["topic"].title,
+                slug=source_profile["topic"].slug,
+                topic_kind=source_profile["topic"].topic_kind,
+                topic_class=source_profile["topic"].topic_class,
+                assignment_count=len(source_profile["topic"].assignments),
+                dominant_assignment_role=source_profile["dominant_role"],
+            ),
+        )
+
+    def _pick_target_source(
+        self,
+        left: dict[str, Any],
+        right: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        if left["weight"] > right["weight"]:
+            return left, right
+        if right["weight"] > left["weight"]:
+            return right, left
+        left_topic: Topic = left["topic"]
+        right_topic: Topic = right["topic"]
+        if left_topic.created_at <= right_topic.created_at:
+            return left, right
+        return right, left
+
+    def _set_similarity(self, left: set[str], right: set[str]) -> tuple[float, list[str]]:
+        if not left or not right:
+            return 0.0, []
+        shared = sorted(left & right)
+        union = left | right
+        return (len(shared) / len(union) if union else 0.0), shared
 
     def _find_canonical_topic(
         self,

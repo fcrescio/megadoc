@@ -473,3 +473,29 @@ class TopicProposalResolution(BaseModel):
     assignment_role: str = AssignmentRole.SECONDARY.value
     target_topic_id: Optional[str] = None
     create_topic: Optional[TopicCreate] = None
+
+
+class GraphSuggestionTopicSummaryResponse(BaseModel):
+    id: str
+    title: str
+    slug: str
+    topic_kind: str
+    topic_class: str
+    assignment_count: int
+    dominant_assignment_role: str
+
+
+class GraphMergeSuggestionResponse(BaseModel):
+    axis: str
+    score: float
+    rationale: str
+    shared_entity_keys: list[str] = Field(default_factory=list)
+    shared_document_count: int
+    source_topic: GraphSuggestionTopicSummaryResponse
+    target_topic: GraphSuggestionTopicSummaryResponse
+
+
+class GraphConsolidationSuggestionsResponse(BaseModel):
+    subject: list[GraphMergeSuggestionResponse] = Field(default_factory=list)
+    document_family: list[GraphMergeSuggestionResponse] = Field(default_factory=list)
+    case_or_issue: list[GraphMergeSuggestionResponse] = Field(default_factory=list)

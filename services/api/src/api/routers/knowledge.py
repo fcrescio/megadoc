@@ -51,6 +51,9 @@ from knowledge_classifier.schemas import (
     TopicCreate,
     TopicProposalResponse,
     DocumentTypeResponse,
+    GraphConsolidationSuggestionsResponse,
+    GraphMergeSuggestionResponse,
+    GraphSuggestionTopicSummaryResponse,
     KnowledgeJobResponse,
     ReviewUpdate,
     ReviewStatus,
@@ -1452,5 +1455,47 @@ def run_job_sync(job_id: str, db: Session = Depends(get_db_session)):
         job.error_message = str(e)
         db.commit()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/consolidation/suggestions", response_model=GraphConsolidationSuggestionsResponse)
+def get_graph_consolidation_suggestions(
+    limit_per_axis: int = 12,
+    db: Session = Depends(get_db_session),
+):
+    service = KnowledgeBaseConsolidationService(db)
+    suggestions = service.suggest_graph_merges(limit_per_axis=limit_per_axis)
+
+    def serialize_suggestion(item) -> GraphMergeSuggestionResponse:
+        return GraphMergeSuggestionResponse(
+            axis=item.axis,
+            score=item.score,
+            rationale=item.rationale,
+            shared_entity_keys=item.shared_entity_keys,
+            shared_document_count=item.shared_document_count,
+            source_topic=GraphSuggestionTopicSummaryResponse(
+                id=item.source_topic.id,
+                title=item.source_topic.title,
+                slug=item.source_topic.slug,
+                topic_kind=item.source_topic.topic_kind,
+                topic_class=item.source_topic.topic_class,
+                assignment_count=item.source_topic.assignment_count,
+                dominant_assignment_role=item.source_topic.dominant_assignment_role,
+            ),
+            target_topic=GraphSuggestionTopicSummaryResponse(
+                id=item.target_topic.id,
+                title=item.target_topic.title,
+                slug=item.target_topic.slug,
+                topic_kind=item.target_topic.topic_kind,
+                topic_class=item.target_topic.topic_class,
+                assignment_count=item.target_topic.assignment_count,
+                dominant_assignment_role=item.target_topic.dominant_assignment_role,
+            ),
+        )
+
+    return GraphConsolidationSuggestionsResponse(
+        subject=[serialize_suggestion(item) for item in suggestions.get("subject", [])],
+        document_family=[serialize_suggestion(item) for item in suggestions.get("document_family", [])],
+        case_or_issue=[serialize_suggestion(item) for item in suggestions.get("case_or_issue", [])],
+    )
     
     return {"status": job.status, "result": result}

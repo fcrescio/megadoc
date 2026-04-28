@@ -1,6 +1,7 @@
 import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import {
   useCanonicalEntities,
+  useGraphConsolidationSuggestions,
   useKnowledgeEntities,
   useKnowledgeEntityDetail,
   useMergeCanonicalEntity,
@@ -56,6 +57,7 @@ function KnowledgeBase({ onOpenDocument }: Props) {
     limit: 14,
   });
   const consolidate = useRunKnowledgeConsolidation();
+  const graphSuggestions = useGraphConsolidationSuggestions();
 
   const topicClasses = useMemo(() => {
     return Array.from(new Set((topics ?? []).map((topic) => topic.topic_class))).sort();
@@ -90,8 +92,12 @@ function KnowledgeBase({ onOpenDocument }: Props) {
       totalAssignments: source.reduce((acc, topic) => acc + topic.assignment_count, 0),
       totalAliases: source.reduce((acc, topic) => acc + topic.alias_count, 0),
       topicClasses: topicClasses.length,
+      graphSuggestions:
+        (graphSuggestions.data?.subject.length ?? 0) +
+        (graphSuggestions.data?.document_family.length ?? 0) +
+        (graphSuggestions.data?.case_or_issue.length ?? 0),
     };
-  }, [topicClasses.length, topics]);
+  }, [graphSuggestions.data, topicClasses.length, topics]);
 
   const searchActive = deferredSearch.length >= 2;
   const searchTopicHits = search.data?.topics ?? [];
@@ -216,6 +222,10 @@ function KnowledgeBase({ onOpenDocument }: Props) {
               <p className="text-xs uppercase tracking-wide text-cyan-200/70">Classes</p>
               <p className="mt-2 text-2xl font-semibold text-white">{stats.topicClasses}</p>
             </div>
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-4 col-span-2">
+              <p className="text-xs uppercase tracking-wide text-cyan-200/70">Graph suggestions</p>
+              <p className="mt-2 text-2xl font-semibold text-white">{stats.graphSuggestions}</p>
+            </div>
           </div>
         </div>
       </div>
@@ -301,6 +311,85 @@ function KnowledgeBase({ onOpenDocument }: Props) {
           {consolidate.data.aliases_created}.
         </div>
       )}
+
+      <div className="rounded-[28px] border border-white/10 bg-white/5 shadow-[0_18px_60px_rgba(2,6,23,0.35)] backdrop-blur-md overflow-hidden">
+        <div className="border-b border-white/10 px-5 py-4 flex items-center justify-between gap-3">
+          <div>
+            <p className="text-xs uppercase tracking-[0.28em] text-cyan-200/70">Graph Review Queue</p>
+            <h3 className="text-lg font-semibold text-white mt-1">Consolidation suggestions</h3>
+          </div>
+          <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-200">
+            review-first, no auto-merge
+          </span>
+        </div>
+        <div className="grid gap-4 p-5 xl:grid-cols-3">
+          {[
+            { axis: 'subject', label: 'Subjects', items: graphSuggestions.data?.subject ?? [] },
+            { axis: 'document_family', label: 'Document families', items: graphSuggestions.data?.document_family ?? [] },
+            { axis: 'case_or_issue', label: 'Cases / issues', items: graphSuggestions.data?.case_or_issue ?? [] },
+          ].map((group) => (
+            <div key={group.axis} className="rounded-2xl border border-white/10 bg-slate-950/40 p-4">
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <h4 className="text-sm font-semibold text-white">{group.label}</h4>
+                <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[11px] text-slate-300">
+                  {group.items.length}
+                </span>
+              </div>
+              {graphSuggestions.isLoading ? (
+                <div className="space-y-3 animate-pulse">
+                  <div className="h-20 rounded-2xl bg-white/5"></div>
+                  <div className="h-20 rounded-2xl bg-white/5"></div>
+                </div>
+              ) : group.items.length === 0 ? (
+                <p className="text-sm text-slate-400">No strong suggestions on this axis.</p>
+              ) : (
+                <div className="space-y-3">
+                  {group.items.map((item) => (
+                    <div key={`${group.axis}-${item.source_topic.id}-${item.target_topic.id}`} className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="rounded-full border border-cyan-300/20 bg-cyan-400/10 px-2 py-1 text-[11px] uppercase tracking-[0.18em] text-cyan-100">
+                          score {item.score.toFixed(2)}
+                        </span>
+                        <span className="text-xs text-slate-400">{item.shared_document_count} shared docs</span>
+                      </div>
+                      <div className="space-y-2">
+                        <button
+                          onClick={() => setSelectedTopicId(item.target_topic.id)}
+                          className="block text-left text-sm font-semibold text-white hover:text-cyan-200"
+                        >
+                          keep: {item.target_topic.title}
+                        </button>
+                        <p className="text-xs text-slate-400">
+                          {item.target_topic.topic_kind} · {item.target_topic.topic_class} · {item.target_topic.dominant_assignment_role}
+                        </p>
+                        <button
+                          onClick={() => setSelectedTopicId(item.source_topic.id)}
+                          className="block text-left text-sm text-slate-200 hover:text-cyan-200"
+                        >
+                          merge candidate: {item.source_topic.title}
+                        </button>
+                        <p className="text-xs text-slate-400">
+                          {item.source_topic.topic_kind} · {item.source_topic.topic_class} · {item.source_topic.dominant_assignment_role}
+                        </p>
+                      </div>
+                      <p className="text-sm text-slate-300">{item.rationale}</p>
+                      {item.shared_entity_keys.length > 0 && (
+                        <div className="flex flex-wrap gap-2">
+                          {item.shared_entity_keys.slice(0, 4).map((entityKey) => (
+                            <span key={entityKey} className="rounded-full border border-white/10 bg-slate-900/60 px-2 py-1 text-[11px] text-slate-300">
+                              {entityKey}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
 
       {searchActive && (
         <div className="grid gap-4 xl:grid-cols-[0.95fr_0.95fr_1.1fr]">

@@ -334,6 +334,32 @@ export interface KnowledgeConsolidationResult {
   proposals_retargeted: number;
 }
 
+export interface GraphSuggestionTopicSummary {
+  id: string;
+  title: string;
+  slug: string;
+  topic_kind: string;
+  topic_class: string;
+  assignment_count: number;
+  dominant_assignment_role: string;
+}
+
+export interface GraphMergeSuggestion {
+  axis: string;
+  score: number;
+  rationale: string;
+  shared_entity_keys: string[];
+  shared_document_count: number;
+  source_topic: GraphSuggestionTopicSummary;
+  target_topic: GraphSuggestionTopicSummary;
+}
+
+export interface GraphConsolidationSuggestions {
+  subject: GraphMergeSuggestion[];
+  document_family: GraphMergeSuggestion[];
+  case_or_issue: GraphMergeSuggestion[];
+}
+
 export interface TopicCreatePayload {
   slug: string;
   title: string;
