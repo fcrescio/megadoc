@@ -3,6 +3,8 @@
 # Segmentation prompt
 SEGMENTATION_PROMPT = """You are a document segmentation expert. Your task is to identify boundaries between distinct documents within a multi-page scan.
 
+{output_language_instruction}
+
 Analyze the provided page content and identify where one document ends and another begins.
 
 Look for these signals of document boundaries:
@@ -41,6 +43,7 @@ Rules:
 - Segments must be consecutive (no gaps)
 - Confidence between 0 and 1
 - If uncertain, create fewer segments with lower confidence
+- Write every rationale in the source document language
 
 Analyze the following pages:
 {pages_content}
@@ -48,6 +51,8 @@ Analyze the following pages:
 
 # Classification prompt
 CLASSIFICATION_PROMPT = """You are a document classification expert. Classify the given document into one of these document types:
+
+{output_language_instruction}
 
 Available document types:
 - bolletta: Utility bills, service charges
@@ -78,7 +83,7 @@ Output JSON schema:
       "salient_features": []
     }
   ],
-  "rationale": "Brief explanation of classification"
+  "rationale": "Sintesi molto breve della classificazione"
 }
 
 Rules:
@@ -87,10 +92,15 @@ Rules:
 - List 1-3 alternative types if applicable
 - Extract salient features that led to classification
 - If confidence < 0.7, mark for review
+- Write rationale and salient_features in the source document language
+- Keep rationale brief: 1-2 concise sentences, ideally under 40 words total
+- Keep type_code values canonical and unchanged
 """
 
 # Entity extraction prompt
 ENTITY_EXTRACTION_PROMPT = """You are an archival entity extraction expert for condominium documents.
+
+{output_language_instruction}
 
 Extract ONLY high-value filing/search entities from the document. This is not table transcription.
 
@@ -140,10 +150,14 @@ Rules:
 - Confidence between 0 and 1
 - Track page locations when possible
 - Summary should capture document purpose in one sentence, max 30 words
+- Write summary in the source document language
+- Keep entity_value as it appears in the document whenever possible
 """
 
 # Topic assignment prompt
 TOPIC_ASSIGNMENT_PROMPT = """You are a topic assignment expert. Assign documents to existing topics or propose new topics.
+
+{output_language_instruction}
 
 Existing topics available:
 {topics_list}
@@ -197,4 +211,6 @@ Rules:
 - Prefer a new proposal over a wrong existing topic
 - Confidence < 0.6 means needs_review
 - Be conservative with duplicate topic proposals, but never merge different buildings, addresses, periods, meetings, or legal matters
+- Write rationale, proposed_title, and description in the source document language
+- Keep topic_ids, slugs, and topic_class values canonical
 """

@@ -16,6 +16,7 @@ from knowledge_classifier.schemas import (
     SegmentBoundary,
     SegmentationResult,
 )
+from knowledge_classifier.services.language import detect_document_language, output_language_instruction
 
 logger = logging.getLogger(__name__)
 
@@ -266,9 +267,14 @@ class SegmentationService:
             f"=== Page {p.page_number} ===\n{p.text[:2000]}"
             for p in pages[:10]  # Limit to first 10 pages for context
         ])
-        
+        language_code = detect_document_language(pages_content)
+
         # Use replace instead of format to avoid conflicts with JSON in prompt
-        prompt = SEGMENTATION_PROMPT.replace("{pages_content}", pages_content)
+        prompt = (
+            SEGMENTATION_PROMPT
+            .replace("{pages_content}", pages_content)
+            .replace("{output_language_instruction}", output_language_instruction(language_code))
+        )
         
         messages = [
             ChatMessage(role="system", content="You are a document segmentation expert."),
@@ -285,12 +291,17 @@ class SegmentationService:
         except Exception as e:
             logger.error(f"LLM segmentation failed: {e}")
             # Fallback to single segment
+            fallback_rationale = (
+                f"Segmentazione LLM fallita: {str(e)[:100]}"
+                if language_code == "it"
+                else f"LLM segmentation failed: {str(e)[:100]}"
+            )
             return SegmentationResult(
                 segments=[SegmentCandidate(
                     start_page=1,
                     end_page=len(pages),
                     confidence=0.5,
-                    rationale=f"LLM segmentation failed: {str(e)[:100]}"
+                    rationale=fallback_rationale
                 )],
                 overall_confidence=0.5,
                 boundaries=[]

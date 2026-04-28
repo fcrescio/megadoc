@@ -28,6 +28,7 @@ from knowledge_classifier.schemas import (
 )
 from knowledge_classifier.services.classification import ClassificationService
 from knowledge_classifier.services.entity_extraction import EntityExtractionService
+from knowledge_classifier.services.language import detect_document_language
 from knowledge_classifier.services.pipeline_strategies import (
     FinancialPipelineStrategy,
     GeneralPipelineStrategy,
@@ -137,7 +138,7 @@ class KnowledgePipelineService:
             
             # Step 5: Topic assignment
             logger.info("Step 5: Assigning topics")
-            self._assign_topics(scan_unit, document_units, entity_results)
+            self._assign_topics(scan_unit, document_units, entity_results, ocr_result)
             strategy.postprocess(self, scan_unit, document_units, entity_results, ocr_result)
             
             # Update final status
@@ -245,8 +246,12 @@ class KnowledgePipelineService:
                 doc_unit.end_page,
                 ocr_result.page_count
             )
+            language_code = detect_document_language(segment_text)
             
-            classification = self.classification_service.classify_document(segment_text)
+            classification = self.classification_service.classify_document(
+                segment_text,
+                language_code=language_code,
+            )
             
             # Update document unit
             self._set_document_type(doc_unit, classification.primary_type.type_code)
@@ -284,11 +289,13 @@ class KnowledgePipelineService:
                 doc_unit.end_page,
                 ocr_result.page_count
             )
+            language_code = detect_document_language(segment_text)
             
             entity_result = self.entity_extraction_service.extract_entities(
                 segment_text,
                 doc_unit.start_page,
                 doc_unit.end_page,
+                language_code=language_code,
             )
 
             entities = self._normalize_entities(
@@ -311,9 +318,10 @@ class KnowledgePipelineService:
                 )
                 self.db.add(db_entity)
             
-            # Update summary if better one available
-            if entity_result.summary and not doc_unit.extracted_summary:
-                doc_unit.extracted_summary = entity_result.summary
+            # Prefer concise archival summaries from entity extraction when available.
+            if entity_result.summary:
+                if not doc_unit.extracted_summary or len(entity_result.summary) <= len(doc_unit.extracted_summary):
+                    doc_unit.extracted_summary = entity_result.summary
             
             results[doc_unit.id] = entity_result
         
@@ -324,12 +332,22 @@ class KnowledgePipelineService:
         scan_unit: DBScanUnit,
         document_units: list[DBDocumentUnit],
         entity_results: dict[uuid.UUID, Any],
+        ocr_result: OCRResult,
     ):
         """Assign topics to all document units."""
         for doc_unit in document_units:
             entity_result = entity_results.get(doc_unit.id)
             entities = entity_result.entities if entity_result else []
             document_type_code = self._get_document_type_code(doc_unit)
+            segment_text = self._extract_segment_text(
+                ocr_result.markdown_text,
+                doc_unit.start_page,
+                doc_unit.end_page,
+                ocr_result.page_count,
+            )
+            language_code = detect_document_language(
+                " ".join(part for part in [segment_text, doc_unit.title or "", doc_unit.extracted_summary or ""] if part)
+            )
             
             # Retrieve candidate topics
             candidates_result = self.topic_retrieval_service.retrieve_candidates(
@@ -346,6 +364,7 @@ class KnowledgePipelineService:
                 document_summary=doc_unit.extracted_summary,
                 entities=entities,
                 candidates=candidates_result.candidates,
+                language_code=language_code,
             )
             
             # Execute decision

@@ -10,6 +10,7 @@ from knowledge_classifier.config import get_settings
 from knowledge_classifier.llm.base import ChatMessage, LLMProvider
 from knowledge_classifier.prompts import CLASSIFICATION_PROMPT
 from knowledge_classifier.schemas import ClassificationResult
+from knowledge_classifier.services.language import detect_document_language, output_language_instruction
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,7 @@ class ClassificationService:
         self,
         document_text: str,
         available_types: list[DocumentType] | None = None,
+        language_code: str | None = None,
     ) -> ClassificationResult:
         """Classify a document into a document type.
         
@@ -38,6 +40,7 @@ class ClassificationService:
         """
         if available_types is None:
             available_types = self._get_active_document_types()
+        language_code = language_code or detect_document_language(document_text)
         
         # Truncate text if too long
         max_length = 15000
@@ -47,7 +50,11 @@ class ClassificationService:
             document_text = document_text[:half] + "\n...\n" + document_text[-half:]
         
         # Use replace instead of format to avoid conflicts with JSON in prompt
-        prompt = CLASSIFICATION_PROMPT.replace("{document_text}", document_text)
+        prompt = (
+            CLASSIFICATION_PROMPT
+            .replace("{document_text}", document_text)
+            .replace("{output_language_instruction}", output_language_instruction(language_code))
+        )
         
         messages = [
             ChatMessage(role="system", content="You are a document classification expert."),
@@ -64,7 +71,7 @@ class ClassificationService:
         except Exception as e:
             logger.error(f"LLM classification failed: {e}")
             # Fallback to heuristic classification
-            return self._heuristic_classification(document_text)
+            return self._heuristic_classification(document_text, language_code)
 
     def _get_active_document_types(self) -> list[DocumentType]:
         """Get all active document types from database."""
@@ -73,7 +80,7 @@ class ClassificationService:
         )
         return list(result.scalars().all())
 
-    def _heuristic_classification(self, text: str) -> ClassificationResult:
+    def _heuristic_classification(self, text: str, language_code: str = "it") -> ClassificationResult:
         """Fallback heuristic-based classification."""
         text_lower = text.lower()
         
@@ -127,6 +134,11 @@ class ClassificationService:
             
             keywords = type_patterns[primary_code][0]
             matched_keywords = [k for k in keywords if k in text_lower][:3]
+            rationale = (
+                "Classificazione euristica basata sul confronto con parole chiave"
+                if language_code == "it"
+                else "Heuristic classification based on keyword matching"
+            )
             return ClassificationResult(
                 primary_type={
                     "type_code": primary_code,
@@ -134,10 +146,15 @@ class ClassificationService:
                     "salient_features": matched_keywords
                 },
                 alternatives=[],
-                rationale=f"Heuristic classification based on keyword matching"
+                rationale=rationale
             )
         
         # Default to "altro"
+        default_rationale = (
+            "Nessun tipo documentale chiaramente riconoscibile"
+            if language_code == "it"
+            else "No clear document type detected"
+        )
         return ClassificationResult(
             primary_type={
                 "type_code": "altro",
@@ -145,5 +162,5 @@ class ClassificationService:
                 "salient_features": []
             },
             alternatives=[],
-            rationale="No clear document type detected"
+            rationale=default_rationale
         )

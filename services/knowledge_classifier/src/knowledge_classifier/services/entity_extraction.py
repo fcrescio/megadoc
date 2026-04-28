@@ -9,6 +9,7 @@ from knowledge_classifier.config import get_settings
 from knowledge_classifier.llm.base import ChatMessage, LLMProvider
 from knowledge_classifier.prompts import ENTITY_EXTRACTION_PROMPT
 from knowledge_classifier.schemas import EntityExtractionResult, ExtractedEntity
+from knowledge_classifier.services.language import detect_document_language, output_language_instruction
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,7 @@ class EntityExtractionService:
         document_text: str,
         start_page: int = 1,
         end_page: int = 1,
+        language_code: str | None = None,
     ) -> EntityExtractionResult:
         """Extract entities from document text.
         
@@ -37,6 +39,7 @@ class EntityExtractionService:
         Returns:
             EntityExtractionResult with extracted entities and summary
         """
+        language_code = language_code or detect_document_language(document_text)
         # Truncate if too long
         max_length = 12000
         if len(document_text) > max_length:
@@ -44,7 +47,11 @@ class EntityExtractionService:
             document_text = document_text[:half] + "\n...\n" + document_text[-half:]
         
         # Use replace instead of format to avoid conflicts with JSON in prompt
-        prompt = ENTITY_EXTRACTION_PROMPT.replace("{document_text}", document_text)
+        prompt = (
+            ENTITY_EXTRACTION_PROMPT
+            .replace("{document_text}", document_text)
+            .replace("{output_language_instruction}", output_language_instruction(language_code))
+        )
         
         messages = [
             ChatMessage(role="system", content="You are an entity extraction expert."),
@@ -66,13 +73,14 @@ class EntityExtractionService:
             return result
         except Exception as e:
             logger.error(f"LLM entity extraction failed: {e}")
-            return self._heuristic_extraction(document_text, start_page, end_page)
+            return self._heuristic_extraction(document_text, start_page, end_page, language_code)
 
     def _heuristic_extraction(
         self,
         text: str,
         start_page: int,
         end_page: int,
+        language_code: str = "it",
     ) -> EntityExtractionResult:
         """Fallback heuristic-based entity extraction."""
         entities: list[ExtractedEntity] = []
@@ -130,7 +138,12 @@ class EntityExtractionService:
                 page_to=end_page
             ))
         
+        summary_text = text[:200] + "..." if len(text) > 200 else text
+        if language_code == "it":
+            summary = f"Estrazione euristica da OCR: {summary_text}"
+        else:
+            summary = f"Heuristic OCR extraction: {summary_text}"
         return EntityExtractionResult(
             entities=entities,
-            summary=text[:200] + "..." if len(text) > 200 else text
+            summary=summary
         )
