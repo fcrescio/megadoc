@@ -86,3 +86,29 @@ class ReadinessResponse(BaseModel):
     database: str
     redis: str
     storage: str
+
+
+class ManualCommentCreate(BaseModel):
+    selected_text: str
+    selection_start: int | None = None
+    selection_end: int | None = None
+    comment_text: str
+    author_name: str | None = None
+
+
+class ManualCommentResponse(BaseModel):
+    id: UUID
+    manual_slug: str
+    selected_text: str
+    selection_start: int | None
+    selection_end: int | None
+    comment_text: str
+    author_name: str | None
+    created_at: datetime
+
+
+class ManualResponse(BaseModel):
+    slug: str
+    title: str
+    markdown: str
+    comments: list[ManualCommentResponse]

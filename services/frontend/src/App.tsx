@@ -4,8 +4,9 @@ import DocumentDetail from './components/DocumentDetail';
 import UploadForm from './components/UploadForm';
 import JobStatus from './components/JobStatus';
 import KnowledgeBase from './components/KnowledgeBase';
+import ManualView from './components/ManualView';
 
-type View = 'documents' | 'knowledge' | 'upload';
+type View = 'documents' | 'knowledge' | 'upload' | 'manual';
 type DocumentTab = 'info' | 'pdf' | 'ocr' | 'knowledge' | 'versions' | 'assets';
 
 interface RouteState {
@@ -24,6 +25,9 @@ function parseRoute(): RouteState {
   }
   if (pathname === '/upload') {
     return { view: 'upload', selectedDoc: null, initialTab: 'info' };
+  }
+  if (pathname === '/manual') {
+    return { view: 'manual', selectedDoc: null, initialTab: 'info' };
   }
   if (pathname.startsWith('/documents/')) {
     const documentId = pathname.replace('/documents/', '').trim();
@@ -49,6 +53,8 @@ function App() {
     let url = '/';
     if (next.view === 'knowledge' && !next.selectedDoc) {
       url = '/knowledge';
+    } else if (next.view === 'manual' && !next.selectedDoc) {
+      url = '/manual';
     } else if (next.view === 'upload' && !next.selectedDoc) {
       url = '/upload';
     } else if (next.selectedDoc) {
@@ -95,6 +101,7 @@ function App() {
             {[
               { id: 'documents', label: 'Documents' },
               { id: 'knowledge', label: 'Knowledge' },
+              { id: 'manual', label: 'Manual' },
               { id: 'upload', label: 'Upload' },
             ].map((item) => (
               <button
@@ -153,6 +160,8 @@ function App() {
           <UploadForm />
         ) : route.view === 'knowledge' ? (
           <KnowledgeBase onOpenDocument={(documentId) => openDocument(documentId, 'knowledge')} />
+        ) : route.view === 'manual' ? (
+          <ManualView />
         ) : (
           <div className="grid gap-6 xl:grid-cols-[1.35fr_0.85fr]">
             <DocumentList onSelectDocument={(documentId) => openDocument(documentId)} />

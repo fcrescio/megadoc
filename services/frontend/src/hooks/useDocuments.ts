@@ -14,6 +14,9 @@ import type {
   CanonicalEntitySummary,
   CanonicalEntityDetail,
   CanonicalEntityMergePayload,
+  ManualDocument,
+  ManualComment,
+  ManualCommentCreatePayload,
   KnowledgeConsolidationResult,
   KnowledgeTopicProposal,
   TopicAssignmentUpsertPayload,
@@ -34,6 +37,8 @@ import {
   getKnowledgeEntityDetail,
   getCanonicalEntities,
   mergeCanonicalEntity,
+  getManual,
+  createManualComment,
   getKnowledgeTopics,
   runKnowledgeConsolidation,
   uploadDocument,
@@ -166,6 +171,24 @@ export function useMergeCanonicalEntity() {
       queryClient.invalidateQueries({ queryKey: ['knowledge-entity-detail'] });
       queryClient.invalidateQueries({ queryKey: ['canonical-entities'] });
       queryClient.invalidateQueries({ queryKey: ['knowledge-search'] });
+    },
+  });
+}
+
+export function useManual(slug: string | null) {
+  return useQuery<ManualDocument | null>({
+    queryKey: ['manual', slug],
+    queryFn: () => getManual(slug!),
+    enabled: !!slug,
+  });
+}
+
+export function useCreateManualComment() {
+  const queryClient = useQueryClient();
+  return useMutation<ManualComment, Error, { slug: string; payload: ManualCommentCreatePayload }>({
+    mutationFn: ({ slug, payload }) => createManualComment(slug, payload),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['manual', variables.slug] });
     },
   });
 }

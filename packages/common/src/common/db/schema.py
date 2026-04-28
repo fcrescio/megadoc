@@ -53,6 +53,17 @@ def ensure_knowledge_schema(engine) -> None:
             updated_at TIMESTAMPTZ NULL
         )""",
         "CREATE INDEX IF NOT EXISTS ix_canonical_entity_variants_type_key ON canonical_entity_variants(entity_type, entity_key)",
+        """CREATE TABLE IF NOT EXISTS manual_comments (
+            id UUID PRIMARY KEY,
+            manual_slug VARCHAR(128) NOT NULL,
+            selected_text TEXT NOT NULL,
+            selection_start INTEGER NULL,
+            selection_end INTEGER NULL,
+            comment_text TEXT NOT NULL,
+            author_name VARCHAR(255) NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )""",
+        "CREATE INDEX IF NOT EXISTS ix_manual_comments_slug_created_at ON manual_comments(manual_slug, created_at)",
     ]
     with engine.begin() as conn:
         for statement in statements:

@@ -14,6 +14,9 @@ import type {
   CanonicalEntitySummary,
   CanonicalEntityDetail,
   CanonicalEntityMergePayload,
+  ManualDocument,
+  ManualComment,
+  ManualCommentCreatePayload,
   KnowledgeConsolidationResult,
   KnowledgeDocumentUnit,
   KnowledgeTopicProposal,
@@ -158,6 +161,23 @@ export async function mergeCanonicalEntity(payload: CanonicalEntityMergePayload)
     body: JSON.stringify(payload),
   });
   return handleResponse<CanonicalEntityDetail>(response);
+}
+
+export async function getManual(slug: string): Promise<ManualDocument> {
+  const response = await fetch(`${API_BASE}/manuals/${slug}`);
+  return handleResponse<ManualDocument>(response);
+}
+
+export async function createManualComment(
+  slug: string,
+  payload: ManualCommentCreatePayload,
+): Promise<ManualComment> {
+  const response = await fetch(`${API_BASE}/manuals/${slug}/comments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return handleResponse<ManualComment>(response);
 }
 
 export async function runKnowledgeConsolidation(): Promise<KnowledgeConsolidationResult> {

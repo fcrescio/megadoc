@@ -353,3 +353,16 @@ class LLMDecision(Base):
 
     scan_unit: Mapped["ScanUnit | None"] = relationship(back_populates="llm_decisions")
     document_unit: Mapped["DocumentUnit | None"] = relationship(back_populates="llm_decisions")
+
+
+class ManualComment(Base):
+    __tablename__ = "manual_comments"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    manual_slug: Mapped[str] = mapped_column(String(128), nullable=False)
+    selected_text: Mapped[str] = mapped_column(Text, nullable=False)
+    selection_start: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    selection_end: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    comment_text: Mapped[str] = mapped_column(Text, nullable=False)
+    author_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())

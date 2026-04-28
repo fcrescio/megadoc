@@ -16,6 +16,9 @@ from common.api.schemas import (
     DocumentResponse,
     DocumentVersionResponse,
     JobResponse,
+    ManualCommentCreate,
+    ManualCommentResponse,
+    ManualResponse,
     OCRResponse,
     ReadinessResponse,
     UploadResponse,
@@ -29,6 +32,7 @@ from common.application.repositories import (
 )
 from common.application.services import DocumentService, JobService, persist_upload_to_temp
 from common.config import Settings, get_settings
+from common.db.models import ManualComment
 from common.db.schema import ensure_knowledge_schema
 from common.db.session import engine, get_db_session
 from common.domain.enums import SourceType
@@ -41,6 +45,8 @@ configure_logging(get_settings().log_level)
 
 app = FastAPI(title="megadoc api", version="0.1.0")
 app.add_middleware(RequestContextMiddleware)
+MANUAL_DIRECTORY = Path("/app/docs")
+MANUAL_SLUGS = {"system": MANUAL_DIRECTORY / "system_manual.md"}
 
 
 def _serialize_job(job, session: Session) -> JobResponse:
@@ -118,6 +124,19 @@ def get_document_service_dep(
 
 def get_job_service_dep(session: Annotated[Session, Depends(db_session_dep)]) -> JobService:
     return JobService(session=session)
+
+
+def _load_manual(slug: str) -> tuple[str, str]:
+    manual_path = MANUAL_SLUGS.get(slug)
+    if manual_path is None or not manual_path.exists():
+        raise HTTPException(status_code=404, detail="Manual not found.")
+    markdown = manual_path.read_text(encoding="utf-8")
+    title = "System Manual"
+    for line in markdown.splitlines():
+        if line.startswith("# "):
+            title = line[2:].strip()
+            break
+    return title, markdown
 
 
 @app.post("/documents/upload", response_model=UploadResponse)
@@ -234,6 +253,48 @@ def list_document_assets(
         raise HTTPException(status_code=404, detail="Document not found.")
     rows = AssetRepository(session).list_for_document(document_id)
     return [DocumentAssetResponse.model_validate(row, from_attributes=True) for row in rows]
+
+
+@app.get("/manuals/{manual_slug}", response_model=ManualResponse)
+def get_manual(manual_slug: str, session: Session = Depends(db_session_dep)) -> ManualResponse:
+    title, markdown = _load_manual(manual_slug)
+    comments = (
+        session.query(ManualComment)
+        .filter(ManualComment.manual_slug == manual_slug)
+        .order_by(ManualComment.created_at.desc())
+        .all()
+    )
+    return ManualResponse(
+        slug=manual_slug,
+        title=title,
+        markdown=markdown,
+        comments=[ManualCommentResponse.model_validate(comment, from_attributes=True) for comment in comments],
+    )
+
+
+@app.post("/manuals/{manual_slug}/comments", response_model=ManualCommentResponse, status_code=201)
+def create_manual_comment(
+    manual_slug: str,
+    payload: ManualCommentCreate,
+    session: Session = Depends(db_session_dep),
+) -> ManualCommentResponse:
+    _load_manual(manual_slug)
+    comment = ManualComment(
+        manual_slug=manual_slug,
+        selected_text=payload.selected_text.strip(),
+        selection_start=payload.selection_start,
+        selection_end=payload.selection_end,
+        comment_text=payload.comment_text.strip(),
+        author_name=(payload.author_name or "").strip() or None,
+    )
+    if not comment.selected_text:
+        raise HTTPException(status_code=400, detail="selected_text is required.")
+    if not comment.comment_text:
+        raise HTTPException(status_code=400, detail="comment_text is required.")
+    session.add(comment)
+    session.commit()
+    session.refresh(comment)
+    return ManualCommentResponse.model_validate(comment, from_attributes=True)
 
 
 @app.get("/documents/{document_id}/ocr", response_model=OCRResponse)

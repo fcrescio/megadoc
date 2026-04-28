@@ -289,6 +289,32 @@ export interface CanonicalEntityMergePayload {
   create_canonical_entity?: CanonicalEntityCreatePayload;
 }
 
+export interface ManualComment {
+  id: string;
+  manual_slug: string;
+  selected_text: string;
+  selection_start: number | null;
+  selection_end: number | null;
+  comment_text: string;
+  author_name: string | null;
+  created_at: string;
+}
+
+export interface ManualDocument {
+  slug: string;
+  title: string;
+  markdown: string;
+  comments: ManualComment[];
+}
+
+export interface ManualCommentCreatePayload {
+  selected_text: string;
+  selection_start?: number | null;
+  selection_end?: number | null;
+  comment_text: string;
+  author_name?: string | null;
+}
+
 export interface KnowledgeConsolidationResult {
   topics_before: number;
   topics_after: number;
