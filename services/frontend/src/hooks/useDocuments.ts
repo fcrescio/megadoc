@@ -22,6 +22,7 @@ import {
   getDocumentAssets,
   getDocumentOCR,
   getDocumentKnowledge,
+  ensureDocumentKnowledge,
   getKnowledgeTopic,
   searchKnowledge,
   getKnowledgeTopics,
@@ -79,6 +80,18 @@ export function useDocumentKnowledge(documentId: string | null) {
     queryKey: ['knowledge', documentId],
     queryFn: () => getDocumentKnowledge(documentId!),
     enabled: !!documentId,
+  });
+}
+
+export function useEnsureDocumentKnowledge() {
+  const queryClient = useQueryClient();
+  return useMutation<{ id: string }, Error, string>({
+    mutationFn: (documentId) => ensureDocumentKnowledge(documentId),
+    onSuccess: (_, documentId) => {
+      queryClient.invalidateQueries({ queryKey: ['knowledge', documentId] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge'] });
+      queryClient.invalidateQueries({ queryKey: ['jobs'] });
+    },
   });
 }
 

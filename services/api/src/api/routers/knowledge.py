@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
+from common.application.knowledge import ensure_scan_unit_for_ocr_result
 from common.db.models import (
     Document,
     DocumentType,
@@ -383,33 +384,50 @@ async def create_scan_unit_from_ocr(
     ocr_result = result.scalar_one_or_none()
     if not ocr_result:
         raise HTTPException(status_code=404, detail="OCR result not found")
-    
-    # Create scan unit
-    scan_unit = ScanUnit(
-        source_document_id=ocr_result.document_id,
-        source_document_version_id=ocr_result.document_version_id,
-        source_ocr_result_id=ocr_result.id,
-        page_count=ocr_result.page_count,
-        status="pending",
-    )
-    db.add(scan_unit)
-    db.flush()  # Get scan_unit.id
-    
-    # Create knowledge job
-    job = KnowledgeJob(
-        scan_unit_id=scan_unit.id,
-        job_type="full_processing",
-        status="pending",
-    )
-    db.add(job)
-    
-    # Queue the processing task
-    dispatch_scan_unit_processing(str(scan_unit.id))
-    
-    # Update job status
-    job.status = "queued"
+
+    scan_unit, _, _, should_dispatch = ensure_scan_unit_for_ocr_result(db, ocr_result)
+    if should_dispatch:
+        dispatch_scan_unit_processing(str(scan_unit.id))
     db.commit()
-    
+
+    return ScanUnitResponse(
+        id=str(scan_unit.id),
+        source_document_id=str(scan_unit.source_document_id),
+        source_ocr_result_id=str(scan_unit.source_ocr_result_id),
+        page_count=scan_unit.page_count,
+        status=scan_unit.status,
+        segmentation_confidence=scan_unit.segmentation_confidence,
+        classification_confidence=scan_unit.classification_confidence,
+        assignment_confidence=scan_unit.assignment_confidence,
+        created_at=scan_unit.created_at,
+        updated_at=scan_unit.updated_at,
+    )
+
+
+@router.post("/documents/{document_id}/ensure", response_model=ScanUnitResponse)
+def ensure_document_knowledge(
+    document_id: str,
+    db: Session = Depends(get_db_session),
+):
+    """Ensure a document with OCR result has a queued knowledge scan."""
+    try:
+        parsed_document_id = uuid.UUID(document_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid document ID") from exc
+
+    ocr_result = db.execute(
+        select(OCRResult)
+        .where(OCRResult.document_id == parsed_document_id)
+        .order_by(OCRResult.created_at.desc())
+    ).scalar_one_or_none()
+    if ocr_result is None:
+        raise HTTPException(status_code=409, detail="OCR result not available yet")
+
+    scan_unit, _, _, should_dispatch = ensure_scan_unit_for_ocr_result(db, ocr_result)
+    if should_dispatch:
+        dispatch_scan_unit_processing(str(scan_unit.id))
+    db.commit()
+
     return ScanUnitResponse(
         id=str(scan_unit.id),
         source_document_id=str(scan_unit.source_document_id),

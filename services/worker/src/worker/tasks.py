@@ -1,13 +1,21 @@
+import os
 from uuid import UUID
 
+from celery import Celery
 from celery.utils.log import get_task_logger
 
+from common.application.knowledge import ensure_scan_unit_for_ocr_result
 from common.application.services import JobService, OCRService
 from common.db.session import SessionLocal
 from common.domain.exceptions import ApplicationError
 from worker.celery_app import celery_app
 
 logger = get_task_logger(__name__)
+
+knowledge_dispatch_app = Celery(
+    "worker_to_knowledge_dispatch",
+    broker=os.getenv("CELERY_BROKER_URL", "redis://redis:6379/1"),
+)
 
 
 @celery_app.task(name="worker.tasks.process_ingestion_job", bind=True, autoretry_for=(), retry_backoff=False)
@@ -33,6 +41,14 @@ def process_ingestion_job(self, job_id: str, backend_override: str | None = None
         )
         result = ocr_service.process_job(UUID(job_id))
         job_service.mark_succeeded(job)
+        scan_unit, _, _, should_dispatch = ensure_scan_unit_for_ocr_result(session, result)
+        session.commit()
+        if should_dispatch:
+            knowledge_dispatch_app.send_task(
+                "knowledge_worker.tasks.process_scan_unit_task",
+                args=[str(scan_unit.id)],
+                queue="knowledge",
+            )
         logger.info("job_succeeded", extra={"job_id": job_id, "ocr_result_id": str(result.id)})
         return {"job_id": job_id, "ocr_result_id": str(result.id)}
     except Exception as exc:

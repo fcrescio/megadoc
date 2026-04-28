@@ -8,6 +8,7 @@ import {
   useDocumentOCR,
   useDocumentAssets,
   useDocumentKnowledge,
+  useEnsureDocumentKnowledge,
   useKnowledgeTopics,
   useAddDocumentUnitTopicAssignment,
   useDeleteDocumentUnitTopicAssignment,
@@ -256,6 +257,7 @@ function DocumentDetail({ documentId, onBack, initialTab = 'info' }: Props) {
   const { data: knowledge, isLoading: knowledgeLoading } = useDocumentKnowledge(documentId);
   const { data: assets } = useDocumentAssets(documentId);
   const { data: knowledgeTopics = [] } = useKnowledgeTopics(true);
+  const ensureKnowledge = useEnsureDocumentKnowledge();
 
   useEffect(() => {
     setActiveTab(initialTab);
@@ -550,7 +552,25 @@ function DocumentDetail({ documentId, onBack, initialTab = 'info' }: Props) {
                   ))}
                 </div>
               ) : (
-                <p className="text-gray-500">No knowledge result available yet.</p>
+                <div className="space-y-4">
+                  <p className="text-gray-500">No knowledge result available yet.</p>
+                  {ocrResult ? (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+                      <p className="text-sm text-amber-900">
+                        OCR is available for this document, but the knowledge pipeline has not produced a scan yet.
+                      </p>
+                      <button
+                        onClick={() => ensureKnowledge.mutate(documentId)}
+                        disabled={ensureKnowledge.isPending}
+                        className="mt-3 px-4 py-2 rounded-md bg-amber-600 text-white text-sm hover:bg-amber-700 disabled:opacity-60"
+                      >
+                        {ensureKnowledge.isPending ? 'Queueing knowledge...' : 'Process knowledge now'}
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-500">Knowledge starts only after OCR succeeds.</p>
+                  )}
+                </div>
               )}
             </div>
           )}
