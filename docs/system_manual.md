@@ -2,7 +2,7 @@
 
 ## Scopo
 
-Megadoc e` un sistema self-hosted di document intelligence progettato per trasformare corpus PDF eterogenei in una base di conoscenza navigabile, revisionabile e progressivamente consolidabile.
+Megadoc è un sistema self-hosted di document intelligence progettato per trasformare corpus PDF eterogenei in una base di conoscenza navigabile, revisionabile e progressivamente consolidabile.
 
 Il sistema nasce per lavorare su documenti reali, non su benchmark puliti:
 
@@ -10,16 +10,16 @@ Il sistema nasce per lavorare su documenti reali, non su benchmark puliti:
 - PDF malformati o borderline
 - pagine ruotate o capovolte
 - documenti contabili e amministrativi con layout instabili
-- fascicoli composti da piu` sottodocumenti
+- fascicoli composti da più sottodocumenti
 - corpora storici o accumulati senza struttura iniziale
 
-L'obiettivo non e` "fare OCR". L'OCR e` solo il primo strato affidabile. Lo scopo finale e` costruire una memoria documentale navigabile fatta di:
+L'obiettivo non è "fare OCR". L'OCR è solo il primo strato affidabile. Lo scopo finale è costruire una memoria documentale navigabile fatta di:
 
 - documenti e versioni
 - testo OCR e derivati strutturati
-- unita` logiche di documento
+- unità logiche di documento
 - classificazioni
-- entita` estratte
+- entità estratte
 - topic multipli e relazioni
 - consolidamento progressivo
 - intervento umano come parte nativa del sistema
@@ -28,46 +28,46 @@ L'obiettivo non e` "fare OCR". L'OCR e` solo il primo strato affidabile. Lo scop
 
 ### Cosa funziona bene
 
-1. L'architettura e` stratificata bene.
+1. L'architettura è stratificata bene.
    Il sistema non chiede a un solo modello di risolvere ingest, OCR, semantica, clustering e review in un unico passaggio. Questo riduce i fallimenti opachi e permette miglioramenti locali.
 
 2. Il dato sorgente viene preservato.
-   PDF originale, versioni, OCR e derivati restano separati dalla knowledge. Questo e` corretto: gli strati semantici possono cambiare senza distruggere la prova documentale.
+   PDF originale, versioni, OCR e derivati restano separati dalla knowledge. Questo è corretto: gli strati semantici possono cambiare senza distruggere la prova documentale.
 
 3. Il progetto ha preso la direzione giusta verso il human-in-the-loop.
    Topic proposals, multi-assign, canonical entities, review queue e commenti sul manuale sono tutti segnali di un sistema che non pretende un'automazione perfetta.
 
-4. La knowledge e` navigabile da piu` assi.
-   Documento, OCR, topic, entita`, canonical entities e ora search convivono nello stesso frontend. Questo e` un vantaggio forte rispetto a pipeline che producono solo JSON o solo embedding.
+4. La knowledge è navigabile da più assi.
+   Documento, OCR, topic, entità, canonical entities e ora search convivono nello stesso frontend. Questo è un vantaggio forte rispetto a pipeline che producono solo JSON o solo embedding.
 
-5. La pipeline OCR e` ormai realmente modulare.
-   Il sistema puo` usare backend diversi, includere preflight, normalizzazione orientamento, fallback e refinement.
+5. La pipeline OCR è ormai realmente modulare.
+   Il sistema può usare backend diversi, includere preflight, normalizzazione orientamento, fallback e refinement.
 
 ### Debolezze strutturali attuali
 
-1. L'evoluzione schema e` ancora in parte applicativa.
-   Oggi diverse tabelle e colonne vengono create o adattate allo startup con bootstrap SQL. E` pragmatico, ma nel medio termine rende piu` fragile il governo del dato rispetto a vere migration versionate.
+1. L'evoluzione schema è ancora in parte applicativa.
+   Oggi diverse tabelle e colonne vengono create o adattate allo startup con bootstrap SQL. È pragmatico, ma nel medio termine rende più fragile il governo del dato rispetto a vere migration versionate.
 
-2. Il modello knowledge e` piu` ricco del consolidamento attuale.
+2. Il modello knowledge è più ricco del consolidamento attuale.
    Ora il sistema supporta topic multipli con ruoli diversi, ma buona parte della logica di consolidamento nasce ancora dal mondo precedente "un documento -> un topic principale". Serve evolvere il consolidamento in ottica grafo.
 
-3. L'indice entita` e` utile ma ancora giovane.
-   L'estrazione per documento funziona, ma la canonicalizzazione globale e` ancora un primo layer. Mancano ancora policy forti su merge, split, provenance e riuso nel routing semantico.
+3. L'indice entità è utile ma ancora giovane.
+   L'estrazione per documento funziona, ma la canonicalizzazione globale è ancora un primo layer. Mancano ancora policy forti su merge, split, provenance e riuso nel routing semantico.
 
-4. La coordinazione tra worker e modelli e` volutamente conservativa.
-   La scelta di serializzare alcune richieste al modello evita collisioni, ma riduce throughput. E` accettabile in questa fase, ma andra` governata meglio se il corpus cresce.
+4. La coordinazione tra worker e modelli è volutamente conservativa.
+   La scelta di serializzare alcune richieste al modello evita collisioni, ma riduce throughput. È accettabile in questa fase, ma andrà governata meglio se il corpus cresce.
 
-5. Il frontend e` ormai ricco, ma la governance della review e` ancora implicita.
-   Ci sono gia` ottime superfici di navigazione, ma mancano ancora workflow espliciti di priorita`, ownership, auditing e risoluzione dei conflitti tra review diverse.
+5. Il frontend è ormai ricco, ma la governance della review è ancora implicita.
+   Ci sono già ottime superfici di navigazione, ma mancano ancora workflow espliciti di priorità, ownership, auditing e risoluzione dei conflitti tra review diverse.
 
 ### Giudizio complessivo
 
-L'architettura e` buona e ha preso una direzione corretta: non e` un demo OCR, ma un sistema di costruzione progressiva di knowledge base. Il rischio principale non e` tecnico di base; e` di modellazione e governance. Il prossimo salto di qualita` non dipende solo da modelli migliori, ma da:
+L'architettura è buona e ha preso una direzione corretta: non è un demo OCR, ma un sistema di costruzione progressiva di knowledge base. Il rischio principale non è tecnico di base; è di modellazione e governance. Il prossimo salto di qualità non dipende solo da modelli migliori, ma da:
 
 - migliore struttura delle relazioni
 - migliore consolidamento
 - maggiore intervento umano guidato
-- regole piu` chiare su canonicalizzazione e review
+- regole più chiare su canonicalizzazione e review
 
 ## Principi Guida
 
@@ -93,14 +93,14 @@ Megadoc decompone il problema in fasi:
 3. OCR e preflight
 4. segmentazione
 5. classificazione
-6. estrazione entita`
+6. estrazione entità
 7. assegnazione topic o proposal
 8. consolidamento
 9. review umana
 
 Questo rende le failure analizzabili e correggibili.
 
-### 3. Rappresentare l'ambiguita`, non nasconderla
+### 3. Rappresentare l'ambiguità, non nasconderla
 
 Molti documenti sono rumorosi, compositi o semanticamente ambigui.
 
@@ -112,11 +112,11 @@ Per questo il sistema usa concetti come:
 - canonical entity con varianti
 - fallback OCR
 
-La falsa certezza e` peggiore dell'incertezza esplicita.
+La falsa certezza è peggiore dell'incertezza esplicita.
 
-### 4. L'umano non e` l'eccezione
+### 4. L'umano non è l'eccezione
 
-L'utente non e` solo qualcuno che corregge errori. E` un co-autore della struttura della knowledge base.
+L'utente non è solo qualcuno che corregge errori. È un co-autore della struttura della knowledge base.
 
 Deve poter:
 
@@ -124,7 +124,7 @@ Deve poter:
 - unire topic
 - creare topic manuali
 - aggiungere topic secondari
-- canonizzare entita`
+- canonizzare entità
 - commentare il manuale
 
 ### 5. Progettare per documenti brutti
@@ -142,7 +142,7 @@ Per questo esistono preflight, detector di orientamento, fallback OCR e pipeline
 
 ## Architettura Logica
 
-Megadoc e` composto da questi servizi principali:
+Megadoc è composto da questi servizi principali:
 
 - `api`: backend FastAPI
 - `frontend`: interfaccia web
@@ -161,7 +161,7 @@ Componenti ausiliari:
 
 ### API
 
-L'API e` responsabile di:
+L'API è responsabile di:
 
 - upload PDF
 - creazione job
@@ -173,7 +173,7 @@ L'API e` responsabile di:
 - ricerca
 - manuale vivo e commenti
 
-L'API e` stateless sul piano applicativo; la persistenza vive in PostgreSQL e MinIO.
+L'API è stateless sul piano applicativo; la persistenza vive in PostgreSQL e MinIO.
 
 ### OCR Worker
 
@@ -186,7 +186,7 @@ Il worker OCR consuma `ingestion_jobs` e si occupa di:
 - salvataggio output e asset derivati
 - enqueue automatico della knowledge dopo successo OCR
 
-La separazione tra worker OCR e worker knowledge e` corretta: evita di legare il throughput OCR alla disponibilita` del modello semantico.
+La separazione tra worker OCR e worker knowledge è corretta: evita di legare il throughput OCR alla disponibilità del modello semantico.
 
 ### Knowledge Worker
 
@@ -195,16 +195,16 @@ Il worker knowledge consuma `scan_unit` e produce:
 - segmentazione in `document_unit`
 - classificazione
 - summary
-- entita`
+- entità
 - assegnazioni topic
 - topic proposal
 - consolidamento scan-level
 
-Attualmente la sua concorrenza e` deliberatamente prudente per non contendere il modello locale.
+Attualmente la sua concorrenza è deliberatamente prudente per non contendere il modello locale.
 
 ### Frontend
 
-Il frontend e` il punto di contatto operativo per:
+Il frontend è il punto di contatto operativo per:
 
 - lista documenti
 - stato job
@@ -218,13 +218,13 @@ Il frontend e` il punto di contatto operativo per:
 - proposal review
 - lettura e commento del manuale
 
-Il principio di prodotto e` corretto: OCR, knowledge e review non devono vivere in superfici separate.
+Il principio di prodotto è corretto: OCR, knowledge e review non devono vivere in superfici separate.
 
 ## Modello Dati
 
 ### Strato documentale
 
-- `documents`: identita` logica del documento
+- `documents`: identità logica del documento
 - `document_versions`: lineage binario
 - `document_assets`: derivati e asset memorizzati
 - `ingestion_jobs`: job OCR
@@ -232,17 +232,17 @@ Il principio di prodotto e` corretto: OCR, knowledge e review non devono vivere 
 
 ### Strato knowledge
 
-- `scan_units`: promozione di un OCR in unita` semanticamente processabile
+- `scan_units`: promozione di un OCR in unità semanticamente processabile
 - `document_units`: sottodocumenti logici dentro uno scan
-- `document_unit_entities`: entita` estratte per unita`
+- `document_unit_entities`: entità estratte per unità
 - `document_unit_topic_assignments`: relazione molti-a-molti con ruoli
 - `topics`: topic canonici
 - `topic_aliases`: alias testuali dei topic
-- `topic_proposals`: suggerimenti non ancora consolidati o gia` assorbiti
+- `topic_proposals`: suggerimenti non ancora consolidati o già assorbiti
 - `knowledge_jobs`: job asincroni della pipeline knowledge
 - `llm_decisions`: audit trail delle decisioni modello
 
-### Strato entita` canoniche
+### Strato entità canoniche
 
 - `canonical_entities`
 - `canonical_entity_variants`
@@ -259,7 +259,7 @@ L'upload salva il file, calcola hash, gestisce deduplica e versioning.
 
 Possibili esiti:
 
-- documento gia` noto
+- documento già noto
 - nuova versione
 - nuovo documento logico
 
@@ -290,20 +290,20 @@ La pipeline knowledge:
 1. instrada il documento verso una famiglia di pipeline
 2. segmenta
 3. classifica
-4. estrae entita`
+4. estrae entità
 5. assegna topic o produce proposal
 6. applica post-processing
 
 ### 6. Review e consolidamento
 
-L'utente puo` poi:
+L'utente può poi:
 
 - navigare per topic
 - cercare nel corpus
 - rivedere proposals
 - creare topic manuali
 - aggiungere assignment multipli
-- consolidare entita`
+- consolidare entità
 
 ## Architettura OCR
 
@@ -313,28 +313,28 @@ Il preflight misura segnali tecnici che il solo `page_count` non cattura:
 
 - PDF valido o malformato
 - peso per pagina
-- probabilita` `image_only`
+- probabilità `image_only`
 - segnali di heavy scan
 - rotazioni dichiarate
 
 ### Orientamento
 
-L'orientamento e` un problema separato dall'OCR.
-La pipeline puo` usare detector dedicati prima dell'OCR per normalizzare l'input.
+L'orientamento è un problema separato dall'OCR.
+La pipeline può usare detector dedicati prima dell'OCR per normalizzare l'input.
 
 ### Backend OCR
 
-Il sistema e` progettato per backend intercambiabili, tra cui:
+Il sistema è progettato per backend intercambiabili, tra cui:
 
 - Docling + RapidOCR
 - `dots_native` con prompt nativi `dots.ocr`
 - backend sperimentali multimodali LLM
 
-La direzione corretta e` mantenere un contratto comune di output, non un solo motore OCR.
+La direzione corretta è mantenere un contratto comune di output, non un solo motore OCR.
 
 ### Fallback
 
-Il backend `dots_native` e` stato irrobustito con:
+Il backend `dots_native` è stato irrobustito con:
 
 - retry HTTP
 - render alternativi
@@ -342,7 +342,7 @@ Il backend `dots_native` e` stato irrobustito con:
 - seconda scala di render
 - riconoscimento pagina vuota
 
-Questa logica e` importante: una pipeline OCR reale deve degradare con grazia.
+Questa logica è importante: una pipeline OCR reale deve degradare con grazia.
 
 ## Routing Knowledge
 
@@ -355,7 +355,7 @@ Il sistema usa un router semantico iniziale verso famiglie larghe:
 - `utility_vendor`
 - `technical_admin`
 
-Questo e` meglio di un unico worker iper-specializzato, perche':
+Questo è meglio di un unico worker iper-specializzato, perché:
 
 - consente prompt diversi
 - consente post-processing diversi
@@ -365,9 +365,9 @@ La `general_pipeline` resta il fallback di sicurezza.
 
 ## Topic e Relazioni
 
-Il modello corretto non e` "un documento appartiene a un solo topic".
+Il modello corretto non è "un documento appartiene a un solo topic".
 
-Oggi un `document_unit` puo` avere piu` assignment con ruoli diversi, tra cui:
+Oggi un `document_unit` può avere più assignment con ruoli diversi, tra cui:
 
 - `subject`
 - `document_family`
@@ -388,11 +388,11 @@ Questo consente di modellare casi come:
   - `subject = lavastoviglie`
   - eventuale `case_or_issue = guasto_lavastoviglie`
 
-Questa e` una delle scelte architetturali piu` importanti del progetto.
+Questa è una delle scelte architetturali più importanti del progetto.
 
 ## Consolidamento Topic
 
-Il consolidamento attuale fa gia` diverse cose utili:
+Il consolidamento attuale fa già diverse cose utili:
 
 - bootstrap topic canonici
 - merge di duplicati evidenti
@@ -402,32 +402,32 @@ Il consolidamento attuale fa gia` diverse cose utili:
 
 Ma non basta abbassare soglie per scendere a "poche decine" di topic.
 
-La vera direzione e`:
+La vera direzione è:
 
 - consolidamento assistito dall'umano
 - strutture multi-topic
-- consolidamento guidato da entita` forti
+- consolidamento guidato da entità forti
 - review dei casi ambigui ad alto valore
 
-Il consolidamento non deve distruggere granularita` utile. Deve separare:
+Il consolidamento non deve distruggere granularità utile. Deve separare:
 
 - topic soggetto
 - famiglie documentali
 - pratiche/casi
 - contesti organizzativi
 
-## Entita`
+## Entità
 
-Le entita` vengono prima estratte localmente per `document_unit`.
+Le entità vengono prima estratte localmente per `document_unit`.
 Poi il sistema offre:
 
 - indice aggregato globale
 - dettaglio entity con document hits
 - canonical entities revisionabili
 
-Questo e` corretto, ma ancora incompleto.
+Questo è corretto, ma ancora incompleto.
 
-La direzione futura e` usare le canonical entities non solo per browsing, ma anche per:
+La direzione futura è usare le canonical entities non solo per browsing, ma anche per:
 
 - migliorare search
 - influenzare consolidamento topic
@@ -435,7 +435,7 @@ La direzione futura e` usare le canonical entities non solo per browsing, ma anc
 
 ## Search
 
-La search attuale e` un asse strategico del sistema.
+La search attuale è un asse strategico del sistema.
 Cerca su:
 
 - topic
@@ -445,8 +445,8 @@ Cerca su:
 - filename
 - OCR text
 
-Questo compensa un limite inevitabile della knowledge base: non tutto verra` canonizzato subito.
-La search deve permettere di trovare anche cio` che il consolidamento non ha ancora strutturato.
+Questo compensa un limite inevitabile della knowledge base: non tutto verrà canonizzato subito.
+La search deve permettere di trovare anche ciò che il consolidamento non ha ancora strutturato.
 
 ## Frontend
 
@@ -463,15 +463,15 @@ Il frontend attuale offre:
 - `Knowledge`: search console, topic browser, entity browser, review
 - `Manual`: manuale vivo commentabile
 
-Il visualizzatore PDF embedded e` importante: la review deve poter tornare alla fonte senza uscire dal contesto.
+Il visualizzatore PDF embedded è importante: la review deve poter tornare alla fonte senza uscire dal contesto.
 
 ## Manuale Vivo
 
-Questo stesso documento e` pensato come parte del prodotto, non come file statico dimenticato.
+Questo stesso documento è pensato come parte del prodotto, non come file statico dimenticato.
 
 Funzioni attuali:
 
-- e` servito dal frontend
+- è servito dal frontend
 - legge markdown dal backend
 - consente selezione di un passaggio
 - salva commenti con citazione e offset
@@ -481,12 +481,12 @@ Questo permette una manutenzione incrementale guidata dall'uso reale.
 
 ## Limiti Attuali del Manuale Vivo
 
-La funzionalita` attuale e` utile, ma va letta per quello che e`:
+La funzionalità attuale è utile, ma va letta per quello che è:
 
-- non e` ancora un sistema completo di annotation governance
+- non è ancora un sistema completo di annotation governance
 - l'ancoraggio usa testo selezionato e offset, non ancora un motore robusto di re-anchoring su versioni future del testo
-- non c'e` ancora threading dei commenti
-- non c'e` ancora workflow di risoluzione o approvazione dei commenti
+- non c'è ancora threading dei commenti
+- non c'è ancora workflow di risoluzione o approvazione dei commenti
 
 Va bene come primo livello operativo.
 
@@ -504,9 +504,9 @@ Servono:
 ### 2. Passare dal consolidamento per topic al consolidamento per grafo
 
 Non basta unire stringhe simili.
-Serve usare con piu` forza:
+Serve usare con più forza:
 
-- entita`
+- entità
 - soggetti
 - periodi
 - contesti
@@ -514,23 +514,23 @@ Serve usare con piu` forza:
 
 ### 3. Formalizzare le migration
 
-Lo startup bootstrap e` stato utile per iterare velocemente, ma il progetto merita migrazioni versionate piu` esplicite.
+Lo startup bootstrap è stato utile per iterare velocemente, ma il progetto merita migrazioni versionate più esplicite.
 
-### 4. Migliorare osservabilita`
+### 4. Migliorare osservabilità
 
-Servono metriche piu` chiare su:
+Servono metriche più chiare su:
 
 - tempi OCR
 - tempi knowledge
 - failure rate per backend
 - documenti con alto rumore OCR
 - topic troppo generici
-- entita` ad alta collisione
+- entità ad alta collisione
 
 ### 5. Integrare meglio canonical entities e topic
 
 Oggi i due mondi esistono entrambi.
-Il prossimo salto e` fare in modo che si rafforzino a vicenda.
+Il prossimo salto è fare in modo che si rafforzino a vicenda.
 
 ## Filosofia di Progetto
 
@@ -540,7 +540,7 @@ Megadoc non deve essere pensato come:
 - un RAG di documenti
 - un archivio PDF con ricerca full-text
 
-Megadoc e` piu` correttamente:
+Megadoc è più correttamente:
 
 - un sistema di ingestione documentale
 - con memoria stratificata
@@ -548,7 +548,7 @@ Megadoc e` piu` correttamente:
 - con consolidamento umano nel loop
 - e con navigazione orientata alla costruzione di conoscenza
 
-La filosofia corretta e` questa:
+La filosofia corretta è questa:
 
 1. non perdere il grezzo
 2. arricchire per strati
@@ -560,10 +560,10 @@ La filosofia corretta e` questa:
 
 Usa questo manuale per:
 
-- capire come e` fatto il sistema
+- capire come è fatto il sistema
 - discutere le scelte architetturali
 - evidenziare punti fragili
 - proporre miglioramenti
 - lasciare commenti puntuali su passaggi specifici
 
-Il manuale non e` definitivo. Deve evolvere con il sistema.
+Il manuale non è definitivo. Deve evolvere con il sistema.

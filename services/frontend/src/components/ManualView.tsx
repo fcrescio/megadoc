@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useCreateManualComment, useManual } from '../hooks/useDocuments';
@@ -40,17 +40,15 @@ function ManualView() {
   const [authorName, setAuthorName] = useState('');
   const [commentText, setCommentText] = useState('');
 
-  useEffect(() => {
-    const handleMouseUp = () => {
-      if (!articleRef.current) {
-        return;
-      }
-      const nextSelection = getSelectionOffsets(articleRef.current);
+  const handleArticleSelection = () => {
+    if (!articleRef.current) {
+      return;
+    }
+    const nextSelection = getSelectionOffsets(articleRef.current);
+    if (nextSelection) {
       setSelection(nextSelection);
-    };
-    document.addEventListener('mouseup', handleMouseUp);
-    return () => document.removeEventListener('mouseup', handleMouseUp);
-  }, []);
+    }
+  };
 
   const architectureComments = manual.data?.comments ?? [];
   const commentStats = useMemo(() => {
@@ -148,7 +146,12 @@ function ManualView() {
               slug: {manualData.slug}
             </span>
           </div>
-          <div ref={articleRef} className="markdown-body max-h-[78vh] overflow-y-auto px-6 py-6 selection:bg-fuchsia-400/35">
+          <div
+            ref={articleRef}
+            onMouseUp={handleArticleSelection}
+            onKeyUp={handleArticleSelection}
+            className="markdown-body max-h-[78vh] overflow-y-auto px-6 py-6 selection:bg-fuchsia-400/35"
+          >
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{manualData.markdown}</ReactMarkdown>
           </div>
         </div>
