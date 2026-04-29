@@ -315,6 +315,7 @@ class KnowledgeBaseConsolidationService:
 
         self._signature_cache.clear()
         self._consolidate_compatible_groups(stats)
+        self._normalize_meeting_topics(stats)
         self._finalize_matched_proposals()
         self.db.flush()
         stats.topics_after = int(
@@ -807,6 +808,210 @@ class KnowledgeBaseConsolidationService:
         stats.topics_merged += 1
         self._signature_cache.pop(str(canonical.id), None)
         self._signature_cache.pop(str(duplicate.id), None)
+
+    def _normalize_meeting_topics(self, stats: ConsolidationStats) -> None:
+        active_topics = self.db.execute(self._topic_query(active_only=True)).scalars().all()
+        clusters: dict[str, list[Topic]] = {}
+        for topic in active_topics:
+            key = self._meeting_cluster_key(topic)
+            if key:
+                clusters.setdefault(key, []).append(topic)
+
+        for cluster_topics in clusters.values():
+            family_topics = [topic for topic in cluster_topics if topic.topic_class == "meeting"]
+            if family_topics:
+                canonical = max(family_topics, key=self._topic_weight)
+                for topic in family_topics:
+                    if topic.id == canonical.id or not topic.is_active:
+                        continue
+                    self._merge_topic_into(canonical, topic, stats)
+            else:
+                seed_topic = max(cluster_topics, key=self._topic_weight)
+                generic_title = self._meeting_generic_title(seed_topic)
+                generic_slug = self._meeting_generic_slug(seed_topic)
+                existing_generic = self.db.execute(
+                    select(Topic).where(Topic.slug == generic_slug)
+                ).scalar_one_or_none()
+                if existing_generic is not None:
+                    canonical = existing_generic
+                    canonical.is_active = True
+                    canonical.canonical = True
+                    canonical.topic_class = "meeting"
+                    canonical.topic_kind = "family"
+                    canonical.title = generic_title
+                    canonical.description = "Topic ombrello per i verbali e le assemblee del medesimo condominio."
+                else:
+                    canonical = Topic(
+                        slug=generic_slug,
+                        title=generic_title,
+                        topic_class="meeting",
+                        topic_kind="family",
+                        description="Topic ombrello per i verbali e le assemblee del medesimo condominio.",
+                        canonical=True,
+                        is_active=True,
+                    )
+                    self.db.add(canonical)
+                    self.db.flush()
+
+            self._rename_topic_to_meeting_family(canonical, stats)
+            self._ensure_meeting_family_assignments(canonical, cluster_topics)
+
+        active_topics = self.db.execute(self._topic_query(active_only=True)).scalars().all()
+        family_groups: dict[str, list[Topic]] = {}
+        for topic in active_topics:
+            if topic.topic_class != "meeting" or topic.topic_kind != "family" or not topic.is_active:
+                continue
+            signature = self._meeting_family_signature(topic)
+            if signature:
+                family_groups.setdefault(signature, []).append(topic)
+
+        for grouped_topics in family_groups.values():
+            if len(grouped_topics) < 2:
+                continue
+            canonical = max(grouped_topics, key=self._topic_weight)
+            for topic in grouped_topics:
+                if topic.id == canonical.id or not topic.is_active:
+                    continue
+                self._merge_topic_into(canonical, topic, stats)
+            self._rename_topic_to_meeting_family(canonical, stats)
+
+    def _meeting_cluster_key(self, topic: Topic) -> str | None:
+        topic_text = f"{topic.title} {topic.description or ''}".lower()
+        if topic.topic_class != "meeting" and not re.search(r"\b(assemblea|verbale|ordinaria|straordinaria)\b", topic_text):
+            return None
+
+        anchors = self._topic_anchor_parts(topic)
+        primary = anchors["condominio"] or anchors["indirizzo"] or anchors["organizzazione"]
+        if primary:
+            return f"meeting:{primary}"
+
+        fallback_tokens = sorted(self._title_tokens(topic.title))
+        if not fallback_tokens:
+            return None
+        return f"meeting:{'_'.join(fallback_tokens[:3])}"
+
+    def _meeting_generic_title(self, topic: Topic) -> str:
+        label = self._topic_anchor_display_value(topic)
+        if label:
+            return f"Assemblee condominiali - {label}"
+        return "Assemblee condominiali"
+
+    def _meeting_family_signature(self, topic: Topic) -> str | None:
+        tokens = sorted(
+            self._title_tokens(f"{topic.title} {topic.description or ''}")
+            - {"verbale", "assemblea", "condominiale", "condominiali", "ordinaria", "straordinaria"}
+        )
+        if not tokens:
+            anchors = self._topic_anchor_parts(topic)
+            primary = anchors["condominio"] or anchors["indirizzo"] or anchors["organizzazione"]
+            if not primary:
+                return None
+            return f"meeting-family:{primary}"
+        return f"meeting-family:{'_'.join(tokens[:4])}"
+
+    def _meeting_generic_slug(self, topic: Topic) -> str:
+        return self._slugify(self._meeting_generic_title(topic))
+
+    def _rename_topic_to_meeting_family(self, topic: Topic, stats: ConsolidationStats) -> None:
+        generic_title = self._meeting_generic_title(topic)
+        generic_slug = self._meeting_generic_slug(topic)
+        alias_values = {
+            topic.slug.lower(),
+            topic.title.lower(),
+            *(alias.alias.lower() for alias in topic.aliases),
+        }
+        for candidate_alias in (topic.slug, topic.title):
+            if candidate_alias.lower() not in alias_values:
+                self.db.add(TopicAlias(topic_id=topic.id, alias=candidate_alias))
+                alias_values.add(candidate_alias.lower())
+                stats.aliases_created += 1
+
+        if topic.title != generic_title:
+            if topic.title.lower() not in alias_values:
+                self.db.add(TopicAlias(topic_id=topic.id, alias=topic.title))
+                alias_values.add(topic.title.lower())
+                stats.aliases_created += 1
+            topic.title = generic_title
+        unique_slug = self._unique_topic_slug(generic_slug, topic.id)
+        if topic.slug != unique_slug:
+            if topic.slug.lower() not in alias_values:
+                self.db.add(TopicAlias(topic_id=topic.id, alias=topic.slug))
+                alias_values.add(topic.slug.lower())
+                stats.aliases_created += 1
+            topic.slug = unique_slug
+        topic.topic_kind = "family"
+        topic.topic_class = "meeting"
+        topic.updated_at = _utcnow()
+        self._signature_cache.pop(str(topic.id), None)
+
+    def _ensure_meeting_family_assignments(self, canonical: Topic, cluster_topics: list[Topic]) -> None:
+        touched_units: set[str] = set()
+        for topic in cluster_topics:
+            for assignment in list(topic.assignments):
+                document_unit = assignment.document_unit
+                if document_unit is None:
+                    continue
+                unit_key = str(document_unit.id)
+                if unit_key in touched_units:
+                    continue
+                touched_units.add(unit_key)
+                has_assignment = any(
+                    existing.topic_id == canonical.id and existing.assignment_role == "document_family"
+                    for existing in document_unit.topic_assignments
+                )
+                if has_assignment:
+                    continue
+                self.db.add(
+                    DocumentUnitTopicAssignment(
+                        document_unit_id=document_unit.id,
+                        topic_id=canonical.id,
+                        assignment_role="document_family",
+                        confidence=assignment.confidence,
+                        rationale="Meeting-family consolidation created an umbrella assembly topic.",
+                    )
+                )
+
+    def _topic_anchor_display_value(self, topic: Topic) -> str | None:
+        counts: dict[str, Counter[str]] = {
+            entity_type: Counter()
+            for entity_type in ("condominio", "indirizzo", "organizzazione")
+        }
+        for assignment in topic.assignments:
+            document_unit = assignment.document_unit
+            if document_unit is None:
+                continue
+            for entity in document_unit.entities:
+                if entity.entity_type not in counts:
+                    continue
+                display_value = (entity.entity_value or "").strip()
+                if display_value:
+                    counts[entity.entity_type][display_value] += 1
+
+        for entity_type in ("condominio", "indirizzo", "organizzazione"):
+            counter = counts[entity_type]
+            if counter:
+                return sorted(counter.items(), key=lambda item: (-item[1], -len(item[0]), item[0]))[0][0]
+
+        title = topic.title.strip()
+        if " - " in title:
+            return title.split(" - ", 1)[1].strip()
+        return None
+
+    def _slugify(self, value: str) -> str:
+        normalized = value.lower()
+        normalized = re.sub(r"[^a-z0-9]+", "-", normalized)
+        normalized = re.sub(r"-{2,}", "-", normalized)
+        return normalized.strip("-")[:255] or "topic"
+
+    def _unique_topic_slug(self, base_slug: str, topic_id: Any | None = None) -> str:
+        candidate = base_slug
+        suffix = 2
+        while True:
+            existing = self.db.execute(select(Topic).where(Topic.slug == candidate)).scalar_one_or_none()
+            if existing is None or (topic_id is not None and existing.id == topic_id):
+                return candidate
+            candidate = f"{base_slug[:240]}-{suffix}"
+            suffix += 1
 
     def _consolidate_compatible_groups(self, stats: ConsolidationStats) -> None:
         active_topics = self.db.execute(self._topic_query(active_only=True)).scalars().all()
