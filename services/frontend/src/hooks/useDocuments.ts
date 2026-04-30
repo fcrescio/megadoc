@@ -9,6 +9,8 @@ import type {
   KnowledgeTopicSummary,
   KnowledgeTopicDetail,
   KnowledgeSearchResult,
+  SpecialistAccountingStatementSummary,
+  SpecialistUtilityBillSummary,
   KnowledgeEntitySummary,
   KnowledgeEntityDetail,
   CanonicalEntitySummary,
@@ -38,6 +40,8 @@ import {
   ensureDocumentSpecialists,
   getKnowledgeTopic,
   searchKnowledge,
+  getSpecialistUtilityBills,
+  getSpecialistAccountingStatements,
   getKnowledgeEntities,
   getKnowledgeEntityDetail,
   getCanonicalEntities,
@@ -160,6 +164,31 @@ export function useKnowledgeSearch(
     queryKey: ['knowledge-search', query, options?.includeInactive, options?.topicKind, options?.topicClass, options?.limit],
     queryFn: () => searchKnowledge(query, options),
     enabled: query.trim().length >= 2,
+  });
+}
+
+export function useSpecialistUtilityBills(options?: {
+  query?: string;
+  issuer?: string;
+  paymentStatus?: string;
+  overdueOnly?: boolean;
+  limit?: number;
+}) {
+  return useQuery<{ total: number; items: SpecialistUtilityBillSummary[] }>({
+    queryKey: ['specialist-utility-bills', options?.query, options?.issuer, options?.paymentStatus, options?.overdueOnly, options?.limit],
+    queryFn: () => getSpecialistUtilityBills(options),
+  });
+}
+
+export function useSpecialistAccountingStatements(options?: {
+  query?: string;
+  statementType?: string;
+  checkStatus?: string;
+  limit?: number;
+}) {
+  return useQuery<{ total: number; items: SpecialistAccountingStatementSummary[] }>({
+    queryKey: ['specialist-accounting-statements', options?.query, options?.statementType, options?.checkStatus, options?.limit],
+    queryFn: () => getSpecialistAccountingStatements(options),
   });
 }
 

@@ -258,6 +258,53 @@ export interface KnowledgeSearchResult {
   document_units: KnowledgeSearchDocumentHit[];
 }
 
+export interface SpecialistUtilityBillSummary {
+  result_id: string;
+  document_unit_id: string;
+  document_id: string | null;
+  original_filename: string | null;
+  document_type_code: string | null;
+  title: string | null;
+  summary: string | null;
+  issuer: string | null;
+  service_type: string | null;
+  account_holder: string | null;
+  issue_date: string | null;
+  due_date: string | null;
+  billing_period_from: string | null;
+  billing_period_to: string | null;
+  total_amount: number | null;
+  currency: string | null;
+  payment_status: string | null;
+  document_number: string | null;
+  contract_code: string | null;
+  supply_reference: string | null;
+  confidence: number | null;
+  review_status: string;
+  related_links: KnowledgeDocumentUnitLink[];
+  created_at: string;
+}
+
+export interface SpecialistAccountingStatementSummary {
+  result_id: string;
+  document_unit_id: string;
+  document_id: string | null;
+  original_filename: string | null;
+  document_type_code: string | null;
+  title: string | null;
+  summary: string | null;
+  statement_type: string | null;
+  accounting_period_from: string | null;
+  accounting_period_to: string | null;
+  currency: string | null;
+  table_count: number;
+  validation_checks: Record<string, unknown>[];
+  has_failed_checks: boolean;
+  confidence: number | null;
+  review_status: string;
+  created_at: string;
+}
+
 export interface KnowledgeEntitySummary {
   entity_type: string;
   entity_key: string;

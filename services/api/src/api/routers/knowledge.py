@@ -1,10 +1,13 @@
 """Knowledge classifier API router."""
 
+import csv
+import io
 import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import JSONResponse, PlainTextResponse
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
@@ -208,6 +211,132 @@ def _serialize_document_unit(doc_unit: DocumentUnit) -> dict[str, Any]:
         "created_at": doc_unit.created_at,
         "updated_at": doc_unit.updated_at,
     }
+
+
+def _latest_specialist_result(document_unit: DocumentUnit, specialist_type: str) -> SpecialistResult | None:
+    results = [result for result in document_unit.specialist_results if result.specialist_type == specialist_type]
+    if not results:
+        return None
+    return max(results, key=lambda item: item.created_at)
+
+
+def _serialize_specialist_utility_summary(result: SpecialistResult, document_unit: DocumentUnit) -> dict[str, Any]:
+    payload = result.result_json or {}
+    scan_unit = document_unit.scan_unit
+    document = scan_unit.document if scan_unit else None
+    links = [link for link in document_unit.outgoing_links if link.link_type.startswith("utility_bill_")]
+    return {
+        "result_id": str(result.id),
+        "document_unit_id": str(document_unit.id),
+        "document_id": str(document.id) if document else None,
+        "original_filename": document.original_filename if document else None,
+        "document_type_code": document_unit.document_type.code if document_unit.document_type else None,
+        "title": document_unit.title,
+        "summary": document_unit.extracted_summary,
+        "issuer": payload.get("issuer"),
+        "service_type": payload.get("service_type"),
+        "account_holder": payload.get("account_holder"),
+        "issue_date": payload.get("issue_date"),
+        "due_date": payload.get("due_date"),
+        "billing_period_from": payload.get("billing_period_from"),
+        "billing_period_to": payload.get("billing_period_to"),
+        "total_amount": payload.get("total_amount"),
+        "currency": payload.get("currency"),
+        "payment_status": payload.get("payment_status"),
+        "document_number": payload.get("document_number"),
+        "contract_code": payload.get("contract_code"),
+        "supply_reference": payload.get("supply_reference"),
+        "confidence": result.confidence,
+        "review_status": result.review_status,
+        "related_links": [
+            {
+                "id": str(link.id),
+                "link_type": link.link_type,
+                "target_document_unit_id": str(link.target_document_unit_id),
+                "target_document_id": (
+                    str(link.target_document_unit.scan_unit.source_document_id)
+                    if link.target_document_unit and link.target_document_unit.scan_unit
+                    else None
+                ),
+                "target_title": link.target_document_unit.title if link.target_document_unit else None,
+                "target_document_type_code": (
+                    link.target_document_unit.document_type.code
+                    if link.target_document_unit and link.target_document_unit.document_type
+                    else None
+                ),
+                "confidence": link.confidence,
+                "rationale": link.rationale,
+            }
+            for link in links
+        ],
+        "created_at": result.created_at,
+    }
+
+
+def _serialize_specialist_accounting_summary(result: SpecialistResult, document_unit: DocumentUnit) -> dict[str, Any]:
+    payload = result.result_json or {}
+    scan_unit = document_unit.scan_unit
+    document = scan_unit.document if scan_unit else None
+    tables = payload.get("tables") if isinstance(payload.get("tables"), list) else []
+    checks = payload.get("validation_checks") if isinstance(payload.get("validation_checks"), list) else []
+    return {
+        "result_id": str(result.id),
+        "document_unit_id": str(document_unit.id),
+        "document_id": str(document.id) if document else None,
+        "original_filename": document.original_filename if document else None,
+        "document_type_code": document_unit.document_type.code if document_unit.document_type else None,
+        "title": document_unit.title,
+        "summary": document_unit.extracted_summary,
+        "statement_type": payload.get("statement_type"),
+        "accounting_period_from": payload.get("accounting_period_from"),
+        "accounting_period_to": payload.get("accounting_period_to"),
+        "currency": payload.get("currency"),
+        "table_count": len(tables),
+        "validation_checks": checks,
+        "has_failed_checks": any(check.get("status") == "fail" for check in checks if isinstance(check, dict)),
+        "confidence": result.confidence,
+        "review_status": result.review_status,
+        "created_at": result.created_at,
+    }
+
+
+def _specialist_result_to_csv(result: SpecialistResult) -> str:
+    payload = result.result_json or {}
+    if result.specialist_type == "accounting_statement":
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+        tables = payload.get("tables") if isinstance(payload.get("tables"), list) else []
+        for table in tables:
+            if not isinstance(table, dict):
+                continue
+            writer.writerow([f"table_id={table.get('table_id','')}", f"table_type={table.get('table_type','')}"])
+            headers = table.get("headers") if isinstance(table.get("headers"), list) else []
+            if headers:
+                writer.writerow([str(header) for header in headers])
+            rows = table.get("rows") if isinstance(table.get("rows"), list) else []
+            for row in rows:
+                cells = row.get("cells") if isinstance(row, dict) and isinstance(row.get("cells"), dict) else {}
+                writer.writerow([str(cells.get(str(header), "")) for header in headers])
+            writer.writerow([])
+        checks = payload.get("validation_checks") if isinstance(payload.get("validation_checks"), list) else []
+        if checks:
+            writer.writerow(["validation_checks"])
+            writer.writerow(["check_type", "status", "details"])
+            for check in checks:
+                if not isinstance(check, dict):
+                    continue
+                writer.writerow([check.get("check_type", ""), check.get("status", ""), check.get("details", "")])
+        return buffer.getvalue()
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(["field", "value"])
+    for key, value in payload.items():
+        if isinstance(value, (list, dict)):
+            writer.writerow([key, str(value)])
+        else:
+            writer.writerow([key, value])
+    return buffer.getvalue()
 
 
 def _serialize_topic_summary(topic: Topic) -> TopicSummaryResponse:
@@ -1020,6 +1149,132 @@ def search_knowledge(
         total_document_hits=len(document_hits),
         topics=topic_hits,
         document_units=document_hits,
+    )
+
+
+@router.get("/specialists/utility-bills")
+def list_specialist_utility_bills(
+    q: str | None = None,
+    issuer: str | None = None,
+    payment_status: str | None = None,
+    overdue_only: bool = False,
+    limit: int = Query(default=50, ge=1, le=200),
+    db: Session = Depends(get_db_session),
+) -> dict[str, Any]:
+    results = db.execute(
+        select(SpecialistResult)
+        .where(SpecialistResult.specialist_type == "utility_bill")
+        .options(
+            selectinload(SpecialistResult.document_unit).selectinload(DocumentUnit.document_type),
+            selectinload(SpecialistResult.document_unit)
+            .selectinload(DocumentUnit.scan_unit)
+            .selectinload(ScanUnit.document),
+            selectinload(SpecialistResult.document_unit)
+            .selectinload(DocumentUnit.outgoing_links)
+            .selectinload(DocumentUnitLink.target_document_unit)
+            .selectinload(DocumentUnit.document_type),
+            selectinload(SpecialistResult.document_unit)
+            .selectinload(DocumentUnit.outgoing_links)
+            .selectinload(DocumentUnitLink.target_document_unit)
+            .selectinload(DocumentUnit.scan_unit),
+        )
+    ).scalars().all()
+
+    today = _utcnow().date().isoformat()
+    normalized_query = _normalize_search_value(q)
+    normalized_issuer = _normalize_search_value(issuer)
+    items: list[dict[str, Any]] = []
+    for result in sorted(results, key=lambda item: item.created_at, reverse=True):
+        document_unit = result.document_unit
+        if document_unit is None:
+            continue
+        item = _serialize_specialist_utility_summary(result, document_unit)
+        haystack = " ".join(
+            str(item.get(field) or "")
+            for field in ("issuer", "account_holder", "document_number", "summary", "original_filename", "supply_reference")
+        ).lower()
+        if normalized_query and normalized_query not in haystack:
+            continue
+        if normalized_issuer and normalized_issuer not in _normalize_search_value(str(item.get("issuer") or "")):
+            continue
+        if payment_status and payment_status != "all" and item.get("payment_status") != payment_status:
+            continue
+        if overdue_only:
+            due_date = item.get("due_date")
+            if not isinstance(due_date, str) or due_date >= today or item.get("payment_status") == "paid":
+                continue
+        items.append(item)
+        if len(items) >= limit:
+            break
+    return {"total": len(items), "items": items}
+
+
+@router.get("/specialists/accounting-statements")
+def list_specialist_accounting_statements(
+    q: str | None = None,
+    statement_type: str | None = None,
+    check_status: str | None = None,
+    limit: int = Query(default=50, ge=1, le=200),
+    db: Session = Depends(get_db_session),
+) -> dict[str, Any]:
+    results = db.execute(
+        select(SpecialistResult)
+        .where(SpecialistResult.specialist_type == "accounting_statement")
+        .options(
+            selectinload(SpecialistResult.document_unit).selectinload(DocumentUnit.document_type),
+            selectinload(SpecialistResult.document_unit)
+            .selectinload(DocumentUnit.scan_unit)
+            .selectinload(ScanUnit.document),
+        )
+    ).scalars().all()
+
+    normalized_query = _normalize_search_value(q)
+    items: list[dict[str, Any]] = []
+    for result in sorted(results, key=lambda item: item.created_at, reverse=True):
+        document_unit = result.document_unit
+        if document_unit is None:
+            continue
+        item = _serialize_specialist_accounting_summary(result, document_unit)
+        haystack = " ".join(
+            str(item.get(field) or "")
+            for field in ("statement_type", "summary", "original_filename", "title")
+        ).lower()
+        if normalized_query and normalized_query not in haystack:
+            continue
+        if statement_type and statement_type != "all" and item.get("statement_type") != statement_type:
+            continue
+        if check_status and check_status != "all":
+            statuses = {
+                check.get("status")
+                for check in item.get("validation_checks", [])
+                if isinstance(check, dict)
+            }
+            if check_status not in statuses:
+                continue
+        items.append(item)
+        if len(items) >= limit:
+            break
+    return {"total": len(items), "items": items}
+
+
+@router.get("/specialist-results/{result_id}/export")
+def export_specialist_result(
+    result_id: uuid.UUID,
+    format: str = Query(default="json", pattern="^(json|csv)$"),
+    db: Session = Depends(get_db_session),
+):
+    result = db.get(SpecialistResult, result_id)
+    if result is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Specialist result not found")
+    if format == "json":
+        return JSONResponse(content=result.result_json or {})
+    csv_text = _specialist_result_to_csv(result)
+    return PlainTextResponse(
+        content=csv_text,
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f'attachment; filename="{result.specialist_type}-{result.id}.csv"',
+        },
     )
 
 

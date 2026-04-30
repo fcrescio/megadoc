@@ -8,6 +8,8 @@ import {
   useKnowledgeSearch,
   useKnowledgeTopic,
   useKnowledgeTopics,
+  useSpecialistAccountingStatements,
+  useSpecialistUtilityBills,
   useReviewGraphConsolidationSuggestion,
   useRunKnowledgeConsolidation,
   useTopicProposals,
@@ -16,6 +18,18 @@ import ProposalList from './ProposalList';
 
 interface Props {
   onOpenDocument: (documentId: string) => void;
+}
+
+function formatDate(value: string | null | undefined) {
+  if (!value) return 'n/d';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleDateString('it-IT');
+}
+
+function formatCurrency(value: number | null | undefined) {
+  if (typeof value !== 'number') return 'n/d';
+  return new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(value);
 }
 
 function KnowledgeBase({ onOpenDocument }: Props) {
@@ -31,6 +45,10 @@ function KnowledgeBase({ onOpenDocument }: Props) {
   const [newCanonicalDisplay, setNewCanonicalDisplay] = useState('');
   const [searchInput, setSearchInput] = useState('');
   const [showProposals, setShowProposals] = useState(false);
+  const [utilityPaymentFilter, setUtilityPaymentFilter] = useState('all');
+  const [utilityOverdueOnly, setUtilityOverdueOnly] = useState(false);
+  const [accountingTypeFilter, setAccountingTypeFilter] = useState('all');
+  const [accountingCheckFilter, setAccountingCheckFilter] = useState('all');
   const deferredSearch = useDeferredValue(searchInput.trim());
 
   const { data: topics, isLoading, error } = useKnowledgeTopics(includeInactive);
@@ -58,6 +76,18 @@ function KnowledgeBase({ onOpenDocument }: Props) {
     limit: 14,
   });
   const consolidate = useRunKnowledgeConsolidation();
+  const utilityLens = useSpecialistUtilityBills({
+    query: deferredSearch || undefined,
+    paymentStatus: utilityPaymentFilter,
+    overdueOnly: utilityOverdueOnly,
+    limit: 8,
+  });
+  const accountingLens = useSpecialistAccountingStatements({
+    query: deferredSearch || undefined,
+    statementType: accountingTypeFilter,
+    checkStatus: accountingCheckFilter,
+    limit: 8,
+  });
   const graphSuggestions = useGraphConsolidationSuggestions();
   const reviewGraphSuggestion = useReviewGraphConsolidationSuggestion();
   const [graphReviewAuthor, setGraphReviewAuthor] = useState('');
@@ -232,6 +262,220 @@ function KnowledgeBase({ onOpenDocument }: Props) {
             </div>
           </div>
         </div>
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-2">
+        <section className="rounded-[28px] border border-sky-300/15 bg-[linear-gradient(135deg,rgba(14,116,144,0.22),rgba(15,23,42,0.88))] p-6 shadow-[0_24px_80px_rgba(8,47,73,0.3)]">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-xs uppercase tracking-[0.35em] text-sky-200/70">Utility Lens</p>
+              <h3 className="mt-2 text-2xl font-semibold text-white">Bollette come record operativi</h3>
+              <p className="mt-2 text-sm text-slate-300">
+                Emittente, scadenza, importo, stato pagamento e collegamenti verso pagamenti o dettagli.
+              </p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-right">
+              <div className="text-xs uppercase tracking-wide text-sky-200/70">matches</div>
+              <div className="mt-1 text-2xl font-semibold text-white">{utilityLens.data?.total ?? 0}</div>
+            </div>
+          </div>
+
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <select
+              value={utilityPaymentFilter}
+              onChange={(event) => setUtilityPaymentFilter(event.target.value)}
+              className="rounded-full border border-white/10 bg-slate-950/70 px-4 py-2 text-sm text-slate-100"
+            >
+              <option value="all">Tutti i pagamenti</option>
+              <option value="paid">Pagate</option>
+              <option value="unpaid">Non pagate</option>
+              <option value="unknown">Stato ignoto</option>
+            </select>
+            <label className="text-sm text-slate-300 flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={utilityOverdueOnly}
+                onChange={(event) => setUtilityOverdueOnly(event.target.checked)}
+                className="rounded border-white/20 bg-slate-900 text-cyan-400 focus:ring-cyan-400"
+              />
+              Solo scadute
+            </label>
+          </div>
+
+          <div className="mt-5 space-y-3">
+            {utilityLens.isLoading ? (
+              <p className="text-sm text-slate-400">Caricamento bollette…</p>
+            ) : utilityLens.data?.items.length ? (
+              utilityLens.data.items.map((bill) => (
+                <article key={bill.result_id} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <h4 className="text-base font-semibold text-white">{bill.issuer ?? 'Bolletta senza emittente'}</h4>
+                      <p className="mt-1 text-sm text-slate-300">{bill.account_holder ?? 'Intestatario non trovato'}</p>
+                      <p className="mt-2 text-xs text-slate-400">{bill.original_filename}</p>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-lg font-semibold text-white">{formatCurrency(bill.total_amount)}</div>
+                      <div className="mt-1 text-xs text-sky-200/80">
+                        {bill.payment_status ?? 'unknown'} · {bill.confidence !== null ? `${Math.round(bill.confidence * 100)}%` : 'n/d'}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-3 text-sm text-slate-300">
+                    <div>Emissione: <span className="text-white">{formatDate(bill.issue_date)}</span></div>
+                    <div>Scadenza: <span className="text-white">{formatDate(bill.due_date)}</span></div>
+                    <div>Tipo: <span className="text-white">{bill.service_type ?? 'unknown'}</span></div>
+                  </div>
+                  {bill.related_links.length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {bill.related_links.map((link) => (
+                        <span key={link.id} className="rounded-full border border-sky-200/20 bg-sky-300/10 px-3 py-1 text-xs text-sky-100">
+                          {link.link_type.replace(/_/g, ' ')} · {link.target_document_type_code ?? 'documento'}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {bill.document_id && (
+                      <button
+                        onClick={() => onOpenDocument(bill.document_id!)}
+                        className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-white hover:bg-white/10"
+                      >
+                        Apri documento
+                      </button>
+                    )}
+                    <a
+                      href={`/api/knowledge/specialist-results/${bill.result_id}/export?format=json`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-white hover:bg-white/10"
+                    >
+                      JSON
+                    </a>
+                    <a
+                      href={`/api/knowledge/specialist-results/${bill.result_id}/export?format=csv`}
+                      className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-white hover:bg-white/10"
+                    >
+                      CSV
+                    </a>
+                  </div>
+                </article>
+              ))
+            ) : (
+              <p className="text-sm text-slate-400">Nessuna bolletta specialistica trovata con i filtri correnti.</p>
+            )}
+          </div>
+        </section>
+
+        <section className="rounded-[28px] border border-emerald-300/15 bg-[linear-gradient(135deg,rgba(6,95,70,0.2),rgba(15,23,42,0.88))] p-6 shadow-[0_24px_80px_rgba(6,78,59,0.28)]">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-xs uppercase tracking-[0.35em] text-emerald-200/70">Accounting Lens</p>
+              <h3 className="mt-2 text-2xl font-semibold text-white">Rendiconti come tabelle verificabili</h3>
+              <p className="mt-2 text-sm text-slate-300">
+                Esplora i prospetti, vedi i check automatici ed esporta il dato tabellare.
+              </p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-right">
+              <div className="text-xs uppercase tracking-wide text-emerald-200/70">matches</div>
+              <div className="mt-1 text-2xl font-semibold text-white">{accountingLens.data?.total ?? 0}</div>
+            </div>
+          </div>
+
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <select
+              value={accountingTypeFilter}
+              onChange={(event) => setAccountingTypeFilter(event.target.value)}
+              className="rounded-full border border-white/10 bg-slate-950/70 px-4 py-2 text-sm text-slate-100"
+            >
+              <option value="all">Tutti i rendiconti</option>
+              <option value="bilancio_preventivo">Bilancio preventivo</option>
+              <option value="riparto_spese">Riparto spese</option>
+              <option value="rendiconto">Rendiconto</option>
+              <option value="estratto_contabile">Estratto contabile</option>
+            </select>
+            <select
+              value={accountingCheckFilter}
+              onChange={(event) => setAccountingCheckFilter(event.target.value)}
+              className="rounded-full border border-white/10 bg-slate-950/70 px-4 py-2 text-sm text-slate-100"
+            >
+              <option value="all">Tutti i check</option>
+              <option value="pass">Con check passati</option>
+              <option value="fail">Con check falliti</option>
+              <option value="unknown">Con check ignoti</option>
+            </select>
+          </div>
+
+          <div className="mt-5 space-y-3">
+            {accountingLens.isLoading ? (
+              <p className="text-sm text-slate-400">Caricamento rendiconti…</p>
+            ) : accountingLens.data?.items.length ? (
+              accountingLens.data.items.map((statement) => (
+                <article key={statement.result_id} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <h4 className="text-base font-semibold text-white">{statement.statement_type ?? 'Rendiconto'}</h4>
+                      <p className="mt-1 text-sm text-slate-300">{statement.summary ?? 'Nessun riassunto disponibile.'}</p>
+                      <p className="mt-2 text-xs text-slate-400">{statement.original_filename}</p>
+                    </div>
+                    <div className="text-right text-sm text-slate-300">
+                      <div className="text-lg font-semibold text-white">{statement.table_count} tabelle</div>
+                      <div className={statement.has_failed_checks ? 'text-rose-200' : 'text-emerald-200'}>
+                        {statement.has_failed_checks ? 'controlli da rivedere' : 'controlli coerenti'}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2 text-sm text-slate-300">
+                    <div>Periodo: <span className="text-white">{formatDate(statement.accounting_period_from)} → {formatDate(statement.accounting_period_to)}</span></div>
+                    <div>Confidenza: <span className="text-white">{statement.confidence !== null ? `${Math.round(statement.confidence * 100)}%` : 'n/d'}</span></div>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {statement.validation_checks.slice(0, 4).map((check, index) => (
+                      <span
+                        key={index}
+                        className={`rounded-full px-3 py-1 text-xs border ${
+                          check.status === 'fail'
+                            ? 'border-rose-300/20 bg-rose-400/10 text-rose-100'
+                            : check.status === 'pass'
+                              ? 'border-emerald-300/20 bg-emerald-400/10 text-emerald-100'
+                              : 'border-white/10 bg-white/5 text-slate-200'
+                        }`}
+                      >
+                        {String(check.check_type)} · {String(check.status)}
+                      </span>
+                    ))}
+                  </div>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {statement.document_id && (
+                      <button
+                        onClick={() => onOpenDocument(statement.document_id!)}
+                        className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-white hover:bg-white/10"
+                      >
+                        Apri documento
+                      </button>
+                    )}
+                    <a
+                      href={`/api/knowledge/specialist-results/${statement.result_id}/export?format=json`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-white hover:bg-white/10"
+                    >
+                      JSON
+                    </a>
+                    <a
+                      href={`/api/knowledge/specialist-results/${statement.result_id}/export?format=csv`}
+                      className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-white hover:bg-white/10"
+                    >
+                      CSV
+                    </a>
+                  </div>
+                </article>
+              ))
+            ) : (
+              <p className="text-sm text-slate-400">Nessun rendiconto specialistico trovato con i filtri correnti.</p>
+            )}
+          </div>
+        </section>
       </div>
 
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">

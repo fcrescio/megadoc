@@ -9,6 +9,8 @@ import type {
   KnowledgeTopicSummary,
   KnowledgeTopicDetail,
   KnowledgeSearchResult,
+  SpecialistAccountingStatementSummary,
+  SpecialistUtilityBillSummary,
   KnowledgeEntitySummary,
   KnowledgeEntityDetail,
   CanonicalEntitySummary,
@@ -123,6 +125,42 @@ export async function searchKnowledge(
   }
   const response = await fetch(`${API_BASE}/knowledge/search?${params.toString()}`);
   return handleResponse<KnowledgeSearchResult>(response);
+}
+
+export async function getSpecialistUtilityBills(options?: {
+  query?: string;
+  issuer?: string;
+  paymentStatus?: string;
+  overdueOnly?: boolean;
+  limit?: number;
+}): Promise<{ total: number; items: SpecialistUtilityBillSummary[] }> {
+  const params = new URLSearchParams();
+  if (options?.query) params.set('q', options.query);
+  if (options?.issuer) params.set('issuer', options.issuer);
+  if (options?.paymentStatus && options.paymentStatus !== 'all') params.set('payment_status', options.paymentStatus);
+  if (options?.overdueOnly) params.set('overdue_only', 'true');
+  if (options?.limit) params.set('limit', String(options.limit));
+  const response = await fetch(`${API_BASE}/knowledge/specialists/utility-bills?${params.toString()}`);
+  return handleResponse(response);
+}
+
+export async function getSpecialistAccountingStatements(options?: {
+  query?: string;
+  statementType?: string;
+  checkStatus?: string;
+  limit?: number;
+}): Promise<{ total: number; items: SpecialistAccountingStatementSummary[] }> {
+  const params = new URLSearchParams();
+  if (options?.query) params.set('q', options.query);
+  if (options?.statementType && options.statementType !== 'all') params.set('statement_type', options.statementType);
+  if (options?.checkStatus && options.checkStatus !== 'all') params.set('check_status', options.checkStatus);
+  if (options?.limit) params.set('limit', String(options.limit));
+  const response = await fetch(`${API_BASE}/knowledge/specialists/accounting-statements?${params.toString()}`);
+  return handleResponse(response);
+}
+
+export function getSpecialistResultExportUrl(resultId: string, format: 'json' | 'csv'): string {
+  return `${API_BASE}/knowledge/specialist-results/${resultId}/export?format=${format}`;
 }
 
 export async function getKnowledgeEntities(

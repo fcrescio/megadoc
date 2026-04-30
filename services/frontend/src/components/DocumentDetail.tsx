@@ -14,7 +14,7 @@ import {
   useAddDocumentUnitTopicAssignment,
   useDeleteDocumentUnitTopicAssignment,
 } from '../hooks/useDocuments';
-import { downloadAsset, getDocumentDownloadUrl } from '../api/client';
+import { downloadAsset, getDocumentDownloadUrl, getSpecialistResultExportUrl } from '../api/client';
 
 interface Props {
   documentId: string;
@@ -60,8 +60,6 @@ function UtilityBillSpecialistCard({
   result: Record<string, unknown>;
   links: KnowledgeDocumentUnit['outgoing_links'];
 }) {
-  const detailLinks = links.filter((link) => link.link_type === 'utility_bill_detail');
-
   return (
     <div className="rounded-xl border border-sky-100 bg-sky-50/80 p-4 space-y-3">
       <div className="flex items-center justify-between gap-3">
@@ -74,6 +72,27 @@ function UtilityBillSpecialistCard({
         <div className="rounded-full bg-white/90 px-3 py-1 text-sm font-medium text-sky-700 border border-sky-100">
           {typeof result.service_type === 'string' && result.service_type ? result.service_type : 'unknown'}
         </div>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        {typeof result.__result_id === 'string' && (
+          <>
+            <a
+              href={getSpecialistResultExportUrl(result.__result_id, 'json')}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-full border border-sky-200 bg-white px-3 py-1 text-xs font-medium text-sky-700 hover:bg-sky-50"
+            >
+              Export JSON
+            </a>
+            <a
+              href={getSpecialistResultExportUrl(result.__result_id, 'csv')}
+              className="rounded-full border border-sky-200 bg-white px-3 py-1 text-xs font-medium text-sky-700 hover:bg-sky-50"
+            >
+              Export CSV
+            </a>
+          </>
+        )}
       </div>
 
       <div className="grid gap-3 md:grid-cols-3">
@@ -120,12 +139,14 @@ function UtilityBillSpecialistCard({
         </div>
       )}
 
-      {detailLinks.length > 0 && (
+      {links.length > 0 && (
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Collegamenti di dettaglio</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Collegamenti</p>
           <div className="flex flex-wrap gap-2">
-            {detailLinks.map((link) => (
+            {links.map((link) => (
               <span key={link.id} className="rounded-full bg-white px-3 py-1 text-xs text-slate-700 border border-sky-100">
+                {link.link_type.replace(/_/g, ' ')}
+                {' · '}
                 {link.target_document_type_code ?? 'documento'}: {link.target_title ?? link.target_document_unit_id}
                 {link.confidence !== null ? ` · ${(link.confidence * 100).toFixed(0)}%` : ''}
               </span>
@@ -155,6 +176,27 @@ function AccountingSpecialistCard({ result }: { result: Record<string, unknown> 
         <div className="rounded-full bg-white/90 px-3 py-1 text-sm font-medium text-emerald-700 border border-emerald-100">
           {tables.length} tabelle
         </div>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        {typeof result.__result_id === 'string' && (
+          <>
+            <a
+              href={getSpecialistResultExportUrl(result.__result_id, 'json')}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-full border border-emerald-200 bg-white px-3 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50"
+            >
+              Export JSON
+            </a>
+            <a
+              href={getSpecialistResultExportUrl(result.__result_id, 'csv')}
+              className="rounded-full border border-emerald-200 bg-white px-3 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50"
+            >
+              Export CSV
+            </a>
+          </>
+        )}
       </div>
 
       <div className="grid gap-3 md:grid-cols-3">
@@ -730,9 +772,14 @@ function DocumentDetail({ documentId, onBack, initialTab = 'info' }: Props) {
                                       )}
                                     </div>
                                     {specialistResult.specialist_type === 'utility_bill' ? (
-                                      <UtilityBillSpecialistCard result={specialistResult.result_json} links={unit.outgoing_links} />
+                                      <UtilityBillSpecialistCard
+                                        result={{ ...specialistResult.result_json, __result_id: specialistResult.id }}
+                                        links={unit.outgoing_links}
+                                      />
                                     ) : specialistResult.specialist_type === 'accounting_statement' ? (
-                                      <AccountingSpecialistCard result={specialistResult.result_json} />
+                                      <AccountingSpecialistCard
+                                        result={{ ...specialistResult.result_json, __result_id: specialistResult.id }}
+                                      />
                                     ) : null}
                                   </div>
                                 ))}

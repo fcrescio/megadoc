@@ -47,7 +47,7 @@ def process_utility_bill(
     )
 
     links: list[DocumentUnitLink] = []
-    for target_unit, confidence, rationale in _find_detail_candidates(
+    for target_unit, link_type, confidence, rationale in _find_related_candidates(
         db,
         document_unit,
         issuer,
@@ -59,7 +59,7 @@ def process_utility_bill(
             DocumentUnitLink(
                 source_document_unit_id=document_unit.id,
                 target_document_unit_id=target_unit.id,
-                link_type="utility_bill_detail",
+                link_type=link_type,
                 confidence=confidence,
                 rationale=rationale,
             )
@@ -332,24 +332,28 @@ def _service_type(text: str) -> str:
     return "unknown"
 
 
-def _find_detail_candidates(
+def _find_related_candidates(
     db: Session,
     document_unit: DocumentUnit,
     issuer: str | None,
     document_number: str | None,
     period_from: str | None,
     period_to: str | None,
-) -> list[tuple[DocumentUnit, float, str]]:
+) -> list[tuple[DocumentUnit, str, float, str]]:
     if not issuer and not document_number:
         return []
 
     candidates = db.execute(
         select(DocumentUnit)
         .where(DocumentUnit.id != document_unit.id)
-        .options(selectinload(DocumentUnit.entities), selectinload(DocumentUnit.scan_unit))
+        .options(
+            selectinload(DocumentUnit.entities),
+            selectinload(DocumentUnit.scan_unit),
+            selectinload(DocumentUnit.document_type),
+        )
     ).scalars().all()
 
-    matches: list[tuple[DocumentUnit, float, str]] = []
+    matches: list[tuple[DocumentUnit, str, float, str]] = []
     issuer_tokens = set(re.findall(r"[a-z0-9]{3,}", (issuer or "").lower()))
     for candidate in candidates:
         haystack = " ".join(
@@ -362,8 +366,10 @@ def _find_detail_candidates(
                 ],
             )
         ).lower()
+        candidate_type = candidate.document_type.code if candidate.document_type else None
         score = 0.0
         reasons: list[str] = []
+        link_type = "utility_bill_reference"
         if document_number and document_number.lower() in haystack:
             score += 0.55
             reasons.append("same document number")
@@ -376,6 +382,19 @@ def _find_detail_candidates(
         if period_to and period_to in haystack:
             score += 0.10
             reasons.append("same end period")
+        if re.search(r"\b(dettaglio|consumi|letture|componenti tariffarie|totale bolletta)\b", haystack):
+            score += 0.12
+            link_type = "utility_bill_detail"
+            reasons.append("detail-like document")
+        if re.search(r"\b(pagamento|quietanza|ricevuta|bonifico|estratto conto|mav|pagata)\b", haystack):
+            score += 0.14
+            link_type = "utility_bill_payment"
+            reasons.append("payment-like document")
+        if candidate_type in {"bolletta", "fattura"} and link_type == "utility_bill_reference":
+            score += 0.05
+        elif candidate_type in {"lettera", "nota"} and link_type == "utility_bill_reference":
+            score += 0.03
         if score >= 0.45:
-            matches.append((candidate, min(score, 0.95), ", ".join(reasons)))
-    return matches[:3]
+            matches.append((candidate, link_type, min(score, 0.95), ", ".join(reasons)))
+    matches.sort(key=lambda item: item[2], reverse=True)
+    return matches[:5]
