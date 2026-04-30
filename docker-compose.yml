@@ -82,7 +82,7 @@ services:
     env_file:
       - .env
     environment:
-      PYTHONPATH: /app/packages/common/src:/app/services/api/src:/app/services/worker/src:/app/services/cli/src:/app/services/knowledge_classifier/src:/app/services/knowledge_worker/src
+      PYTHONPATH: /app/packages/common/src:/app/services/api/src:/app/services/worker/src:/app/services/cli/src:/app/services/knowledge_classifier/src:/app/services/knowledge_worker/src:/app/services/specialist_worker/src
     depends_on:
       postgres:
         condition: service_healthy
@@ -197,7 +197,7 @@ services:
       CELERY_BROKER_URL: redis://127.0.0.1:6379/1
       CELERY_RESULT_BACKEND: redis://127.0.0.1:6379/2
       DATABASE_URL: postgresql+psycopg://megadoc:megadoc@127.0.0.1:5432/megadoc
-      PYTHONPATH: /app/packages/common/src:/app/services/api/src:/app/services/worker/src:/app/services/cli/src:/app/services/knowledge_classifier/src:/app/services/knowledge_worker/src
+      PYTHONPATH: /app/packages/common/src:/app/services/api/src:/app/services/worker/src:/app/services/cli/src:/app/services/knowledge_classifier/src:/app/services/knowledge_worker/src:/app/services/specialist_worker/src
     depends_on:
       redis:
         condition: service_healthy
@@ -216,6 +216,70 @@ services:
         "--concurrency=${KNOWLEDGE_WORKER_CONCURRENCY:-1}",
         "-Q",
         "knowledge"
+      ]
+
+  specialist_utility_worker:
+    build:
+      context: .
+      dockerfile: infra/compose/Dockerfile.app
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      CELERY_BROKER_URL: redis://127.0.0.1:6379/1
+      CELERY_RESULT_BACKEND: redis://127.0.0.1:6379/2
+      DATABASE_URL: postgresql+psycopg://megadoc:megadoc@127.0.0.1:5432/megadoc
+      PYTHONPATH: /app/packages/common/src:/app/services/api/src:/app/services/worker/src:/app/services/cli/src:/app/services/knowledge_classifier/src:/app/services/knowledge_worker/src:/app/services/specialist_worker/src
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    network_mode: host
+    command:
+      [
+        "celery",
+        "-A",
+        "specialist_worker.celery_app:celery_app",
+        "worker",
+        "--loglevel=INFO",
+        "--concurrency=${SPECIALIST_UTILITY_WORKER_CONCURRENCY:-1}",
+        "-Q",
+        "${SPECIALIST_QUEUE_UTILITY:-specialist_utility}"
+      ]
+
+  specialist_accounting_worker:
+    build:
+      context: .
+      dockerfile: infra/compose/Dockerfile.app
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      CELERY_BROKER_URL: redis://127.0.0.1:6379/1
+      CELERY_RESULT_BACKEND: redis://127.0.0.1:6379/2
+      DATABASE_URL: postgresql+psycopg://megadoc:megadoc@127.0.0.1:5432/megadoc
+      PYTHONPATH: /app/packages/common/src:/app/services/api/src:/app/services/worker/src:/app/services/cli/src:/app/services/knowledge_classifier/src:/app/services/knowledge_worker/src:/app/services/specialist_worker/src
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    network_mode: host
+    command:
+      [
+        "celery",
+        "-A",
+        "specialist_worker.celery_app:celery_app",
+        "worker",
+        "--loglevel=INFO",
+        "--concurrency=${SPECIALIST_ACCOUNTING_WORKER_CONCURRENCY:-1}",
+        "-Q",
+        "${SPECIALIST_QUEUE_ACCOUNTING:-specialist_accounting}"
       ]
 
   cli:

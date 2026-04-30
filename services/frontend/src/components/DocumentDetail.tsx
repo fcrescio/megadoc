@@ -9,6 +9,7 @@ import {
   useDocumentAssets,
   useDocumentKnowledge,
   useEnsureDocumentKnowledge,
+  useEnsureDocumentSpecialists,
   useKnowledgeTopics,
   useAddDocumentUnitTopicAssignment,
   useDeleteDocumentUnitTopicAssignment,
@@ -30,6 +31,223 @@ const ASSIGNMENT_ROLES = [
 ];
 
 const TOPIC_KINDS = ['entity', 'family', 'issue', 'project', 'context'];
+
+function formatDate(value: unknown) {
+  if (typeof value !== 'string' || !value) {
+    return 'n/d';
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+  return parsed.toLocaleDateString('it-IT');
+}
+
+function formatCurrency(value: unknown) {
+  if (typeof value !== 'number') {
+    return 'n/d';
+  }
+  return new Intl.NumberFormat('it-IT', {
+    style: 'currency',
+    currency: 'EUR',
+  }).format(value);
+}
+
+function UtilityBillSpecialistCard({
+  result,
+  links,
+}: {
+  result: Record<string, unknown>;
+  links: KnowledgeDocumentUnit['outgoing_links'];
+}) {
+  const detailLinks = links.filter((link) => link.link_type === 'utility_bill_detail');
+
+  return (
+    <div className="rounded-xl border border-sky-100 bg-sky-50/80 p-4 space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-sky-700">Utility Bill</p>
+          <h4 className="text-base font-semibold text-slate-900">
+            {typeof result.issuer === 'string' && result.issuer ? result.issuer : 'Fornitore non identificato'}
+          </h4>
+        </div>
+        <div className="rounded-full bg-white/90 px-3 py-1 text-sm font-medium text-sky-700 border border-sky-100">
+          {typeof result.service_type === 'string' && result.service_type ? result.service_type : 'unknown'}
+        </div>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-3">
+        <div className="rounded-lg bg-white p-3 border border-sky-100">
+          <p className="text-xs uppercase tracking-wide text-slate-500">Emissione</p>
+          <p className="mt-1 text-sm font-medium text-slate-900">{formatDate(result.issue_date)}</p>
+        </div>
+        <div className="rounded-lg bg-white p-3 border border-sky-100">
+          <p className="text-xs uppercase tracking-wide text-slate-500">Scadenza</p>
+          <p className="mt-1 text-sm font-medium text-slate-900">{formatDate(result.due_date)}</p>
+        </div>
+        <div className="rounded-lg bg-white p-3 border border-sky-100">
+          <p className="text-xs uppercase tracking-wide text-slate-500">Importo totale</p>
+          <p className="mt-1 text-sm font-medium text-slate-900">{formatCurrency(result.total_amount)}</p>
+        </div>
+        <div className="rounded-lg bg-white p-3 border border-sky-100">
+          <p className="text-xs uppercase tracking-wide text-slate-500">Intestazione</p>
+          <p className="mt-1 text-sm font-medium text-slate-900">{String(result.account_holder || 'n/d')}</p>
+        </div>
+        <div className="rounded-lg bg-white p-3 border border-sky-100">
+          <p className="text-xs uppercase tracking-wide text-slate-500">Numero documento</p>
+          <p className="mt-1 text-sm font-medium text-slate-900">{String(result.document_number || 'n/d')}</p>
+        </div>
+        <div className="rounded-lg bg-white p-3 border border-sky-100">
+          <p className="text-xs uppercase tracking-wide text-slate-500">Stato pagamento</p>
+          <p className="mt-1 text-sm font-medium text-slate-900">{String(result.payment_status || 'unknown')}</p>
+        </div>
+      </div>
+
+      {Boolean(result.billing_period_from || result.billing_period_to || result.pod_pdr_or_supply_code || result.supply_reference) && (
+        <div className="grid gap-3 md:grid-cols-2">
+          <div className="rounded-lg bg-white p-3 border border-sky-100">
+            <p className="text-xs uppercase tracking-wide text-slate-500">Periodo competenza</p>
+            <p className="mt-1 text-sm text-slate-900">
+              {formatDate(result.billing_period_from)} {result.billing_period_to ? `→ ${formatDate(result.billing_period_to)}` : ''}
+            </p>
+          </div>
+          <div className="rounded-lg bg-white p-3 border border-sky-100">
+            <p className="text-xs uppercase tracking-wide text-slate-500">Riferimento fornitura</p>
+            <p className="mt-1 text-sm text-slate-900 break-words">
+              {String(result.pod_pdr_or_supply_code || result.supply_reference || 'n/d')}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {detailLinks.length > 0 && (
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Collegamenti di dettaglio</p>
+          <div className="flex flex-wrap gap-2">
+            {detailLinks.map((link) => (
+              <span key={link.id} className="rounded-full bg-white px-3 py-1 text-xs text-slate-700 border border-sky-100">
+                {link.target_document_type_code ?? 'documento'}: {link.target_title ?? link.target_document_unit_id}
+                {link.confidence !== null ? ` · ${(link.confidence * 100).toFixed(0)}%` : ''}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AccountingSpecialistCard({ result }: { result: Record<string, unknown> }) {
+  const tables = Array.isArray(result.tables) ? (result.tables as Record<string, unknown>[]) : [];
+  const validationChecks = Array.isArray(result.validation_checks)
+    ? (result.validation_checks as Record<string, unknown>[])
+    : [];
+
+  return (
+    <div className="rounded-xl border border-emerald-100 bg-emerald-50/80 p-4 space-y-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-700">Accounting Statement</p>
+          <h4 className="text-base font-semibold text-slate-900">
+            {typeof result.statement_type === 'string' && result.statement_type ? result.statement_type : 'statement'}
+          </h4>
+        </div>
+        <div className="rounded-full bg-white/90 px-3 py-1 text-sm font-medium text-emerald-700 border border-emerald-100">
+          {tables.length} tabelle
+        </div>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-3">
+        <div className="rounded-lg bg-white p-3 border border-emerald-100">
+          <p className="text-xs uppercase tracking-wide text-slate-500">Periodo</p>
+          <p className="mt-1 text-sm font-medium text-slate-900">
+            {formatDate(result.accounting_period_from)} {result.accounting_period_to ? `→ ${formatDate(result.accounting_period_to)}` : ''}
+          </p>
+        </div>
+        <div className="rounded-lg bg-white p-3 border border-emerald-100">
+          <p className="text-xs uppercase tracking-wide text-slate-500">Valuta</p>
+          <p className="mt-1 text-sm font-medium text-slate-900">{String(result.currency || 'EUR')}</p>
+        </div>
+        <div className="rounded-lg bg-white p-3 border border-emerald-100">
+          <p className="text-xs uppercase tracking-wide text-slate-500">Tipo</p>
+          <p className="mt-1 text-sm font-medium text-slate-900">{String(result.statement_type || 'n/d')}</p>
+        </div>
+      </div>
+
+      {validationChecks.length > 0 && (
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Verifiche</p>
+          <div className="grid gap-2">
+            {validationChecks.map((check: Record<string, unknown>, index: number) => (
+              <div key={index} className="rounded-lg bg-white border border-emerald-100 px-3 py-2 text-sm">
+                <span className={`font-medium ${check.status === 'pass' ? 'text-emerald-700' : 'text-slate-900'}`}>
+                  {String(check.check_type || 'check')}
+                </span>
+                {check.details ? (
+                  <span className="text-slate-600"> · {String(check.details)}</span>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {tables.length > 0 && (
+        <div className="space-y-4">
+          {tables.map((table: Record<string, unknown>, tableIndex: number) => {
+            const headers = Array.isArray(table.headers) ? (table.headers as unknown[]) : [];
+            const rows = Array.isArray(table.rows) ? (table.rows as Record<string, unknown>[]) : [];
+            const previewRows = rows.slice(0, 6);
+            return (
+              <div key={tableIndex} className="rounded-lg border border-emerald-100 bg-white overflow-hidden">
+                <div className="flex items-center justify-between gap-3 px-3 py-2 border-b border-emerald-100 bg-emerald-50/50">
+                  <div className="text-sm font-medium text-slate-900">{String(table.table_type || 'table')}</div>
+                  <div className="text-xs text-slate-500">{rows.length} righe</div>
+                </div>
+                {headers.length > 0 ? (
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full text-sm">
+                      <thead className="bg-slate-50">
+                        <tr>
+                          {headers.map((header: unknown, headerIndex: number) => (
+                            <th key={headerIndex} className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                              {String(header)}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {previewRows.map((row: Record<string, unknown>, rowIndex: number) => {
+                          const cells = row.cells && typeof row.cells === 'object' ? (row.cells as Record<string, unknown>) : {};
+                          return (
+                            <tr key={rowIndex}>
+                              {headers.map((header: unknown, headerIndex: number) => (
+                                <td key={headerIndex} className="px-3 py-2 text-slate-700 align-top whitespace-pre-wrap">
+                                  {String(cells[String(header)] ?? '')}
+                                </td>
+                              ))}
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="px-3 py-3 text-sm text-slate-500">Tabella riconosciuta senza intestazioni affidabili.</div>
+                )}
+                {rows.length > previewRows.length && (
+                  <div className="px-3 py-2 text-xs text-slate-500 border-t border-slate-100">
+                    Preview limitata alle prime {previewRows.length} righe.
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function slugify(value: string) {
   return value
@@ -258,6 +476,7 @@ function DocumentDetail({ documentId, onBack, initialTab = 'info' }: Props) {
   const { data: assets } = useDocumentAssets(documentId);
   const { data: knowledgeTopics = [] } = useKnowledgeTopics(true);
   const ensureKnowledge = useEnsureDocumentKnowledge();
+  const ensureSpecialists = useEnsureDocumentSpecialists();
 
   useEffect(() => {
     setActiveTab(initialTab);
@@ -434,6 +653,15 @@ function DocumentDetail({ documentId, onBack, initialTab = 'info' }: Props) {
                 </div>
               ) : knowledge && knowledge.scan_units.length > 0 ? (
                 <div className="space-y-6">
+                  <div className="flex items-center justify-end">
+                    <button
+                      onClick={() => ensureSpecialists.mutate(documentId)}
+                      disabled={ensureSpecialists.isPending}
+                      className="px-3 py-2 rounded-md border border-slate-300 text-slate-700 text-sm hover:bg-slate-50 disabled:opacity-60"
+                    >
+                      {ensureSpecialists.isPending ? 'Queueing specialists...' : 'Run specialist extraction'}
+                    </button>
+                  </div>
                   {knowledge.scan_units.map((scanUnit) => (
                     <div key={scanUnit.id} className="border rounded-lg overflow-hidden">
                       <div className="bg-gray-50 px-4 py-3 border-b">
@@ -479,6 +707,51 @@ function DocumentDetail({ documentId, onBack, initialTab = 'info' }: Props) {
                               <p className="text-sm text-gray-700 bg-amber-50 border border-amber-100 rounded p-3">
                                 {unit.extracted_summary}
                               </p>
+                            )}
+
+                            {unit.specialist_results.length > 0 && (
+                              <div className="space-y-3">
+                                <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                                  Specialized extraction
+                                </p>
+                                {unit.specialist_results.map((specialistResult) => (
+                                  <div key={specialistResult.id} className="space-y-2">
+                                    <div className="flex flex-wrap gap-2 text-xs">
+                                      <span className="px-2 py-1 rounded-full bg-slate-100 text-slate-700">
+                                        {specialistResult.specialist_type}
+                                      </span>
+                                      <span className="px-2 py-1 rounded-full bg-slate-100 text-slate-700">
+                                        {specialistResult.review_status}
+                                      </span>
+                                      {specialistResult.confidence !== null && (
+                                        <span className="px-2 py-1 rounded-full bg-slate-100 text-slate-700">
+                                          {(specialistResult.confidence * 100).toFixed(0)}%
+                                        </span>
+                                      )}
+                                    </div>
+                                    {specialistResult.specialist_type === 'utility_bill' ? (
+                                      <UtilityBillSpecialistCard result={specialistResult.result_json} links={unit.outgoing_links} />
+                                    ) : specialistResult.specialist_type === 'accounting_statement' ? (
+                                      <AccountingSpecialistCard result={specialistResult.result_json} />
+                                    ) : null}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+
+                            {unit.specialist_jobs.length > 0 && (
+                              <div>
+                                <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
+                                  Specialist jobs
+                                </p>
+                                <div className="flex flex-wrap gap-2">
+                                  {unit.specialist_jobs.map((job) => (
+                                    <span key={job.id} className="px-2 py-1 rounded-full bg-slate-100 text-slate-700 text-xs">
+                                      {job.specialist_type}: {job.status}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
                             )}
 
                             <div>

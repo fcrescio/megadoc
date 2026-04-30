@@ -13,6 +13,7 @@ from common.application.knowledge import (
     has_active_ingestion_jobs,
     mark_knowledge_job_pending_dispatch,
 )
+from common.application.specialists import ensure_specialist_jobs_for_scan_unit
 from common.db.models import (
     CanonicalEntity,
     CanonicalEntityVariant,
@@ -28,6 +29,9 @@ from common.db.models import (
     TopicProposal,
     KnowledgeJob,
     GraphConsolidationReview,
+    SpecialistJob,
+    SpecialistResult,
+    DocumentUnitLink,
 )
 from common.db.session import SessionLocal, get_db_session
 from knowledge_classifier.schemas import (
@@ -65,6 +69,7 @@ from knowledge_classifier.schemas import (
 )
 from knowledge_classifier.services.consolidation import KnowledgeBaseConsolidationService
 from knowledge_worker.dispatch import dispatch_scan_unit_processing
+from specialist_worker.dispatch import dispatch_specialist_job
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 
@@ -129,6 +134,9 @@ def _serialize_topic_proposal(proposal: TopicProposal | None) -> dict[str, Any] 
 
 
 def _serialize_document_unit(doc_unit: DocumentUnit) -> dict[str, Any]:
+    specialist_jobs = sorted(doc_unit.specialist_jobs, key=lambda job: job.created_at, reverse=True)
+    specialist_results = sorted(doc_unit.specialist_results, key=lambda result: result.created_at, reverse=True)
+    outgoing_links = sorted(doc_unit.outgoing_links, key=lambda link: (link.link_type, link.created_at))
     return {
         "id": str(doc_unit.id),
         "scan_unit_id": str(doc_unit.scan_unit_id),
@@ -148,6 +156,55 @@ def _serialize_document_unit(doc_unit: DocumentUnit) -> dict[str, Any]:
             for assignment in doc_unit.topic_assignments
         ],
         "proposal": _serialize_topic_proposal(doc_unit.proposal),
+        "specialist_jobs": [
+            {
+                "id": str(job.id),
+                "specialist_type": job.specialist_type,
+                "status": job.status,
+                "input_version": job.input_version,
+                "attempt_count": job.attempt_count,
+                "error_message": job.error_message,
+                "created_at": job.created_at,
+                "started_at": job.started_at,
+                "finished_at": job.finished_at,
+            }
+            for job in specialist_jobs
+        ],
+        "specialist_results": [
+            {
+                "id": str(result.id),
+                "specialist_type": result.specialist_type,
+                "schema_version": result.schema_version,
+                "confidence": result.confidence,
+                "review_status": result.review_status,
+                "result_json": result.result_json,
+                "created_at": result.created_at,
+                "updated_at": result.updated_at,
+            }
+            for result in specialist_results
+        ],
+        "outgoing_links": [
+            {
+                "id": str(link.id),
+                "link_type": link.link_type,
+                "target_document_unit_id": str(link.target_document_unit_id),
+                "target_title": link.target_document_unit.title if link.target_document_unit else None,
+                "target_document_type_code": (
+                    link.target_document_unit.document_type.code
+                    if link.target_document_unit and link.target_document_unit.document_type
+                    else None
+                ),
+                "target_document_id": (
+                    str(link.target_document_unit.scan_unit.source_document_id)
+                    if link.target_document_unit and link.target_document_unit.scan_unit
+                    else None
+                ),
+                "confidence": link.confidence,
+                "rationale": link.rationale,
+                "created_at": link.created_at,
+            }
+            for link in outgoing_links
+        ],
         "created_at": doc_unit.created_at,
         "updated_at": doc_unit.updated_at,
     }
@@ -394,6 +451,26 @@ def get_document_knowledge(document_id: str, db: Session = Depends(get_db_sessio
 
     result = db.execute(
         select(ScanUnit)
+        .options(
+            selectinload(ScanUnit.document_units).selectinload(DocumentUnit.document_type),
+            selectinload(ScanUnit.document_units).selectinload(DocumentUnit.entities),
+            selectinload(ScanUnit.document_units)
+            .selectinload(DocumentUnit.topic_assignments)
+            .selectinload(DocumentUnitTopicAssignment.topic),
+            selectinload(ScanUnit.document_units)
+            .selectinload(DocumentUnit.proposal)
+            .selectinload(TopicProposal.matched_topic),
+            selectinload(ScanUnit.document_units).selectinload(DocumentUnit.specialist_jobs),
+            selectinload(ScanUnit.document_units).selectinload(DocumentUnit.specialist_results),
+            selectinload(ScanUnit.document_units)
+            .selectinload(DocumentUnit.outgoing_links)
+            .selectinload(DocumentUnitLink.target_document_unit)
+            .selectinload(DocumentUnit.document_type),
+            selectinload(ScanUnit.document_units)
+            .selectinload(DocumentUnit.outgoing_links)
+            .selectinload(DocumentUnitLink.target_document_unit)
+            .selectinload(DocumentUnit.scan_unit),
+        )
         .where(ScanUnit.source_document_id == parsed_document_id)
         .order_by(ScanUnit.created_at.desc())
     )
@@ -486,6 +563,44 @@ def ensure_document_knowledge(
     )
 
 
+@router.post("/documents/{document_id}/ensure-specialists")
+def ensure_document_specialists(
+    document_id: str,
+    db: Session = Depends(get_db_session),
+):
+    """Ensure specialist jobs exist for the latest knowledge scan of a document."""
+    try:
+        parsed_document_id = uuid.UUID(document_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid document ID") from exc
+
+    scan_unit = db.execute(
+        select(ScanUnit)
+        .where(ScanUnit.source_document_id == parsed_document_id)
+        .order_by(ScanUnit.created_at.desc())
+    ).scalar_one_or_none()
+    if scan_unit is None:
+        raise HTTPException(status_code=404, detail="Knowledge scan not found")
+
+    created_jobs = ensure_specialist_jobs_for_scan_unit(db, scan_unit.id)
+    db.commit()
+    for specialist_job in created_jobs:
+        dispatch_specialist_job(str(specialist_job.id), specialist_job.specialist_type)
+
+    return {
+        "scan_unit_id": str(scan_unit.id),
+        "created_jobs": len(created_jobs),
+        "jobs": [
+            {
+                "id": str(job.id),
+                "specialist_type": job.specialist_type,
+                "status": job.status,
+            }
+            for job in created_jobs
+        ],
+    }
+
+
 @router.get("/scan-units", response_model=list[ScanUnitResponse])
 def list_scan_units(db: Session = Depends(get_db_session)):
     """List all scan units."""
@@ -545,6 +660,14 @@ def list_document_units(scan_unit_id: str, db: Session = Depends(get_db_session)
             selectinload(DocumentUnit.topic_assignments).selectinload(DocumentUnitTopicAssignment.topic),
             selectinload(DocumentUnit.proposal).selectinload(TopicProposal.matched_topic),
             selectinload(DocumentUnit.scan_unit).selectinload(ScanUnit.document),
+            selectinload(DocumentUnit.specialist_jobs),
+            selectinload(DocumentUnit.specialist_results),
+            selectinload(DocumentUnit.outgoing_links)
+            .selectinload(DocumentUnitLink.target_document_unit)
+            .selectinload(DocumentUnit.document_type),
+            selectinload(DocumentUnit.outgoing_links)
+            .selectinload(DocumentUnitLink.target_document_unit)
+            .selectinload(DocumentUnit.scan_unit),
         )
         .where(DocumentUnit.scan_unit_id == uuid.UUID(scan_unit_id))
         .order_by(DocumentUnit.ordinal)
@@ -565,6 +688,14 @@ def get_document_unit(document_unit_id: str, db: Session = Depends(get_db_sessio
             selectinload(DocumentUnit.topic_assignments).selectinload(DocumentUnitTopicAssignment.topic),
             selectinload(DocumentUnit.proposal).selectinload(TopicProposal.matched_topic),
             selectinload(DocumentUnit.scan_unit).selectinload(ScanUnit.document),
+            selectinload(DocumentUnit.specialist_jobs),
+            selectinload(DocumentUnit.specialist_results),
+            selectinload(DocumentUnit.outgoing_links)
+            .selectinload(DocumentUnitLink.target_document_unit)
+            .selectinload(DocumentUnit.document_type),
+            selectinload(DocumentUnit.outgoing_links)
+            .selectinload(DocumentUnitLink.target_document_unit)
+            .selectinload(DocumentUnit.scan_unit),
         )
         .where(DocumentUnit.id == uuid.UUID(document_unit_id))
     )
@@ -590,6 +721,14 @@ def review_document_unit(
             selectinload(DocumentUnit.topic_assignments).selectinload(DocumentUnitTopicAssignment.topic),
             selectinload(DocumentUnit.proposal).selectinload(TopicProposal.matched_topic),
             selectinload(DocumentUnit.scan_unit).selectinload(ScanUnit.document),
+            selectinload(DocumentUnit.specialist_jobs),
+            selectinload(DocumentUnit.specialist_results),
+            selectinload(DocumentUnit.outgoing_links)
+            .selectinload(DocumentUnitLink.target_document_unit)
+            .selectinload(DocumentUnit.document_type),
+            selectinload(DocumentUnit.outgoing_links)
+            .selectinload(DocumentUnitLink.target_document_unit)
+            .selectinload(DocumentUnit.scan_unit),
         )
         .where(DocumentUnit.id == uuid.UUID(document_unit_id))
     )

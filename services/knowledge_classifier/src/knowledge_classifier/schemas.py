@@ -401,6 +401,9 @@ class DocumentUnitResponse(BaseModel):
     entities: list[ExtractedEntity] = Field(default_factory=list)
     topic_assignments: list[TopicAssignmentResponse] = Field(default_factory=list)
     proposal: Optional[TopicProposalResponse] = None
+    specialist_jobs: list[dict[str, Any]] = Field(default_factory=list)
+    specialist_results: list[dict[str, Any]] = Field(default_factory=list)
+    outgoing_links: list[dict[str, Any]] = Field(default_factory=list)
     created_at: datetime
     updated_at: Optional[datetime] = None
 

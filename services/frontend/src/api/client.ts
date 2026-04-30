@@ -76,6 +76,15 @@ export async function ensureDocumentKnowledge(documentId: string): Promise<{ id:
   return handleResponse<{ id: string }>(response);
 }
 
+export async function ensureDocumentSpecialists(
+  documentId: string,
+): Promise<{ scan_unit_id: string; created_jobs: number; jobs: { id: string; specialist_type: string; status: string }[] }> {
+  const response = await fetch(`${API_BASE}/knowledge/documents/${documentId}/ensure-specialists`, {
+    method: 'POST',
+  });
+  return handleResponse(response);
+}
+
 export async function getKnowledgeTopics(includeInactive = false, topicKind?: string): Promise<KnowledgeTopicSummary[]> {
   const params = new URLSearchParams();
   params.set('include_inactive', String(includeInactive));

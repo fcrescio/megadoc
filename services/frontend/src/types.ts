@@ -112,6 +112,41 @@ export interface KnowledgeTopicProposal {
   reviewed_at: string | null;
 }
 
+export interface SpecialistJob {
+  id: string;
+  specialist_type: string;
+  status: string;
+  input_version: string | null;
+  attempt_count: number;
+  error_message: string | null;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+export interface SpecialistResult {
+  id: string;
+  specialist_type: string;
+  schema_version: string;
+  confidence: number | null;
+  review_status: string;
+  result_json: Record<string, unknown>;
+  created_at: string;
+  updated_at: string | null;
+}
+
+export interface KnowledgeDocumentUnitLink {
+  id: string;
+  link_type: string;
+  target_document_unit_id: string;
+  target_title: string | null;
+  target_document_type_code: string | null;
+  target_document_id: string | null;
+  confidence: number | null;
+  rationale: string | null;
+  created_at: string;
+}
+
 export interface KnowledgeDocumentUnit {
   id: string;
   scan_unit_id: string;
@@ -128,6 +163,9 @@ export interface KnowledgeDocumentUnit {
   entities: KnowledgeEntity[];
   topic_assignments: KnowledgeTopicAssignment[];
   proposal: KnowledgeTopicProposal | null;
+  specialist_jobs: SpecialistJob[];
+  specialist_results: SpecialistResult[];
+  outgoing_links: KnowledgeDocumentUnitLink[];
   created_at: string;
   updated_at: string | null;
 }

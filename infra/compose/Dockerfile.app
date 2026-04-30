@@ -8,7 +8,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     XDG_CACHE_HOME=/home/appuser/.cache \
     HF_HOME=/home/appuser/.cache/huggingface \
     PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True \
-    PYTHONPATH=/app/packages/common/src:/app/services/api/src:/app/services/worker/src:/app/services/cli/src
+    PYTHONPATH=/app/packages/common/src:/app/services/api/src:/app/services/worker/src:/app/services/cli/src:/app/services/knowledge_classifier/src:/app/services/knowledge_worker/src:/app/services/specialist_worker/src
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \

@@ -58,6 +58,7 @@ pythonpath = [
   "services/cli/src",
   "services/knowledge_classifier/src",
   "services/knowledge_worker/src",
+  "services/specialist_worker/src",
 ]
 testpaths = ["tests"]
 
@@ -72,5 +73,6 @@ where = [
   "services/cli/src",
   "services/knowledge_classifier/src",
   "services/knowledge_worker/src",
+  "services/specialist_worker/src",
 ]
-include = ["common*", "api*", "worker*", "cli*", "knowledge_classifier*", "knowledge_worker*"]
+include = ["common*", "api*", "worker*", "cli*", "knowledge_classifier*", "knowledge_worker*", "specialist_worker*"]

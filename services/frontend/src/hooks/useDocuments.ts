@@ -35,6 +35,7 @@ import {
   getDocumentOCR,
   getDocumentKnowledge,
   ensureDocumentKnowledge,
+  ensureDocumentSpecialists,
   getKnowledgeTopic,
   searchKnowledge,
   getKnowledgeEntities,
@@ -112,6 +113,21 @@ export function useEnsureDocumentKnowledge() {
       queryClient.invalidateQueries({ queryKey: ['knowledge', documentId] });
       queryClient.invalidateQueries({ queryKey: ['knowledge'] });
       queryClient.invalidateQueries({ queryKey: ['jobs'] });
+    },
+  });
+}
+
+export function useEnsureDocumentSpecialists() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    { scan_unit_id: string; created_jobs: number; jobs: { id: string; specialist_type: string; status: string }[] },
+    Error,
+    string
+  >({
+    mutationFn: (documentId) => ensureDocumentSpecialists(documentId),
+    onSuccess: (_, documentId) => {
+      queryClient.invalidateQueries({ queryKey: ['knowledge', documentId] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge'] });
     },
   });
 }

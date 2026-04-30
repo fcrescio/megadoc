@@ -83,6 +83,43 @@ def ensure_knowledge_schema(engine) -> None:
             created_at TIMESTAMPTZ NOT NULL DEFAULT now()
         )""",
         "CREATE INDEX IF NOT EXISTS ix_graph_consolidation_reviews_pair ON graph_consolidation_reviews(axis, source_topic_id, target_topic_id, created_at)",
+        """CREATE TABLE IF NOT EXISTS specialist_jobs (
+            id UUID PRIMARY KEY,
+            document_unit_id UUID NOT NULL REFERENCES document_units(id) ON DELETE CASCADE,
+            specialist_type VARCHAR(64) NOT NULL,
+            status VARCHAR(32) NOT NULL,
+            input_version VARCHAR(128) NULL,
+            attempt_count INTEGER NOT NULL DEFAULT 0,
+            error_message TEXT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            started_at TIMESTAMPTZ NULL,
+            finished_at TIMESTAMPTZ NULL
+        )""",
+        "CREATE INDEX IF NOT EXISTS ix_specialist_jobs_status_created_at ON specialist_jobs(status, created_at)",
+        "CREATE INDEX IF NOT EXISTS ix_specialist_jobs_unit_type ON specialist_jobs(document_unit_id, specialist_type)",
+        """CREATE TABLE IF NOT EXISTS specialist_results (
+            id UUID PRIMARY KEY,
+            document_unit_id UUID NOT NULL REFERENCES document_units(id) ON DELETE CASCADE,
+            specialist_type VARCHAR(64) NOT NULL,
+            schema_version VARCHAR(64) NOT NULL,
+            confidence DOUBLE PRECISION NULL,
+            review_status VARCHAR(32) NOT NULL DEFAULT 'auto_accepted',
+            result_json JSON NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NULL
+        )""",
+        "CREATE INDEX IF NOT EXISTS ix_specialist_results_unit_type ON specialist_results(document_unit_id, specialist_type)",
+        """CREATE TABLE IF NOT EXISTS document_unit_links (
+            id UUID PRIMARY KEY,
+            source_document_unit_id UUID NOT NULL REFERENCES document_units(id) ON DELETE CASCADE,
+            target_document_unit_id UUID NOT NULL REFERENCES document_units(id) ON DELETE CASCADE,
+            link_type VARCHAR(64) NOT NULL,
+            confidence DOUBLE PRECISION NULL,
+            rationale TEXT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )""",
+        "CREATE INDEX IF NOT EXISTS ix_document_unit_links_source_type ON document_unit_links(source_document_unit_id, link_type)",
+        "CREATE INDEX IF NOT EXISTS ix_document_unit_links_target_type ON document_unit_links(target_document_unit_id, link_type)",
     ]
     with engine.begin() as conn:
         for statement in statements:

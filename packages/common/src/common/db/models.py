@@ -257,6 +257,22 @@ class DocumentUnit(Base):
     topic_assignments: Mapped[list["DocumentUnitTopicAssignment"]] = relationship(
         back_populates="document_unit", cascade="all, delete-orphan"
     )
+    specialist_jobs: Mapped[list["SpecialistJob"]] = relationship(
+        back_populates="document_unit", cascade="all, delete-orphan"
+    )
+    specialist_results: Mapped[list["SpecialistResult"]] = relationship(
+        back_populates="document_unit", cascade="all, delete-orphan"
+    )
+    outgoing_links: Mapped[list["DocumentUnitLink"]] = relationship(
+        foreign_keys="DocumentUnitLink.source_document_unit_id",
+        back_populates="source_document_unit",
+        cascade="all, delete-orphan",
+    )
+    incoming_links: Mapped[list["DocumentUnitLink"]] = relationship(
+        foreign_keys="DocumentUnitLink.target_document_unit_id",
+        back_populates="target_document_unit",
+        cascade="all, delete-orphan",
+    )
     proposal: Mapped["TopicProposal | None"] = relationship(
         foreign_keys="TopicProposal.source_document_unit_id", back_populates="source_document_unit", uselist=False
     )
@@ -277,6 +293,79 @@ class DocumentUnitEntity(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     document_unit: Mapped["DocumentUnit"] = relationship(back_populates="entities")
+
+
+class SpecialistJob(Base):
+    __tablename__ = "specialist_jobs"
+    __table_args__ = (
+        Index("ix_specialist_jobs_status_created_at", "status", "created_at"),
+        Index("ix_specialist_jobs_unit_type", "document_unit_id", "specialist_type"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    document_unit_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("document_units.id", ondelete="CASCADE"), nullable=False
+    )
+    specialist_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    input_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    document_unit: Mapped["DocumentUnit"] = relationship(back_populates="specialist_jobs")
+
+
+class SpecialistResult(Base):
+    __tablename__ = "specialist_results"
+    __table_args__ = (
+        Index("ix_specialist_results_unit_type", "document_unit_id", "specialist_type"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    document_unit_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("document_units.id", ondelete="CASCADE"), nullable=False
+    )
+    specialist_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    schema_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    review_status: Mapped[str] = mapped_column(String(32), nullable=False, default="auto_accepted")
+    result_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    document_unit: Mapped["DocumentUnit"] = relationship(back_populates="specialist_results")
+
+
+class DocumentUnitLink(Base):
+    __tablename__ = "document_unit_links"
+    __table_args__ = (
+        Index("ix_document_unit_links_source_type", "source_document_unit_id", "link_type"),
+        Index("ix_document_unit_links_target_type", "target_document_unit_id", "link_type"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    source_document_unit_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("document_units.id", ondelete="CASCADE"), nullable=False
+    )
+    target_document_unit_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("document_units.id", ondelete="CASCADE"), nullable=False
+    )
+    link_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    source_document_unit: Mapped["DocumentUnit"] = relationship(
+        foreign_keys=[source_document_unit_id],
+        back_populates="outgoing_links",
+    )
+    target_document_unit: Mapped["DocumentUnit"] = relationship(
+        foreign_keys=[target_document_unit_id],
+        back_populates="incoming_links",
+    )
 
 
 class CanonicalEntity(Base):

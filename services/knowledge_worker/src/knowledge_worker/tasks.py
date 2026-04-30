@@ -11,12 +11,14 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from common.application.knowledge import has_active_ingestion_jobs
+from common.application.specialists import ensure_specialist_jobs_for_scan_unit
 from common.db.models import KnowledgeJob
 from common.db.schema import ensure_knowledge_schema
 from knowledge_classifier.config import get_settings
 from knowledge_classifier.llm.mock import MockDeterministicProvider
 from knowledge_classifier.llm.openai_compat import OpenAICompatibleProvider
 from knowledge_classifier.services.pipeline import KnowledgePipelineService
+from specialist_worker.dispatch import dispatch_specialist_job
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +86,14 @@ def process_scan_unit_task(self, scan_unit_id: str):
             
             # Commit changes
             session.commit()
+
+            with Session(engine) as specialist_session:
+                specialist_jobs = ensure_specialist_jobs_for_scan_unit(specialist_session, scan_unit_id)
+                specialist_session.commit()
+
+            for specialist_job in specialist_jobs:
+                dispatch_specialist_job(str(specialist_job.id), specialist_job.specialist_type)
+
             _update_knowledge_job(
                 engine,
                 scan_unit_id,

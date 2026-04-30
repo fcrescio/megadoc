@@ -29,6 +29,22 @@ class Settings(BaseSettings):
         default="ingestion_llm_vision",
         alias="INGESTION_QUEUE_LLM_VISION",
     )
+    specialist_queue_utility: str = Field(
+        default="specialist_utility",
+        alias="SPECIALIST_QUEUE_UTILITY",
+    )
+    specialist_queue_accounting: str = Field(
+        default="specialist_accounting",
+        alias="SPECIALIST_QUEUE_ACCOUNTING",
+    )
+    specialist_job_running_timeout_seconds: int = Field(
+        default=3 * 60 * 60,
+        alias="SPECIALIST_JOB_RUNNING_TIMEOUT_SECONDS",
+    )
+    specialist_job_queued_timeout_seconds: int = Field(
+        default=24 * 60 * 60,
+        alias="SPECIALIST_JOB_QUEUED_TIMEOUT_SECONDS",
+    )
     ingestion_job_running_timeout_seconds: int = Field(
         default=6 * 60 * 60,
         alias="INGESTION_JOB_RUNNING_TIMEOUT_SECONDS",
