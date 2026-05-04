@@ -5,7 +5,7 @@ import re
 import uuid
 from typing import Any
 
-from sqlalchemy import insert, select
+from sqlalchemy import delete, insert, select
 from sqlalchemy.orm import Session
 
 from common.db.models import (
@@ -90,6 +90,8 @@ class KnowledgePipelineService:
             raise ValueError(f"OCR result not found: {scan_unit.source_ocr_result_id}")
         
         try:
+            self._reset_scan_unit_outputs(scan_unit)
+
             routing_decision = self.pipeline_router_service.route_scan(ocr_result)
             strategy = self._resolve_pipeline_strategy(routing_decision.pipeline_id)
             logger.info(
@@ -171,6 +173,35 @@ class KnowledgePipelineService:
             scan_unit.status = ScanUnitStatus.FAILED.value
             self.db.flush()
             raise
+
+    def _reset_scan_unit_outputs(self, scan_unit: DBScanUnit) -> None:
+        """Remove previous per-scan outputs so retries stay idempotent."""
+        existing_document_unit_ids = self.db.execute(
+            select(DBDocumentUnit.id).where(DBDocumentUnit.scan_unit_id == scan_unit.id)
+        ).scalars().all()
+        if not existing_document_unit_ids:
+            return
+
+        self.db.execute(
+            delete(TopicProposal).where(TopicProposal.source_document_unit_id.in_(existing_document_unit_ids))
+        )
+        self.db.execute(
+            delete(LLMDecision).where(LLMDecision.document_unit_id.in_(existing_document_unit_ids))
+        )
+        self.db.execute(
+            delete(LLMDecision).where(
+                LLMDecision.scan_unit_id == scan_unit.id,
+                LLMDecision.document_unit_id.is_(None),
+            )
+        )
+
+        stale_document_units = self.db.execute(
+            select(DBDocumentUnit).where(DBDocumentUnit.scan_unit_id == scan_unit.id)
+        ).scalars().all()
+        for stale_document_unit in stale_document_units:
+            self.db.delete(stale_document_unit)
+
+        self.db.flush()
 
     def _get_scan_unit(self, scan_unit_id: str) -> DBScanUnit | None:
         """Get scan unit by ID."""

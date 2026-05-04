@@ -89,10 +89,15 @@ def process_scan_unit_task(self, scan_unit_id: str):
 
             with Session(engine) as specialist_session:
                 specialist_jobs = ensure_specialist_jobs_for_scan_unit(specialist_session, scan_unit_id)
+                specialist_session.flush()
+                specialist_dispatches = [
+                    (str(specialist_job.id), specialist_job.specialist_type)
+                    for specialist_job in specialist_jobs
+                ]
                 specialist_session.commit()
 
-            for specialist_job in specialist_jobs:
-                dispatch_specialist_job(str(specialist_job.id), specialist_job.specialist_type)
+            for specialist_job_id, specialist_type in specialist_dispatches:
+                dispatch_specialist_job(specialist_job_id, specialist_type)
 
             _update_knowledge_job(
                 engine,
