@@ -10,11 +10,12 @@ def process_accounting_statement(
     document_unit: DocumentUnit,
     segment_text: str,
     input_version: str,
+    structured_json: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], float]:
     text = segment_text or ""
     statement_type = _statement_type(text)
     period_from, period_to = _extract_period(text)
-    tables = _extract_markdown_tables(text)
+    tables = _extract_structured_tables(document_unit, structured_json or {}) or _extract_markdown_tables(text)
     validation_checks = _build_validation_checks(tables)
 
     confidence = 0.45
@@ -26,7 +27,9 @@ def process_accounting_statement(
         confidence += 0.10
     if statement_type != "unknown":
         confidence += 0.10
-    confidence = min(confidence, 0.95)
+    if any(table.get("source") == "docling_structured" for table in tables):
+        confidence += 0.05
+    confidence = min(confidence, 0.97)
 
     result = {
         "document_kind": "accounting_statement",
@@ -70,6 +73,146 @@ def _normalize_date(value: str) -> str:
     return f"{year}-{month.zfill(2)}-{day.zfill(2)}"
 
 
+def _extract_structured_tables(document_unit: DocumentUnit, structured_json: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_tables = structured_json.get("tables")
+    if not isinstance(raw_tables, list):
+        return []
+
+    extracted: list[dict[str, Any]] = []
+    for index, table in enumerate(raw_tables, start=1):
+        if not isinstance(table, dict):
+            continue
+        if not _table_overlaps_document_unit(table, document_unit.start_page, document_unit.end_page):
+            continue
+        parsed = _parse_structured_table(table)
+        if parsed is None:
+            continue
+        headers, rows, raw_headers = parsed
+        extracted.append(
+            {
+                "table_id": table.get("self_ref", f"table_{index}").split("/")[-1] or f"table_{index}",
+                "table_type": _classify_table(headers, rows),
+                "headers": headers,
+                "raw_headers": raw_headers,
+                "rows": rows,
+                "totals": _extract_table_totals(headers, rows),
+                "source": "docling_structured",
+            }
+        )
+    return extracted
+
+
+def _table_overlaps_document_unit(table: dict[str, Any], start_page: int, end_page: int) -> bool:
+    prov = table.get("prov")
+    if not isinstance(prov, list):
+        return True
+    pages = {
+        item.get("page_no")
+        for item in prov
+        if isinstance(item, dict) and isinstance(item.get("page_no"), int)
+    }
+    if not pages:
+        return True
+    return any(start_page <= page <= end_page for page in pages)
+
+
+def _parse_structured_table(table: dict[str, Any]) -> tuple[list[str], list[dict[str, Any]], list[list[str]]] | None:
+    data = table.get("data")
+    if not isinstance(data, dict):
+        return None
+    cell_defs = data.get("table_cells")
+    num_rows = data.get("num_rows")
+    num_cols = data.get("num_cols")
+    if not isinstance(cell_defs, list) or not isinstance(num_rows, int) or not isinstance(num_cols, int):
+        return None
+
+    grid = [["" for _ in range(num_cols)] for _ in range(num_rows)]
+    column_header_rows = 0
+    first_data_row = num_rows
+    for cell in cell_defs:
+        if not isinstance(cell, dict):
+            continue
+        row_start = int(cell.get("start_row_offset_idx", 0))
+        row_end = int(cell.get("end_row_offset_idx", row_start + 1))
+        col_start = int(cell.get("start_col_offset_idx", 0))
+        col_end = int(cell.get("end_col_offset_idx", col_start + 1))
+        text = str(cell.get("text", "")).strip()
+        if cell.get("column_header"):
+            column_header_rows = max(column_header_rows, row_end)
+        if cell.get("row_header") and row_start < first_data_row:
+            first_data_row = row_start
+        for row_idx in range(row_start, min(row_end, num_rows)):
+            for col_idx in range(col_start, min(col_end, num_cols)):
+                if text and not grid[row_idx][col_idx]:
+                    grid[row_idx][col_idx] = text
+
+    if first_data_row == num_rows:
+        first_data_row = 1 if num_rows > 1 else 0
+    header_rows = max(column_header_rows, first_data_row)
+    raw_headers = _build_raw_headers(grid, header_rows, num_cols)
+    headers = _make_unique_headers(raw_headers)
+
+    rows: list[dict[str, Any]] = []
+    for row_idx in range(header_rows, num_rows):
+        row_cells = grid[row_idx]
+        if not any(cell.strip() for cell in row_cells):
+            continue
+        cells: dict[str, str] = {}
+        normalized_amounts: dict[str, float] = {}
+        for col_idx, header in enumerate(headers):
+            value = row_cells[col_idx].strip()
+            cells[header] = value
+            amount = _parse_amount(value)
+            if amount is not None:
+                normalized_amounts[header] = amount
+        rows.append(
+            {
+                "row_id": f"row_{len(rows) + 1}",
+                "cells": cells,
+                "normalized_amounts": normalized_amounts,
+            }
+        )
+    if not rows:
+        return None
+    return headers, rows, raw_headers
+
+
+def _build_raw_headers(grid: list[list[str]], header_rows: int, num_cols: int) -> list[list[str]]:
+    raw_headers: list[list[str]] = []
+    for col_idx in range(num_cols):
+        parts: list[str] = []
+        for row_idx in range(header_rows):
+            value = grid[row_idx][col_idx].strip()
+            if value and (not parts or parts[-1] != value):
+                parts.append(value)
+        if not parts:
+            parts.append(f"column_{col_idx + 1}")
+        raw_headers.append(parts)
+    return raw_headers
+
+
+def _make_unique_headers(raw_headers: list[list[str]]) -> list[str]:
+    semantic_suffix = {
+        0: "unita",
+        1: "categoria",
+    }
+    headers: list[str] = []
+    seen: dict[str, int] = {}
+    for col_idx, parts in enumerate(raw_headers):
+        base = " / ".join(parts)
+        if not base:
+            base = f"column_{col_idx + 1}"
+        count = seen.get(base, 0)
+        seen[base] = count + 1
+        if count == 0:
+            header = base
+        else:
+            suffix = semantic_suffix.get(count, str(count + 1))
+            header = f"{base} / {suffix}"
+        headers.append(header)
+    return headers
+
+
 def _extract_markdown_tables(text: str) -> list[dict[str, Any]]:
     lines = text.splitlines()
     blocks: list[list[str]] = []
@@ -97,6 +240,7 @@ def _extract_markdown_tables(text: str) -> list[dict[str, Any]]:
                 "headers": headers,
                 "rows": rows,
                 "totals": _extract_table_totals(headers, rows),
+                "source": "markdown_fallback",
             }
         )
     return tables
@@ -108,7 +252,7 @@ def _parse_table_block(block: list[str]) -> tuple[list[str], list[dict[str, Any]
     raw_rows = [_split_row(line) for line in block]
     if len(raw_rows) < 2 or not raw_rows[0]:
         return None
-    headers = raw_rows[0]
+    headers = _make_unique_headers([[header] for header in raw_rows[0]])
     data_rows = []
     for raw in raw_rows[2:]:
         if not any(cell.strip() for cell in raw):
@@ -134,8 +278,7 @@ def _parse_table_block(block: list[str]) -> tuple[list[str], list[dict[str, Any]
 
 
 def _split_row(line: str) -> list[str]:
-    parts = [part.strip() for part in line.strip().strip("|").split("|")]
-    return parts
+    return [part.strip() for part in line.strip().strip("|").split("|")]
 
 
 def _parse_amount(value: str | None) -> float | None:
@@ -153,12 +296,25 @@ def _parse_amount(value: str | None) -> float | None:
 
 def _classify_table(headers: list[str], rows: list[dict[str, Any]]) -> str:
     joined_headers = " ".join(headers).lower()
+    sample_values = " ".join(
+        value
+        for row in rows[:5]
+        for value in row["cells"].values()
+        if isinstance(value, str)
+    ).lower()
     if "rata n." in joined_headers or "totale dovuto" in joined_headers:
         return "payment_schedule"
+    if (
+        "appartamento" in joined_headers
+        or "scala" in joined_headers
+        or "unita" in joined_headers
+        or "appartamento" in sample_values
+        or "postoauto" in sample_values
+        or re.search(r"\b[a-d]\d{1,2}\b", sample_values)
+    ):
+        return "expense_allocation"
     if "totale gestione" in joined_headers or "saldo finale" in joined_headers:
         return "summary"
-    if "palazzina" in joined_headers or "appartamento" in joined_headers or "totale gestione" in joined_headers:
-        return "expense_allocation"
     if "importi" in joined_headers or "totali" in joined_headers:
         return "summary"
     if any("saldo" in " ".join(row["cells"].values()).lower() for row in rows):
@@ -169,8 +325,9 @@ def _classify_table(headers: list[str], rows: list[dict[str, Any]]) -> str:
 def _extract_table_totals(headers: list[str], rows: list[dict[str, Any]]) -> dict[str, float]:
     totals: dict[str, float] = {}
     for row in rows:
-        first_cell = next(iter(row["cells"].values()), "").lower()
-        if "totale" not in first_cell and "saldo finale" not in first_cell:
+        first_values = [str(value).lower() for value in list(row["cells"].values())[:2] if value]
+        marker = " ".join(first_values)
+        if "totale" not in marker and "saldo finale" not in marker:
             continue
         for header, amount in row["normalized_amounts"].items():
             totals[header] = amount
@@ -186,9 +343,9 @@ def _build_validation_checks(tables: list[dict[str, Any]]) -> list[dict[str, Any
         if table["table_type"] != "summary":
             continue
         totals = table.get("totals", {})
-        total_gestione = totals.get("Totale gestione")
-        saldo_finale = totals.get("Saldo finale (Euro)")
-        generic_total = totals.get("Totali") or totals.get("Totale")
+        total_gestione = _pick_amount_by_header(totals, ["Totale gestione"])
+        saldo_finale = _pick_amount_by_header(totals, ["Saldo finale (Euro)", "Saldo finale"])
+        generic_total = _pick_amount_by_header(totals, ["Totali", "Totale"])
         if total_gestione is not None:
             summary_totals.append(total_gestione)
         if saldo_finale is not None:
@@ -211,11 +368,12 @@ def _build_validation_checks(tables: list[dict[str, Any]]) -> list[dict[str, Any
         total_row = None
         value_rows: list[float] = []
         for row in table["rows"]:
-            first_cell = next(iter(row["cells"].values()), "").lower()
-            amount = row["normalized_amounts"].get("Totale") or row["normalized_amounts"].get("Totale gestione")
+            first_values = [str(value).lower() for value in list(row["cells"].values())[:2] if value]
+            marker = " ".join(first_values)
+            amount = _pick_amount_by_header(row["normalized_amounts"], ["Totale", "Totale gestione"])
             if amount is None:
                 continue
-            if "totale" in first_cell:
+            if "totale" in marker:
                 total_row = amount
             else:
                 value_rows.append(amount)
@@ -237,12 +395,14 @@ def _build_validation_checks(tables: list[dict[str, Any]]) -> list[dict[str, Any
         total_row = None
         installment_sum = None
         for row in table["rows"]:
-            first_values = [str(value).lower() for value in row["cells"].values() if value]
+            first_values = [str(value).lower() for value in list(row["cells"].values())[:2] if value]
             if not any("totale" in value for value in first_values):
                 continue
             amounts = row["normalized_amounts"]
-            total_row = amounts.get("Totale dovuto")
-            installment_columns = [amount for key, amount in amounts.items() if "Rata n." in key]
+            total_row = _pick_amount_by_header(amounts, ["Totale dovuto"])
+            installment_columns = [
+                amount for key, amount in amounts.items() if "Rata n." in key
+            ]
             if installment_columns:
                 installment_sum = round(sum(installment_columns), 2)
             break
@@ -278,3 +438,11 @@ def _build_validation_checks(tables: list[dict[str, Any]]) -> list[dict[str, Any
             }
         )
     return checks
+
+
+def _pick_amount_by_header(amounts: dict[str, float], header_hints: list[str]) -> float | None:
+    for hint in header_hints:
+        for header, amount in amounts.items():
+            if hint.lower() in header.lower():
+                return amount
+    return None

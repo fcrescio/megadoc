@@ -66,6 +66,7 @@ def process_specialist_job(self, specialist_job_id: str):
                     document_unit,
                     segment_text,
                     specialist_job.input_version or "",
+                    structured_json=ocr_result.structured_json,
                 )
                 schema_version = "accounting_statement_v1"
             else:
