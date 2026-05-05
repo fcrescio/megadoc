@@ -59,6 +59,26 @@ export interface Job {
   stale_reason: string | null;
 }
 
+export interface RemoteBackendStatus {
+  name: string;
+  status: 'ok' | 'degraded' | 'error';
+  endpoint: string | null;
+  model: string | null;
+  detail: string | null;
+  server_reachable: boolean;
+  model_available: boolean | null;
+  latency_ms: number | null;
+}
+
+export interface SystemStatus {
+  status: 'ok' | 'degraded' | 'error';
+  database: string;
+  redis: string;
+  storage: string;
+  ocr_backend: RemoteBackendStatus;
+  llm_backend: RemoteBackendStatus;
+}
+
 export interface UploadResponse {
   document_id: string;
   version_id: string;

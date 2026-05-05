@@ -4,6 +4,7 @@ import type {
   DocumentAsset,
   OCRResult,
   Job,
+  SystemStatus,
   UploadResponse,
   DocumentKnowledge,
   KnowledgeTopicSummary,
@@ -44,6 +45,11 @@ async function handleResponse<T>(response: Response): Promise<T> {
 export async function getDocuments(limit = 100): Promise<Document[]> {
   const response = await fetch(`${API_BASE}/documents?limit=${limit}`);
   return handleResponse<Document[]>(response);
+}
+
+export async function getSystemStatus(): Promise<SystemStatus> {
+  const response = await fetch(`${API_BASE}/system/status`);
+  return handleResponse<SystemStatus>(response);
 }
 
 export async function getDocument(id: string): Promise<Document> {

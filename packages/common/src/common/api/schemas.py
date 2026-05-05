@@ -88,6 +88,26 @@ class ReadinessResponse(BaseModel):
     storage: str
 
 
+class RemoteBackendStatus(BaseModel):
+    name: str
+    status: str
+    endpoint: str | None = None
+    model: str | None = None
+    detail: str | None = None
+    server_reachable: bool = False
+    model_available: bool | None = None
+    latency_ms: int | None = None
+
+
+class SystemStatusResponse(BaseModel):
+    status: str
+    database: str
+    redis: str
+    storage: str
+    ocr_backend: RemoteBackendStatus
+    llm_backend: RemoteBackendStatus
+
+
 class ManualCommentCreate(BaseModel):
     selected_text: str
     selection_start: int | None = None

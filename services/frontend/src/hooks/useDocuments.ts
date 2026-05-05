@@ -4,6 +4,7 @@ import type {
   DocumentVersion,
   DocumentAsset,
   OCRResult,
+  SystemStatus,
   UploadResponse,
   DocumentKnowledge,
   KnowledgeTopicSummary,
@@ -31,6 +32,7 @@ import type {
 } from '../types';
 import {
   getDocuments,
+  getSystemStatus,
   getDocument,
   getDocumentVersions,
   getDocumentAssets,
@@ -66,6 +68,15 @@ export function useDocuments(limit = 100) {
   return useQuery<Document[]>({
     queryKey: ['documents', limit],
     queryFn: () => getDocuments(limit),
+  });
+}
+
+export function useSystemStatus() {
+  return useQuery<SystemStatus>({
+    queryKey: ['system-status'],
+    queryFn: () => getSystemStatus(),
+    refetchInterval: 15000,
+    staleTime: 5000,
   });
 }
 

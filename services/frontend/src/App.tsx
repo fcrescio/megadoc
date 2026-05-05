@@ -5,6 +5,7 @@ import UploadForm from './components/UploadForm';
 import JobStatus from './components/JobStatus';
 import KnowledgeBase from './components/KnowledgeBase';
 import ManualView from './components/ManualView';
+import SystemStatusButton from './components/SystemStatusButton';
 
 type View = 'documents' | 'knowledge' | 'upload' | 'manual';
 type DocumentTab = 'info' | 'pdf' | 'ocr' | 'knowledge' | 'versions' | 'assets';
@@ -97,26 +98,29 @@ function App() {
             <h1 className="text-2xl lg:text-3xl font-semibold text-white">Document intelligence, now navigable</h1>
           </div>
 
-          <nav className="flex flex-wrap items-center gap-2">
-            {[
-              { id: 'documents', label: 'Documents' },
-              { id: 'knowledge', label: 'Knowledge' },
-              { id: 'manual', label: 'Manual' },
-              { id: 'upload', label: 'Upload' },
-            ].map((item) => (
-              <button
-                key={item.id}
-                onClick={() => openView(item.id as View)}
-                className={`px-4 py-2 rounded-full text-sm font-medium transition ${
-                  activeView === item.id
-                    ? 'bg-cyan-400/15 text-cyan-200 border border-cyan-300/30 shadow-[0_0_30px_rgba(34,211,238,0.18)]'
-                    : 'bg-white/5 text-slate-300 border border-white/10 hover:bg-white/10'
-                }`}
-              >
-                {item.label}
-              </button>
-            ))}
-          </nav>
+          <div className="flex flex-wrap items-center gap-3 justify-end">
+            <nav className="flex flex-wrap items-center gap-2">
+              {[
+                { id: 'documents', label: 'Documents' },
+                { id: 'knowledge', label: 'Knowledge' },
+                { id: 'manual', label: 'Manual' },
+                { id: 'upload', label: 'Upload' },
+              ].map((item) => (
+                <button
+                  key={item.id}
+                  onClick={() => openView(item.id as View)}
+                  className={`px-4 py-2 rounded-full text-sm font-medium transition ${
+                    activeView === item.id
+                      ? 'bg-cyan-400/15 text-cyan-200 border border-cyan-300/30 shadow-[0_0_30px_rgba(34,211,238,0.18)]'
+                      : 'bg-white/5 text-slate-300 border border-white/10 hover:bg-white/10'
+                  }`}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </nav>
+            <SystemStatusButton />
+          </div>
         </div>
       </header>
 

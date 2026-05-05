@@ -3,6 +3,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Annotated
+import json
+from urllib.error import HTTPError, URLError
+from urllib.request import Request as UrlRequest, urlopen
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile
 from redis import Redis
@@ -22,7 +25,9 @@ from common.api.schemas import (
     ManualCommentResponse,
     ManualResponse,
     OCRResponse,
+    RemoteBackendStatus,
     ReadinessResponse,
+    SystemStatusResponse,
     UploadResponse,
 )
 from common.application.repositories import (
@@ -42,6 +47,7 @@ from common.domain.exceptions import NotFoundError, ValidationError
 from common.logging import configure_logging
 from common.storage.backends import StorageBackend, get_storage_backend
 from worker.tasks import process_ingestion_job
+from knowledge_classifier.config import get_settings as get_knowledge_settings
 
 configure_logging(get_settings().log_level)
 
@@ -416,4 +422,184 @@ def ready(
     overall = "ok" if {db_status, redis_status, storage_status} == {"ok"} else "degraded"
     return ReadinessResponse(
         status=overall, database=db_status, redis=redis_status, storage=storage_status
+    )
+
+
+@app.get("/system/status", response_model=SystemStatusResponse)
+def system_status(
+    session: Session = Depends(db_session_dep),
+    redis: Redis = Depends(get_redis_dep),
+    storage: StorageBackend = Depends(get_storage_dep),
+    settings: Settings = Depends(get_settings_dep),
+) -> SystemStatusResponse:
+    db_status = "ok"
+    redis_status = "ok"
+    storage_status = "ok"
+    try:
+        session.execute(text("SELECT 1"))
+    except Exception:
+        db_status = "error"
+    try:
+        redis.ping()
+    except Exception:
+        redis_status = "error"
+    try:
+        storage.healthcheck()
+    except Exception:
+        storage_status = "error"
+
+    ocr_status = _probe_ocr_backend(settings)
+    llm_status = _probe_llm_backend(settings)
+
+    statuses = {
+        db_status,
+        redis_status,
+        storage_status,
+        ocr_status.status,
+        llm_status.status,
+    }
+    overall = "ok"
+    if "error" in statuses:
+        overall = "error"
+    elif "degraded" in statuses:
+        overall = "degraded"
+
+    return SystemStatusResponse(
+        status=overall,
+        database=db_status,
+        redis=redis_status,
+        storage=storage_status,
+        ocr_backend=ocr_status,
+        llm_backend=llm_status,
+    )
+
+
+def _probe_ocr_backend(settings: Settings) -> RemoteBackendStatus:
+    backend = (settings.ocr_backend or "").strip().lower()
+    if backend not in {"dots_native", "llm_vision"}:
+        return RemoteBackendStatus(
+            name=f"ocr:{backend or 'docling'}",
+            status="ok",
+            detail="Backend OCR locale, nessuna dipendenza remota richiesta.",
+            server_reachable=True,
+            model_available=None,
+        )
+    if backend == "dots_native":
+        endpoint = settings.ocr_dots_native_endpoint
+        model = settings.ocr_dots_native_model
+        api_key = settings.ocr_dots_native_api_key
+    else:
+        endpoint = settings.ocr_llm_vision_endpoint
+        model = settings.ocr_llm_vision_model
+        api_key = settings.ocr_llm_vision_api_key
+    return _probe_openai_compatible_backend(
+        name=f"ocr:{backend}",
+        endpoint=endpoint,
+        model=model,
+        api_key=api_key,
+    )
+
+
+def _probe_llm_backend(settings: Settings) -> RemoteBackendStatus:
+    kn_settings = get_knowledge_settings()
+    if kn_settings.use_mock_llm:
+        return RemoteBackendStatus(
+            name="knowledge_llm",
+            status="ok",
+            endpoint=kn_settings.llm_endpoint,
+            model=kn_settings.llm_model,
+            detail="Mock LLM attivo.",
+            server_reachable=True,
+            model_available=True,
+        )
+    return _probe_openai_compatible_backend(
+        name="knowledge_llm",
+        endpoint=kn_settings.llm_endpoint,
+        model=kn_settings.llm_model,
+        api_key=kn_settings.llm_api_key,
+    )
+
+
+def _probe_openai_compatible_backend(
+    *,
+    name: str,
+    endpoint: str,
+    model: str | None,
+    api_key: str | None,
+    timeout_seconds: float = 2.5,
+) -> RemoteBackendStatus:
+    headers = {"Accept": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    root = endpoint.rstrip("/")
+    if root.endswith("/v1"):
+        health_url = root[:-3] + "/health"
+    else:
+        health_url = root + "/health"
+    models_url = root + "/models"
+
+    server_reachable = False
+    model_available: bool | None = None
+    latency_ms: int | None = None
+    detail: str | None = None
+
+    try:
+        health_request = UrlRequest(health_url, headers=headers, method="GET")
+        started = datetime.now(timezone.utc)
+        with urlopen(health_request, timeout=timeout_seconds) as response:
+            response.read()
+        latency_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
+        server_reachable = 200 <= getattr(response, "status", 200) < 300
+    except Exception as exc:
+        detail = f"Health check failed: {exc}"
+
+    try:
+        models_request = UrlRequest(models_url, headers=headers, method="GET")
+        started = datetime.now(timezone.utc)
+        with urlopen(models_request, timeout=timeout_seconds) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        if latency_ms is None:
+            latency_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
+        server_reachable = True
+        models = payload.get("data", []) if isinstance(payload, dict) else []
+        model_ids = {
+            item.get("id")
+            for item in models
+            if isinstance(item, dict) and isinstance(item.get("id"), str)
+        }
+        if model:
+            model_available = model in model_ids
+            if not model_available:
+                detail = f"Server raggiungibile ma modello non disponibile: {model}"
+        else:
+            model_available = None
+    except HTTPError as exc:
+        if not server_reachable:
+            detail = f"Model listing failed: HTTP {exc.code}"
+    except URLError as exc:
+        if not server_reachable:
+            detail = f"Backend non raggiungibile: {exc.reason}"
+    except Exception as exc:
+        if not server_reachable:
+            detail = f"Model listing failed: {exc}"
+
+    status = "ok"
+    if not server_reachable:
+        status = "error"
+    elif model_available is False:
+        status = "degraded"
+
+    if detail is None and status == "ok":
+        detail = "Backend remoto operativo."
+
+    return RemoteBackendStatus(
+        name=name,
+        status=status,
+        endpoint=endpoint,
+        model=model,
+        detail=detail,
+        server_reachable=server_reachable,
+        model_available=model_available,
+        latency_ms=latency_ms,
     )
