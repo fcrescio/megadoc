@@ -6,6 +6,7 @@ from typing import Annotated
 import json
 from urllib.error import HTTPError, URLError
 from urllib.request import Request as UrlRequest, urlopen
+from urllib.parse import urlparse, urlunparse
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile
 from redis import Redis
@@ -544,15 +545,29 @@ def _probe_openai_compatible_backend(
     latency_ms: int | None = None
     detail: str | None = None
 
-    try:
-        health_request = UrlRequest(health_url, headers=headers, method="GET")
-        started = datetime.now(timezone.utc)
-        with urlopen(health_request, timeout=timeout_seconds) as response:
-            response.read()
-        latency_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
-        server_reachable = 200 <= getattr(response, "status", 200) < 300
-    except Exception as exc:
-        detail = f"Health check failed: {exc}"
+    probe_urls = [endpoint]
+    alternate_endpoint = _alternate_docker_host_endpoint(endpoint)
+    if alternate_endpoint and alternate_endpoint not in probe_urls:
+        probe_urls.append(alternate_endpoint)
+
+    active_endpoint = endpoint
+    for candidate_endpoint in probe_urls:
+        root_candidate = candidate_endpoint.rstrip("/")
+        candidate_health_url = root_candidate[:-3] + "/health" if root_candidate.endswith("/v1") else root_candidate + "/health"
+        try:
+            health_request = UrlRequest(candidate_health_url, headers=headers, method="GET")
+            started = datetime.now(timezone.utc)
+            with urlopen(health_request, timeout=timeout_seconds) as response:
+                response.read()
+            latency_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
+            server_reachable = 200 <= getattr(response, "status", 200) < 300
+            if server_reachable:
+                active_endpoint = candidate_endpoint
+                health_url = candidate_health_url
+                models_url = root_candidate + "/models"
+                break
+        except Exception as exc:
+            detail = f"Health check failed: {exc}"
 
     try:
         models_request = UrlRequest(models_url, headers=headers, method="GET")
@@ -575,7 +590,10 @@ def _probe_openai_compatible_backend(
         else:
             model_available = None
     except HTTPError as exc:
-        if not server_reachable:
+        if exc.code == 404 and server_reachable:
+            model_available = None
+            detail = "Server raggiungibile; elenco modelli non esposto da /v1/models."
+        elif not server_reachable:
             detail = f"Model listing failed: HTTP {exc.code}"
     except URLError as exc:
         if not server_reachable:
@@ -596,10 +614,19 @@ def _probe_openai_compatible_backend(
     return RemoteBackendStatus(
         name=name,
         status=status,
-        endpoint=endpoint,
+        endpoint=active_endpoint,
         model=model,
         detail=detail,
         server_reachable=server_reachable,
         model_available=model_available,
         latency_ms=latency_ms,
     )
+
+
+def _alternate_docker_host_endpoint(endpoint: str) -> str | None:
+    parsed = urlparse(endpoint)
+    if not parsed.hostname or parsed.hostname == "host.docker.internal":
+        return None
+    if parsed.hostname.startswith("10.") or parsed.hostname.startswith("192.168.") or parsed.hostname.startswith("172."):
+        return urlunparse(parsed._replace(netloc=f"host.docker.internal:{parsed.port or (443 if parsed.scheme == 'https' else 80)}"))
+    return None
