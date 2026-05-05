@@ -122,8 +122,14 @@ services:
     env_file:
       - .env
     environment:
+      CELERY_BROKER_URL: redis://127.0.0.1:6379/1
+      CELERY_RESULT_BACKEND: redis://127.0.0.1:6379/2
+      DATABASE_URL: postgresql+psycopg://megadoc:megadoc@127.0.0.1:5432/megadoc
+      S3_ENDPOINT_URL: http://127.0.0.1:9000
+      OCR_DOTS_NATIVE_ENDPOINT: ${OCR_WORKER_DOTS_NATIVE_ENDPOINT:-http://10.89.0.3:8080/v1}
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    network_mode: host
     depends_on:
       redis:
         condition: service_healthy
@@ -197,6 +203,7 @@ services:
       CELERY_BROKER_URL: redis://127.0.0.1:6379/1
       CELERY_RESULT_BACKEND: redis://127.0.0.1:6379/2
       DATABASE_URL: postgresql+psycopg://megadoc:megadoc@127.0.0.1:5432/megadoc
+      KN_LLM_ENDPOINT: ${KN_WORKER_LLM_ENDPOINT:-http://10.89.0.3:8080/v1}
       PYTHONPATH: /app/packages/common/src:/app/services/api/src:/app/services/worker/src:/app/services/cli/src:/app/services/knowledge_classifier/src:/app/services/knowledge_worker/src:/app/services/specialist_worker/src
     depends_on:
       redis:

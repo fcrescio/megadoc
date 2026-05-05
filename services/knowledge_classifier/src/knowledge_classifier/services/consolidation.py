@@ -15,6 +15,7 @@ from common.db.models import (
     CanonicalEntityVariant,
     DocumentUnit,
     DocumentUnitEntity,
+    DocumentType,
     DocumentUnitTopicAssignment,
     GraphConsolidationReview,
     Topic,
@@ -316,6 +317,7 @@ class KnowledgeBaseConsolidationService:
         self._signature_cache.clear()
         self._consolidate_compatible_groups(stats)
         self._normalize_meeting_topics(stats)
+        self._normalize_accounting_family_topics(stats)
         self._finalize_matched_proposals()
         self.db.flush()
         stats.topics_after = int(
@@ -819,39 +821,14 @@ class KnowledgeBaseConsolidationService:
 
         for cluster_topics in clusters.values():
             family_topics = [topic for topic in cluster_topics if topic.topic_class == "meeting"]
-            if family_topics:
-                canonical = max(family_topics, key=self._topic_weight)
-                for topic in family_topics:
-                    if topic.id == canonical.id or not topic.is_active:
-                        continue
-                    self._merge_topic_into(canonical, topic, stats)
-            else:
-                seed_topic = max(cluster_topics, key=self._topic_weight)
-                generic_title = self._meeting_generic_title(seed_topic)
-                generic_slug = self._meeting_generic_slug(seed_topic)
-                existing_generic = self.db.execute(
-                    select(Topic).where(Topic.slug == generic_slug)
-                ).scalar_one_or_none()
-                if existing_generic is not None:
-                    canonical = existing_generic
-                    canonical.is_active = True
-                    canonical.canonical = True
-                    canonical.topic_class = "meeting"
-                    canonical.topic_kind = "family"
-                    canonical.title = generic_title
-                    canonical.description = "Topic ombrello per i verbali e le assemblee del medesimo condominio."
-                else:
-                    canonical = Topic(
-                        slug=generic_slug,
-                        title=generic_title,
-                        topic_class="meeting",
-                        topic_kind="family",
-                        description="Topic ombrello per i verbali e le assemblee del medesimo condominio.",
-                        canonical=True,
-                        is_active=True,
-                    )
-                    self.db.add(canonical)
-                    self.db.flush()
+            if not family_topics:
+                continue
+
+            canonical = max(family_topics, key=self._topic_weight)
+            for topic in family_topics:
+                if topic.id == canonical.id or not topic.is_active:
+                    continue
+                self._merge_topic_into(canonical, topic, stats)
 
             self._rename_topic_to_meeting_family(canonical, stats)
             self._ensure_meeting_family_assignments(canonical, cluster_topics)
@@ -876,8 +853,7 @@ class KnowledgeBaseConsolidationService:
             self._rename_topic_to_meeting_family(canonical, stats)
 
     def _meeting_cluster_key(self, topic: Topic) -> str | None:
-        topic_text = f"{topic.title} {topic.description or ''}".lower()
-        if topic.topic_class != "meeting" and not re.search(r"\b(assemblea|verbale|ordinaria|straordinaria)\b", topic_text):
+        if topic.topic_class != "meeting":
             return None
 
         anchors = self._topic_anchor_parts(topic)
@@ -951,6 +927,9 @@ class KnowledgeBaseConsolidationService:
                 document_unit = assignment.document_unit
                 if document_unit is None:
                     continue
+                document_type = document_unit.document_type
+                if document_type is not None and document_type.code != "verbale_assemblea":
+                    continue
                 unit_key = str(document_unit.id)
                 if unit_key in touched_units:
                     continue
@@ -996,6 +975,151 @@ class KnowledgeBaseConsolidationService:
         if " - " in title:
             return title.split(" - ", 1)[1].strip()
         return None
+
+    def _normalize_accounting_family_topics(self, stats: ConsolidationStats) -> None:
+        accounting_units = self.db.execute(
+            select(DocumentUnit)
+            .options(
+                selectinload(DocumentUnit.document_type),
+                selectinload(DocumentUnit.entities),
+                selectinload(DocumentUnit.topic_assignments).selectinload(DocumentUnitTopicAssignment.topic),
+            )
+            .join(DocumentUnit.document_type)
+            .where(func.lower(DocumentType.code).in_(("rendiconto_contabile", "riparto_spese")))
+        ).scalars().all()
+
+        clusters: dict[str, list[DocumentUnit]] = {}
+        labels: dict[str, str] = {}
+        for document_unit in accounting_units:
+            anchor, label = self._document_unit_accounting_anchor(document_unit)
+            if not anchor:
+                continue
+            clusters.setdefault(anchor, []).append(document_unit)
+            labels.setdefault(anchor, label or "Rendiconti condominiali")
+
+        for anchor, units in clusters.items():
+            canonical = self._resolve_accounting_canonical_topic(units, labels[anchor])
+            self._rename_topic_to_accounting_family(canonical, labels[anchor], stats)
+            for document_unit in units:
+                self._ensure_accounting_family_assignment(document_unit, canonical, stats)
+
+    def _document_unit_accounting_anchor(self, document_unit: DocumentUnit) -> tuple[str | None, str | None]:
+        normalized_candidates: dict[str, str] = {}
+        for entity in document_unit.entities:
+            if entity.entity_type not in {"condominio", "indirizzo"}:
+                continue
+            normalized = self._normalize_anchor_value(entity)
+            if not normalized:
+                continue
+            normalized_candidates.setdefault(normalized, entity.entity_value.strip())
+
+        if normalized_candidates:
+            anchor, label = sorted(normalized_candidates.items(), key=lambda item: (-len(item[0]), item[0]))[0]
+            return anchor, label
+        return None, None
+
+    def _resolve_accounting_canonical_topic(self, units: list[DocumentUnit], label: str) -> Topic:
+        candidate_topics: list[Topic] = []
+        for document_unit in units:
+            for assignment in document_unit.topic_assignments:
+                topic = assignment.topic
+                if topic is None:
+                    continue
+                if topic.topic_class == "financial_period":
+                    candidate_topics.append(topic)
+
+        if candidate_topics:
+            canonical = max(candidate_topics, key=self._topic_weight)
+            canonical.is_active = True
+            canonical.canonical = True
+            canonical.topic_class = "financial_period"
+            canonical.topic_kind = "family"
+            return canonical
+
+        base_title = f"Rendiconti Condominiali - {label}"
+        base_slug = self._slugify(base_title)
+        existing = self.db.execute(select(Topic).where(Topic.slug == base_slug)).scalar_one_or_none()
+        if existing is not None:
+            existing.is_active = True
+            existing.canonical = True
+            existing.topic_class = "financial_period"
+            existing.topic_kind = "family"
+            return existing
+
+        topic = Topic(
+            slug=base_slug,
+            title=base_title,
+            topic_class="financial_period",
+            topic_kind="family",
+            description="Topic ombrello per rendiconti, riparti e bilanci dello stesso condominio.",
+            canonical=True,
+            is_active=True,
+        )
+        self.db.add(topic)
+        self.db.flush()
+        return topic
+
+    def _rename_topic_to_accounting_family(self, topic: Topic, label: str, stats: ConsolidationStats) -> None:
+        generic_title = f"Rendiconti Condominiali - {label}"
+        generic_slug = self._slugify(generic_title)
+        alias_values = {
+            topic.slug.lower(),
+            topic.title.lower(),
+            *(alias.alias.lower() for alias in topic.aliases),
+        }
+        for candidate_alias in (topic.slug, topic.title):
+            if candidate_alias.lower() not in alias_values:
+                self.db.add(TopicAlias(topic_id=topic.id, alias=candidate_alias))
+                alias_values.add(candidate_alias.lower())
+                stats.aliases_created += 1
+
+        if topic.title != generic_title:
+            if topic.title.lower() not in alias_values:
+                self.db.add(TopicAlias(topic_id=topic.id, alias=topic.title))
+                stats.aliases_created += 1
+            topic.title = generic_title
+
+        unique_slug = self._unique_topic_slug(generic_slug, topic.id)
+        if topic.slug != unique_slug:
+            if topic.slug.lower() not in alias_values:
+                self.db.add(TopicAlias(topic_id=topic.id, alias=topic.slug))
+                stats.aliases_created += 1
+            topic.slug = unique_slug
+
+        topic.topic_kind = "family"
+        topic.topic_class = "financial_period"
+        topic.is_active = True
+        topic.canonical = True
+        topic.updated_at = _utcnow()
+        self._signature_cache.pop(str(topic.id), None)
+
+    def _ensure_accounting_family_assignment(self, document_unit: DocumentUnit, canonical: Topic, stats: ConsolidationStats) -> None:
+        existing_financial = None
+        removable_meeting_assignments: list[DocumentUnitTopicAssignment] = []
+        for assignment in list(document_unit.topic_assignments):
+            topic = assignment.topic
+            if topic is None:
+                continue
+            if topic.id == canonical.id and assignment.assignment_role == "document_family":
+                existing_financial = assignment
+            if topic.topic_class == "meeting" and topic.topic_kind == "family":
+                removable_meeting_assignments.append(assignment)
+
+        if existing_financial is None:
+            self.db.add(
+                DocumentUnitTopicAssignment(
+                    document_unit_id=document_unit.id,
+                    topic_id=canonical.id,
+                    assignment_role="document_family",
+                    confidence=0.92,
+                    rationale="Accounting-family normalization created an umbrella financial topic for the condominium.",
+                )
+            )
+            stats.assignments_retargeted += 1
+
+        for assignment in removable_meeting_assignments:
+            self.db.delete(assignment)
+            stats.assignments_retargeted += 1
 
     def _slugify(self, value: str) -> str:
         normalized = value.lower()

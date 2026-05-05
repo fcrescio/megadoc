@@ -4,6 +4,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Annotated
 import json
+import os
 from urllib.error import HTTPError, URLError
 from urllib.request import Request as UrlRequest, urlopen
 from urllib.parse import urlparse, urlunparse
@@ -486,7 +487,7 @@ def _probe_ocr_backend(settings: Settings) -> RemoteBackendStatus:
             model_available=None,
         )
     if backend == "dots_native":
-        endpoint = settings.ocr_dots_native_endpoint
+        endpoint = os.getenv("OCR_WORKER_DOTS_NATIVE_ENDPOINT", settings.ocr_dots_native_endpoint)
         model = settings.ocr_dots_native_model
         api_key = settings.ocr_dots_native_api_key
     else:
@@ -515,7 +516,7 @@ def _probe_llm_backend(settings: Settings) -> RemoteBackendStatus:
         )
     return _probe_openai_compatible_backend(
         name="knowledge_llm",
-        endpoint=kn_settings.llm_endpoint,
+        endpoint=os.getenv("KN_WORKER_LLM_ENDPOINT", kn_settings.llm_endpoint),
         model=kn_settings.llm_model,
         api_key=kn_settings.llm_api_key,
     )
