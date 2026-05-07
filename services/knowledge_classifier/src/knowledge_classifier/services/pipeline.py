@@ -37,7 +37,7 @@ from knowledge_classifier.services.pipeline_strategies import (
     TechnicalAdminPipelineStrategy,
     UtilityVendorPipelineStrategy,
 )
-from knowledge_classifier.services.routing import PipelineRouterService
+from knowledge_classifier.services.routing import PipelineRouterService, PipelineRoutingDecision
 from knowledge_classifier.services.segmentation import SegmentationService
 from knowledge_classifier.services.topic_assignment import TopicAssignmentService
 from knowledge_classifier.services.topic_retrieval import TopicRetrievalService
@@ -92,21 +92,6 @@ class KnowledgePipelineService:
         try:
             self._reset_scan_unit_outputs(scan_unit)
 
-            routing_decision = self.pipeline_router_service.route_scan(ocr_result)
-            strategy = self._resolve_pipeline_strategy(routing_decision.pipeline_id)
-            logger.info(
-                "Routing scan_unit %s to %s (%s)",
-                scan_unit_id,
-                routing_decision.pipeline_id,
-                routing_decision.family,
-            )
-            self._save_llm_decision(
-                scan_unit_id=scan_unit.id,
-                decision_type="pipeline_routing",
-                input_payload={"page_count": ocr_result.page_count},
-                output_payload=routing_decision.model_dump(),
-            )
-
             # Step 1: Segmentation
             logger.info("Step 1: Segmenting document")
             scan_unit.status = ScanUnitStatus.PROCESSING.value
@@ -127,21 +112,31 @@ class KnowledgePipelineService:
             scan_unit.segmentation_confidence = segmentation_result.overall_confidence
             scan_unit.status = ScanUnitStatus.SEGMENTED.value
             self.db.flush()
+
+            # Step 3: Route each document unit after segmentation
+            logger.info("Step 3: Routing document units")
+            routing_decisions = self._route_document_units(document_units, ocr_result)
             
-            # Step 3: Classify each document unit
-            logger.info("Step 3: Classifying document units")
+            # Step 4: Classify each document unit
+            logger.info("Step 4: Classifying document units")
             classification_results = self._classify_document_units(
                 document_units, ocr_result
             )
             
-            # Step 4: Extract entities
-            logger.info("Step 4: Extracting entities")
+            # Step 5: Extract entities
+            logger.info("Step 5: Extracting entities")
             entity_results = self._extract_entities(document_units, ocr_result)
             
-            # Step 5: Topic assignment
-            logger.info("Step 5: Assigning topics")
+            # Step 6: Topic assignment
+            logger.info("Step 6: Assigning topics")
             self._assign_topics(scan_unit, document_units, entity_results, ocr_result)
-            strategy.postprocess(self, scan_unit, document_units, entity_results, ocr_result)
+            self._postprocess_routed_document_units(
+                scan_unit,
+                document_units,
+                routing_decisions,
+                entity_results,
+                ocr_result,
+            )
             
             # Update final status
             needs_review = any(
@@ -162,8 +157,8 @@ class KnowledgePipelineService:
                 "scan_unit_id": str(scan_unit.id),
                 "status": scan_unit.status,
                 "document_units_count": len(document_units),
-                "pipeline_id": routing_decision.pipeline_id,
-                "pipeline_family": routing_decision.family,
+                "pipeline_ids": sorted({decision.pipeline_id for decision in routing_decisions.values()}),
+                "pipeline_families": sorted({decision.family for decision in routing_decisions.values()}),
                 "segmentation_confidence": scan_unit.segmentation_confidence,
                 "classification_confidence": scan_unit.classification_confidence,
             }
@@ -219,6 +214,66 @@ class KnowledgePipelineService:
             pipeline_id,
             self.pipeline_strategies["general_pipeline"],
         )
+
+    def _route_document_units(
+        self,
+        document_units: list[DBDocumentUnit],
+        ocr_result: OCRResult,
+    ) -> dict[uuid.UUID, PipelineRoutingDecision]:
+        """Route each segmented document independently."""
+        routing_decisions: dict[uuid.UUID, PipelineRoutingDecision] = {}
+        for doc_unit in document_units:
+            segment_text = self._extract_segment_text(
+                ocr_result.markdown_text,
+                doc_unit.start_page,
+                doc_unit.end_page,
+                ocr_result.page_count,
+            )
+            routing_decision = self.pipeline_router_service.route_text(segment_text)
+            routing_decisions[doc_unit.id] = routing_decision
+            logger.info(
+                "Routing document_unit %s pages %s-%s to %s (%s)",
+                doc_unit.id,
+                doc_unit.start_page,
+                doc_unit.end_page,
+                routing_decision.pipeline_id,
+                routing_decision.family,
+            )
+            self._save_llm_decision(
+                document_unit_id=doc_unit.id,
+                decision_type="pipeline_routing",
+                input_payload={
+                    "start_page": doc_unit.start_page,
+                    "end_page": doc_unit.end_page,
+                    "text_length": len(segment_text),
+                },
+                output_payload=routing_decision.model_dump(),
+            )
+        return routing_decisions
+
+    def _postprocess_routed_document_units(
+        self,
+        scan_unit: DBScanUnit,
+        document_units: list[DBDocumentUnit],
+        routing_decisions: dict[uuid.UUID, PipelineRoutingDecision],
+        entity_results: dict[uuid.UUID, Any],
+        ocr_result: OCRResult,
+    ) -> None:
+        """Run strategy post-processing against independently routed segments."""
+        units_by_pipeline: dict[str, list[DBDocumentUnit]] = {}
+        for doc_unit in document_units:
+            decision = routing_decisions.get(doc_unit.id)
+            pipeline_id = decision.pipeline_id if decision is not None else "general_pipeline"
+            units_by_pipeline.setdefault(pipeline_id, []).append(doc_unit)
+
+        for pipeline_id, routed_units in units_by_pipeline.items():
+            strategy = self._resolve_pipeline_strategy(pipeline_id)
+            routed_entity_results = {
+                doc_unit.id: entity_results[doc_unit.id]
+                for doc_unit in routed_units
+                if doc_unit.id in entity_results
+            }
+            strategy.postprocess(self, scan_unit, routed_units, routed_entity_results, ocr_result)
 
     def _get_ocr_result(self, ocr_result_id) -> OCRResult | None:
         """Get OCR result by ID."""

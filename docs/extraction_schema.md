@@ -185,9 +185,32 @@ scan_unit
   -> llm_decisions
 ```
 
-## 6. Routing Knowledge
+## 6. Segmentazione In Document Unit
 
-Prima della segmentazione, il sistema decide una famiglia di pipeline leggendo il testo OCR complessivo.
+Uno scan puo' contenere uno o piu' sottodocumenti. La pipeline produce `document_unit` prima di qualsiasi routing semantico specialistico.
+
+```text
+document_unit
+- id
+- scan_unit_id
+- ordinal
+- start_page
+- end_page
+- title
+- document_type_id
+- document_type_confidence
+- segmentation_confidence
+- extracted_summary
+- review_status
+- created_at
+- updated_at
+```
+
+Ogni `document_unit` resta referenziato allo scan sorgente tramite pagine `start_page` / `end_page`. Il salvataggio di PDF figli per segmento e' ancora da progettare.
+
+## 7. Routing Knowledge Per Segmento
+
+Dopo la segmentazione, il sistema decide una famiglia di pipeline per ogni `document_unit`, leggendo solo il testo del segmento.
 
 Famiglie possibili:
 
@@ -211,28 +234,7 @@ pipeline_routing
 - signals
 ```
 
-Questa decisione viene salvata in `llm_decisions`, anche se oggi il router e' euristico e non LLM puro.
-
-## 7. Segmentazione In Document Unit
-
-Uno scan puo' contenere uno o piu' sottodocumenti. La pipeline produce `document_unit`.
-
-```text
-document_unit
-- id
-- scan_unit_id
-- ordinal
-- start_page
-- end_page
-- title
-- document_type_id
-- document_type_confidence
-- segmentation_confidence
-- extracted_summary
-- review_status
-- created_at
-- updated_at
-```
+Questa decisione viene salvata in `llm_decisions` con `document_unit_id`, anche se oggi il router e' euristico e non LLM puro. Segmenti diversi dello stesso PDF possono quindi essere post-processati da pipeline diverse.
 
 Esempio:
 
@@ -867,6 +869,8 @@ segmentation
 classification
 topic_assignment
 ```
+
+`segmentation` e' una decisione scan-level; `pipeline_routing`, `classification` e `topic_assignment` sono decisioni per `document_unit`.
 
 Questo permette di risalire a perche' il sistema ha deciso cosi'.
 

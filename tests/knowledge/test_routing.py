@@ -89,3 +89,17 @@ def test_router_falls_back_to_general_pipeline_for_unknown_scans():
 
     assert decision.pipeline_id == "general_pipeline"
     assert decision.family == "general"
+
+
+def test_router_can_route_individual_segment_texts_independently():
+    service = PipelineRouterService()
+
+    accounting_decision = service.route_text(
+        "Bilancio consuntivo. Rendiconto gestione 2024. Riparto spese."
+    )
+    utility_decision = service.route_text(
+        "Fattura servizio idrico. Bolletta Acque per fornitura acqua."
+    )
+
+    assert accounting_decision.pipeline_id == "financial_pipeline"
+    assert utility_decision.pipeline_id == "utility_vendor_pipeline"

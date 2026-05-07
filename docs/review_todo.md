@@ -4,7 +4,7 @@ TODO emersi dalla review architetturale del progetto.
 
 ## Knowledge Segmentation
 
-- [ ] Rivedere la pipeline knowledge eliminando o ridimensionando il routing globale prima della segmentazione.
+- [x] Rivedere la pipeline knowledge eliminando o ridimensionando il routing globale prima della segmentazione.
 
   Il routing scan-level attuale decide una famiglia di pipeline sull'intero OCR prima di sapere se il PDF contiene piu' documenti logici. Questo e' fragile per scansioni composte, per esempio pacchetti di bollette dove prospetti consumi, bollettini, fatture e allegati si alternano nello stesso PDF.
 
@@ -21,6 +21,8 @@ TODO emersi dalla review architetturale del progetto.
   ```
 
   La segmentazione va trattata come passaggio fondamentale ancora a livello documentale, prima della semantica specialistica. Idealmente dovrebbe produrre documenti figli o segmenti persistiti con PDF individuali, referenziati al documento sorgente ma trattati con la stessa dignita' operativa di un documento sorgente monolitico.
+
+  Stato codice: il routing globale scan-level e' stato rimosso dal flusso principale. La pipeline ora segmenta prima, poi esegue `pipeline_routing` per ogni `document_unit` e applica la post-elaborazione per gruppi di segmenti con la stessa pipeline.
 
   Aspetti da progettare:
 

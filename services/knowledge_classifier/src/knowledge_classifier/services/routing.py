@@ -34,6 +34,11 @@ class PipelineRouterService:
     def route_scan(self, ocr_result: OCRResult) -> PipelineRoutingDecision:
         """Route a scan based on coarse document-family signals."""
         scan_text = self._scan_text(ocr_result)
+        return self.route_text(scan_text)
+
+    def route_text(self, text: str) -> PipelineRoutingDecision:
+        """Route one document or segment based on coarse document-family signals."""
+        scan_text = (text or "")[:30000].lower()
         compact_text = self._compact_scan_text(scan_text)
 
         for rule in (
