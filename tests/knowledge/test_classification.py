@@ -1,7 +1,37 @@
 """Tests for classification service."""
 
+import pytest
+
+from knowledge_classifier.llm.base import ChatMessage, LLMResponse
 from knowledge_classifier.llm.mock import MockDeterministicProvider
 from knowledge_classifier.services.classification import ClassificationService
+
+
+class FailingProvider:
+    def chat(
+        self,
+        messages: list[ChatMessage],
+        temperature: float = 0.1,
+        response_format: dict | None = None,
+    ) -> LLMResponse:
+        raise RuntimeError("LLM unavailable")
+
+    def chat_with_json(
+        self,
+        messages: list[ChatMessage],
+        schema,
+        temperature: float = 0.1,
+        max_retries: int = 3,
+    ):
+        raise RuntimeError("LLM unavailable")
+
+    @property
+    def model_name(self) -> str:
+        return "failing"
+
+    @property
+    def provider_name(self) -> str:
+        return "failing"
 
 
 def test_classification_verbale():
@@ -71,17 +101,15 @@ def test_classification_bolletta():
     assert result.primary_type.confidence > 0
 
 
-def test_heuristic_classification():
-    """Test heuristic fallback classification."""
+def test_classification_fails_explicitly_when_llm_fails():
+    """Classification must not fabricate a heuristic result when the LLM fails."""
     class MockSession:
         pass
     
-    llm = MockDeterministicProvider()
+    llm = FailingProvider()
     service = ClassificationService(llm, MockSession())
     
-    # Test with clear keywords
     text = "Verbale assemblea ordinaria presenti Rossi Bianchi"
-    result = service._heuristic_classification(text)
-    
-    assert result.primary_type.type_code == "verbale_assemblea"
-    assert result.primary_type.confidence > 0.5
+
+    with pytest.raises(RuntimeError, match="LLM unavailable"):
+        service.classify_document(text)

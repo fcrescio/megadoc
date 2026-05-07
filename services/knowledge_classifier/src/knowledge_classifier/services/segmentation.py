@@ -62,17 +62,7 @@ class SegmentationService:
         pages = self._build_page_representations(ocr_structured, ocr_markdown, page_count)
         
         if not pages:
-            # Fallback: single segment for entire document
-            return SegmentationResult(
-                segments=[SegmentCandidate(
-                    start_page=1,
-                    end_page=page_count,
-                    confidence=0.5,
-                    rationale="No page data available, treating as single document"
-                )],
-                overall_confidence=0.5,
-                boundaries=[]
-            )
+            raise ValueError("No page data available for segmentation.")
 
         # First pass: heuristic boundary detection
         heuristic_boundaries = self._detect_heuristic_boundaries(pages)
@@ -288,21 +278,6 @@ class SegmentationService:
                 temperature=self.settings.llm_temperature,
             )
             return result
-        except Exception as e:
-            logger.error(f"LLM segmentation failed: {e}")
-            # Fallback to single segment
-            fallback_rationale = (
-                f"Segmentazione LLM fallita: {str(e)[:100]}"
-                if language_code == "it"
-                else f"LLM segmentation failed: {str(e)[:100]}"
-            )
-            return SegmentationResult(
-                segments=[SegmentCandidate(
-                    start_page=1,
-                    end_page=len(pages),
-                    confidence=0.5,
-                    rationale=fallback_rationale
-                )],
-                overall_confidence=0.5,
-                boundaries=[]
-            )
+        except Exception:
+            logger.exception("LLM segmentation failed")
+            raise

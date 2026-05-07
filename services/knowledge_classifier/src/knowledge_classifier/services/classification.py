@@ -68,10 +68,9 @@ class ClassificationService:
                 temperature=self.settings.llm_temperature,
             )
             return result
-        except Exception as e:
-            logger.error(f"LLM classification failed: {e}")
-            # Fallback to heuristic classification
-            return self._heuristic_classification(document_text, language_code)
+        except Exception:
+            logger.exception("LLM classification failed")
+            raise
 
     def _get_active_document_types(self) -> list[DocumentType]:
         """Get all active document types from database."""
@@ -79,88 +78,3 @@ class ClassificationService:
             select(DocumentType).where(DocumentType.is_active == True)
         )
         return list(result.scalars().all())
-
-    def _heuristic_classification(self, text: str, language_code: str = "it") -> ClassificationResult:
-        """Fallback heuristic-based classification."""
-        text_lower = text.lower()
-        
-        # Simple keyword-based classification
-        type_scores: dict[str, float] = {}
-        
-        type_patterns = {
-            "verbale_assemblea": (
-                ["verbale", "assemblea", "deliberazione", "presenti", "assenti"],
-                0.8
-            ),
-            "rendiconto_contabile": (
-                ["rendiconto", "bilancio", "contabile", "spese", "entrate"],
-                0.75
-            ),
-            "fattura": (
-                ["fattura", "fatt.", "n.", "data", "importo", "totale"],
-                0.8
-            ),
-            "preventivo": (
-                ["preventivo", "offerta", "prezzo", "stima"],
-                0.75
-            ),
-            "bolletta": (
-                ["bolletta", "fattura elettronica", "pagamento", "scadenza"],
-                0.7
-            ),
-            "contratto": (
-                ["contratto", "accordo", "parti", "firme", "clausole"],
-                0.75
-            ),
-            "lettera": (
-                ["spett.le", "gentile", "cordiali saluti", "distinti saluti"],
-                0.6
-            ),
-            "allegato_tecnico": (
-                ["allegato", "specifiche", "tecnico", "schede"],
-                0.65
-            ),
-        }
-        
-        for type_code, (keywords, base_score) in type_patterns.items():
-            matches = sum(1 for kw in keywords if kw in text_lower)
-            if matches > 0:
-                score = min(base_score * (matches / len(keywords)) * 1.5, 1.0)
-                type_scores[type_code] = score
-        
-        if type_scores:
-            primary_code = max(type_scores, key=type_scores.get)
-            primary_score = type_scores[primary_code]
-            
-            keywords = type_patterns[primary_code][0]
-            matched_keywords = [k for k in keywords if k in text_lower][:3]
-            rationale = (
-                "Classificazione euristica basata sul confronto con parole chiave"
-                if language_code == "it"
-                else "Heuristic classification based on keyword matching"
-            )
-            return ClassificationResult(
-                primary_type={
-                    "type_code": primary_code,
-                    "confidence": primary_score,
-                    "salient_features": matched_keywords
-                },
-                alternatives=[],
-                rationale=rationale
-            )
-        
-        # Default to "altro"
-        default_rationale = (
-            "Nessun tipo documentale chiaramente riconoscibile"
-            if language_code == "it"
-            else "No clear document type detected"
-        )
-        return ClassificationResult(
-            primary_type={
-                "type_code": "altro",
-                "confidence": 0.5,
-                "salient_features": []
-            },
-            alternatives=[],
-            rationale=default_rationale
-        )
