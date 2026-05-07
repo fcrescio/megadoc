@@ -1,6 +1,6 @@
 # Knowledge Classifier Service
 
-Modulo per la classificazione automatica di documenti scansionati.
+Modulo knowledge di Megadoc. Implementa la fase `scan -> document units -> document type -> topic assignment` e le sue estensioni correnti.
 
 ## Panoramica
 
@@ -10,6 +10,8 @@ Questo servizio prende in input il risultato OCR di un PDF e:
 2. **Classifica** ogni documento in un tipo noto
 3. **Estrae** entità chiave (condomini, date, importi, etc.)
 4. **Assegna** il documento a topic esistenti o propone nuovi topic
+5. **Consolida** topic e relazioni con intervento umano
+6. **Instrada** document unit compatibili verso worker specialistici
 
 ## Concetti Chiave
 
@@ -32,6 +34,18 @@ Argomento/fascicolo a cui il documento appartiene (es: `condominio_via_roma_bila
 ### Entity
 Elementi nominati estratti dal documento (persone, organizzazioni, date, importi).
 
+### Canonical Entity
+Entità globale revisionabile che raggruppa varianti locali estratte da documenti diversi.
+
+### Topic Assignment Role
+Ruolo semantico dell'assegnazione topic. Un documento può appartenere a più topic con ruoli diversi:
+
+- `subject`
+- `document_family`
+- `case_or_issue`
+- `person_or_org_context`
+- `secondary`
+
 ## Avvio
 
 ```bash
@@ -42,7 +56,7 @@ docker compose up --build
 docker compose up knowledge_worker
 ```
 
-## API Endpoints
+## API Endpoints Principali
 
 ### Creare Scan Unit da OCR
 
@@ -71,6 +85,12 @@ GET /knowledge/scan-units/{scan_unit_id}/document-units
 
 ```bash
 GET /knowledge/topics
+```
+
+### Search Knowledge
+
+```bash
+GET /knowledge/search?q=<testo>
 ```
 
 ### Creare Topic
@@ -106,12 +126,45 @@ Content-Type: application/json
 }
 ```
 
+### Assignment Manuale Topic
+
+```bash
+POST /knowledge/document-units/{document_unit_id}/topic-assignments
+DELETE /knowledge/document-units/{document_unit_id}/topic-assignments/{assignment_id}
+```
+
+### Consolidamento Graph-Based
+
+```bash
+GET /knowledge/consolidation/suggestions
+POST /knowledge/consolidation/review
+```
+
+### Entità
+
+```bash
+GET /knowledge/entities
+GET /knowledge/entities/detail
+GET /knowledge/canonical-entities
+POST /knowledge/canonical-entities/merge
+```
+
+### Specialisti
+
+```bash
+POST /knowledge/documents/{document_id}/ensure-specialists
+GET /knowledge/specialists/utility-bills
+GET /knowledge/specialists/accounting-statements
+GET /knowledge/specialist-results/{result_id}/export?format=json|csv
+```
+
 ## Configurazione
 
 | Variabile | Descrizione | Default |
 |-----------|-------------|---------|
-| `KN_LLM_ENDPOINT` | Endpoint LLM API | `http://10.89.0.3:8080/v1` |
-| `KN_LLM_MODEL` | Nome modello LLM | `qwen3.5-27B` |
+| `KN_LLM_ENDPOINT` | Endpoint LLM API visto dall'API/container standard | `http://10.89.0.3:8080/v1` |
+| `KN_WORKER_LLM_ENDPOINT` | Endpoint LLM visto dal worker in host network | `http://10.89.0.3:8080/v1` |
+| `KN_LLM_MODEL` | Nome modello LLM | `qwen3.6-A3B` |
 | `KN_LLM_API_KEY` | API key LLM | - |
 | `KN_LLM_TIMEOUT` | Timeout richieste | `120` |
 | `KN_LLM_TEMPERATURE` | Temperature LLM | `0.1` |
@@ -139,16 +192,31 @@ docker compose exec api python /app/scripts/seed_knowledge.py
 ```
 OCR Result
     ↓
-[1] Segmentazione → Document Units
+[1] Ensure Scan Unit
     ↓
-[2] Classificazione → Document Type
+[2] Router semantico
     ↓
-[3] Estrazione Entità → Entities
+[3] Segmentazione → Document Units
     ↓
-[4] Topic Retrieval → Candidate Topics
+[4] Classificazione → Document Type
     ↓
-[5] Topic Assignment → Assignments o Proposals
+[5] Estrazione Entità → Entities
+    ↓
+[6] Topic Retrieval → Candidate Topics
+    ↓
+[7] Topic Assignment → Assignments o Proposals
+    ↓
+[8] Post-processing e specialist routing
 ```
+
+Famiglie router correnti:
+
+- `general`
+- `normative`
+- `meeting`
+- `financial`
+- `utility_vendor`
+- `technical_admin`
 
 ## Stati
 
@@ -169,12 +237,15 @@ OCR Result
 - `needs_review` - Richiede revisione
 - `failed` - Errore
 
-## Limiti Noti v1
+## Stato Attuale E Limiti
 
-1. La segmentazione si basa su pattern lessicali semplici
-2. Non usa embeddings o vector search
-3. L'estrazione entità è basica (regex + LLM)
-4. I topic proposals richiedono approvazione manuale
+1. La pipeline usa LLM locale OpenAI-compatible o mock deterministico.
+2. Non usa ancora embeddings o vector search.
+3. I topic proposals richiedono review umana quando il sistema non deve decidere automaticamente.
+4. Il consolidamento è graph-based ma ancora da rafforzare con canonical entities.
+5. È stato osservato un deadlock PostgreSQL su rerun/consolidation di documenti contabili complessi.
+6. Il server LLM locale carica un solo modello alla volta: OCR e knowledge devono essere orchestrati in sequenza.
+7. I risultati devono rispettare la lingua del documento, quindi documenti italiani devono produrre summary e knowledge in italiano.
 
 ## Assunzioni sul Formato OCR
 
@@ -185,3 +256,13 @@ Il servizio assume che l'OCR result contenga:
 - `page_count`: Numero totale di pagine
 
 Se `structured_json` non ha dati per pagina, il servizio fa fallback su `markdown_text` dividendo equamente le linee.
+
+## Note Sul Consolidamento Contabile
+
+I rendiconti e i riparti non vanno fusi dentro topic di assemblea ordinaria o straordinaria solo perché appaiono nello stesso fascicolo. Il comportamento corretto è:
+
+- meeting/verbali sotto topic meeting;
+- rendiconti/riparti sotto topic famiglia contabile;
+- eventuale relazione con assemblea come contesto secondario o pratica collegata.
+
+La correzione recente crea/usa topic come `Rendiconti Condominiali - <condominio>` e rimuove assignment contabili erroneamente finiti in family meeting.

@@ -26,6 +26,21 @@ L'obiettivo non è "fare OCR". L'OCR è solo il primo strato affidabile. Lo scop
 
 ## Struttura Architetturale
 
+### Stato operativo attuale
+
+Al 2026-05-07 Megadoc include:
+
+- OCR con backend intercambiabili e preferenza operativa per `dots_native`
+- knowledge pipeline con router semantico
+- topic multipli con ruoli distinti
+- consolidamento graph-based revisionabile
+- canonical entities
+- worker specialistici per bollette e rendiconti
+- frontend con PDF embedded, search, review, entità, specialisti e manuale vivo
+- badge stato backend LLM/OCR
+
+Il documento di handoff per una nuova sessione agentica è `docs/agent_handoff.md`.
+
 ### Caratteristiche principali
 
 1. Il sistema è stratificato.
@@ -147,6 +162,9 @@ Componenti ausiliari:
 
 - container di bootstrap bucket storage
 - container/build di migrazione o inizializzazione
+- `worker_llm_vision` per OCR sperimentale multimodale
+- `specialist_utility_worker` per bollette
+- `specialist_accounting_worker` per rendiconti contabili
 
 ## Runtime Topology
 
@@ -322,6 +340,8 @@ Il sistema è progettato per backend intercambiabili, tra cui:
 - backend sperimentali multimodali LLM
 
 La direzione corretta è mantenere un contratto comune di output, non un solo motore OCR.
+
+Operativamente il backend più promettente oggi è `dots_native` con modello `ggml-org/dots.ocr-GGUF:Q8_0`, mentre Qwen viene usato per knowledge. Poiché il server locale carica un solo modello alla volta, gli OCR devono essere completati prima di avviare batch knowledge estesi.
 
 ### Fallback
 
@@ -522,6 +542,45 @@ Servono metriche più chiare su:
 
 Oggi i due mondi esistono entrambi.
 Il prossimo salto è fare in modo che si rafforzino a vicenda.
+
+## Worker Specialistici
+
+La specializzazione non sostituisce la knowledge generale. La completa.
+
+Il router specialistico decide se un `document_unit` merita un passaggio dedicato. Questa architettura evita di trasformare il worker generale in un prompt enorme e fragile.
+
+### Bollette
+
+Il worker bollette cerca di estrarre:
+
+- fornitore
+- intestatario
+- tipo servizio
+- data emissione
+- scadenza
+- periodo fatturazione
+- importo
+- numero documento
+- riferimenti contratto/POD/PDR
+- stato pagamento quando inferibile
+
+Questi dati alimentano la Utility Lens del frontend.
+
+### Rendiconti
+
+Il worker rendiconti tenta di trasformare tabelle contabili in strutture esportabili e verificabili.
+
+Il punto critico è preservare le righe e le colonne reali. Quando disponibile, il worker deve usare celle strutturate dell'OCR e non solo markdown flattenizzato, perché il markdown può perdere nomi dei condomini o creare righe spurie.
+
+Questi dati alimentano la Accounting Lens del frontend e l'export CSV/JSON.
+
+## Problemi Aperti Operativi
+
+- Il rerun knowledge su documenti contabili complessi può esporre deadlock PostgreSQL se consolidation e aggiornamenti document unit competono.
+- Il routing specialistico deve ancora ridurre falsi positivi su scansioni miste.
+- La canonicalizzazione delle entità deve diventare più utile nel consolidamento dei topic.
+- Le estensioni schema recenti vanno portate in migration Alembic più sistematiche.
+- L'osservabilità per tempi, code, fallback e token/sec è ancora insufficiente.
 
 ## Filosofia di Progetto
 

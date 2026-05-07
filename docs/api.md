@@ -1,7 +1,7 @@
 # API Reference
 
 Questa documentazione descrive l'API HTTP effettivamente implementata nel progetto allo stato attuale.
-Non documenta funzionalita future non ancora presenti nel codice.
+Non documenta funzionalità future non ancora presenti nel codice.
 
 Base URL tipica in locale:
 
@@ -16,7 +16,7 @@ L'API espone la prima fase della pipeline documentale:
 - upload di PDF
 - versioning logico dei documenti tramite `external_id`
 - creazione e monitoraggio di job OCR asincroni
-- recupero del risultato OCR piu recente
+- recupero del risultato OCR più recente
 - listing e download di versioni e asset generati
 - health e readiness checks
 
@@ -26,11 +26,11 @@ L'API espone la prima fase della pipeline documentale:
 - Le risposte JSON usano il formato serializzato di FastAPI/Pydantic.
 - Gli upload usano `multipart/form-data`.
 - L'API aggiunge sempre l'header `x-request-id` in risposta.
-- Non e presente autenticazione applicativa in questa fase.
+- Non è presente autenticazione applicativa in questa fase.
 
 ## Modello Concettuale
 
-- `document`: identita logica del documento
+- `document`: identità logica del documento
 - `document_version`: singolo binario associato a quel documento
 - `ingestion_job`: job asincrono di processing OCR/layout
 - `ocr_result`: risultato OCR persistito per una specifica versione
@@ -49,11 +49,11 @@ Il comportamento dipende da come viene fatto l'upload:
 
 - Senza `external_id`:
   - il sistema tratta il file come nuovo documento logico
-  - se `DEDUPLICATE_BY_HASH=true` e l'hash e gia presente, il documento esistente viene riusato
+  - se `DEDUPLICATE_BY_HASH=true` e l'hash è già presente, il documento esistente viene riusato
 - Con `external_id`:
   - il sistema cerca il documento logico esistente con quel valore
-  - se il contenuto e diverso, crea una nuova `document_version`
-  - se il contenuto e identico e `DEDUPLICATE_BY_HASH=true`, non crea una nuova versione
+  - se il contenuto è diverso, crea una nuova `document_version`
+  - se il contenuto è identico e `DEDUPLICATE_BY_HASH=true`, non crea una nuova versione
 
 ## Endpoint
 
@@ -148,7 +148,7 @@ Significato dei campi:
 - `status`:
   - `stored` se `auto_submit=false`
   - tipicamente `queued` se `auto_submit=true`
-- `deduplicated`: `true` se il contenuto e stato riusato senza nuova versione
+- `deduplicated`: `true` se il contenuto è stato riusato senza nuova versione
 - `job_id`: presente se `auto_submit=true`
 - `sha256`: hash SHA-256 del contenuto
 - `size_bytes`: dimensione del file in byte
@@ -179,8 +179,8 @@ Body:
 
 Note:
 
-- `priority` e opzionale, default `5`
-- se esiste gia un job attivo (`queued` o `running`) per quel documento, viene riusato
+- `priority` è opzionale, default `5`
+- se esiste già un job attivo (`queued` o `running`) per quel documento, viene riusato
 - dopo la creazione il job viene dispatchato al worker
 
 Response `200`:
@@ -206,7 +206,7 @@ Errori:
 
 ### `GET /jobs`
 
-Lista dei job piu recenti.
+Lista dei job più recenti.
 
 Query params:
 
@@ -266,7 +266,7 @@ Errori:
 
 ### `GET /documents`
 
-Lista dei documenti piu recenti.
+Lista dei documenti più recenti.
 
 Query params:
 
@@ -441,8 +441,8 @@ Query params:
 
 Semantica:
 
-- se `version_id` e assente, viene scaricata l'ultima versione
-- se `version_id` e presente, viene scaricata quella specifica
+- se `version_id` è assente, viene scaricata l'ultima versione
+- se `version_id` è presente, viene scaricata quella specifica
 
 Response `200`:
 
@@ -490,7 +490,7 @@ Errori:
 
 ### Risultato OCR
 
-Attualmente l'API espone il risultato OCR riuscito piu recente.
+Attualmente l'API espone il risultato OCR riuscito più recente.
 I fallimenti vengono riflessi nello stato del job, non in un endpoint separato di OCR failures.
 
 ## Esempi di Workflow
@@ -578,3 +578,214 @@ x-request-id: <uuid-o-header-propagato>
 
 Se il client invia `x-request-id`, il middleware lo propaga.
 Altrimenti viene generato automaticamente.
+
+## Estensioni Implementate Dopo La Fase OCR
+
+Le sezioni precedenti descrivono il nucleo documentale. Lo stato attuale include anche knowledge, specialisti, manuale e stato backend.
+
+### `GET /system/status`
+
+Restituisce lo stato operativo del backend applicativo e del server locale LLM/OCR.
+
+Uso:
+
+```bash
+curl "http://localhost:8080/system/status"
+```
+
+La risposta è usata dal frontend per mostrare un badge di stato. Il probing del server locale non dipende solo da `/v1/models`: se l'endpoint modelli non è affidabile, l'API usa anche segnali come `/health` e la raggiungibilità dell'endpoint configurato.
+
+### `GET /manuals/{manual_slug}`
+
+Serve un manuale markdown con commenti associati.
+
+Manuale disponibile:
+
+- `system`: legge `docs/system_manual.md`
+
+Uso:
+
+```bash
+curl "http://localhost:8080/manuals/system"
+```
+
+### `POST /manuals/{manual_slug}/comments`
+
+Crea un commento ancorato a una selezione del manuale.
+
+Body tipico:
+
+```json
+{
+  "quote": "testo selezionato",
+  "comment": "nota utente",
+  "author": "utente",
+  "start_offset": 10,
+  "end_offset": 42
+}
+```
+
+### `PATCH /manuals/{manual_slug}/comments/{comment_id}`
+
+Aggiorna stato o nota di risoluzione di un commento.
+
+Stati supportati:
+
+- `open`
+- `resolved`
+- `wontfix`
+
+## API Knowledge
+
+Tutti gli endpoint knowledge sono sotto:
+
+```text
+/knowledge
+```
+
+### Documento Knowledge
+
+```bash
+GET  /knowledge/documents/{document_id}
+POST /knowledge/documents/{document_id}/ensure
+POST /knowledge/documents/{document_id}/ensure-specialists
+```
+
+- `GET` restituisce scan unit, document unit, entità, topic assignment, job specialistici e risultati specialistici collegati al documento.
+- `ensure` crea o riusa la knowledge per l'ultimo OCR disponibile e mette in coda il job se necessario.
+- `ensure-specialists` crea job specialistici per i `document_unit` compatibili.
+
+### Scan Unit E Document Unit
+
+```bash
+POST /knowledge/scan-units/from-ocr/{ocr_result_id}
+GET  /knowledge/scan-units
+GET  /knowledge/scan-units/{scan_unit_id}
+GET  /knowledge/scan-units/{scan_unit_id}/document-units
+GET  /knowledge/document-units/{document_unit_id}
+POST /knowledge/document-units/{document_unit_id}/review
+POST /knowledge/document-units/{document_unit_id}/topic-assignments
+DELETE /knowledge/document-units/{document_unit_id}/topic-assignments/{assignment_id}
+```
+
+Questi endpoint consentono di creare knowledge da OCR, consultare la segmentazione e correggere manualmente titolo, summary, tipo documento, review status e topic assignment.
+
+### Topic
+
+```bash
+GET  /knowledge/topics
+GET  /knowledge/topics/{topic_id}
+POST /knowledge/topics
+GET  /knowledge/topic-proposals
+POST /knowledge/topic-proposals/{proposal_id}/approve
+POST /knowledge/topic-proposals/{proposal_id}/reject
+```
+
+`GET /knowledge/topic-proposals` accetta `include_consolidated=true|false`.
+
+L'approvazione può creare un nuovo topic, assegnare un topic esistente, fare merge o aggiungere un assignment secondario in base al payload.
+
+### Search
+
+```bash
+GET /knowledge/search?q=<testo>
+```
+
+La search cerca in:
+
+- topic e alias;
+- document unit e summary;
+- filename;
+- OCR text/markdown;
+- assignment topic.
+
+Parametri comuni:
+
+- `q`
+- `include_inactive`
+- `topic_kind`
+- `topic_class`
+- `limit`
+
+### Entità
+
+```bash
+GET  /knowledge/entities
+GET  /knowledge/entities/detail
+GET  /knowledge/canonical-entities
+POST /knowledge/canonical-entities/merge
+```
+
+`/entities` espone l'indice aggregato delle entità estratte localmente dai documenti.
+`/canonical-entities` espone il livello globale revisionabile.
+
+### Consolidamento Graph-Based
+
+```bash
+POST /knowledge/consolidate/run-sync
+GET  /knowledge/consolidation/suggestions
+POST /knowledge/consolidation/review
+```
+
+`/consolidation/suggestions` produce merge candidate distinti per asse semantico, per esempio `subject`, `document_family`, `case_or_issue`.
+
+`/consolidation/review` consente all'utente di approvare, rigettare o trasformare suggerimenti in alias/merge.
+
+### Document Types E Knowledge Jobs
+
+```bash
+GET  /knowledge/document-types
+GET  /knowledge/jobs/{job_id}
+POST /knowledge/jobs/{job_id}/run-sync
+```
+
+`run-sync` è utile in sviluppo/debug per eseguire direttamente un job knowledge senza attendere il worker.
+
+## API Specialistiche
+
+### Bollette
+
+```bash
+GET /knowledge/specialists/utility-bills
+```
+
+Filtri principali:
+
+- `q`
+- `issuer`
+- `payment_status`
+- `overdue_only`
+- `limit`
+
+Il risultato contiene riepiloghi normalizzati di bollette: fornitore, intestatario, date, importo, scadenza, stato pagamento e riferimenti quando disponibili.
+
+### Rendiconti Contabili
+
+```bash
+GET /knowledge/specialists/accounting-statements
+```
+
+Filtri principali:
+
+- `q`
+- `statement_type`
+- `check_status`
+- `limit`
+
+Il risultato contiene riepiloghi contabili e diagnostica delle tabelle estratte.
+
+### Export Risultati Specialistici
+
+```bash
+GET /knowledge/specialist-results/{result_id}/export?format=json
+GET /knowledge/specialist-results/{result_id}/export?format=csv
+```
+
+L'export CSV è particolarmente rilevante per i rendiconti, perché consente analisi tabellare esterna.
+
+## Note Operative Correnti
+
+- Il frontend usa gli stessi endpoint tramite proxy `/api/*`.
+- La pagina `/knowledge` del frontend non è una API: è l'interfaccia umana per navigare topic, search, entities, proposal e specialisti.
+- Il server locale LLM/OCR supporta un solo modello alla volta; la pipeline deve completare prima gli OCR e poi passare alla knowledge quando possibile.
+- I fallback OCR non devono essere invisibili all'utente quando il backend principale è indisponibile: lo stato deve emergere da `/system/status` e dal job status.
