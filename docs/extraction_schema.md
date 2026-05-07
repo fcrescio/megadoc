@@ -424,11 +424,12 @@ topic_kind=context:
 
 ## 12. Recupero Topic Candidati
 
-Prima di decidere l'associazione, il sistema cerca topic esistenti candidati usando:
+Dopo gli specialisti, prima di decidere l'associazione, il sistema cerca topic esistenti candidati usando:
 
 ```text
 - titolo documento
 - summary
+- summary specialistici compattati, se presenti
 - entita' estratte
 - normalized_value delle entita'
 - compatibilita' tra document_type e topic_class
@@ -457,6 +458,19 @@ Esempi di reason:
 ```
 
 ## 13. Topic Assignment
+
+Il topic assignment e' una fase di finalizzazione separata dalla classificazione iniziale. La knowledge pipeline produce `document_unit`, `document_type` ed entity generali, poi crea/accoda eventuali specialist job. Un task di finalizzazione aspetta che gli specialist job del medesimo scan non siano piu' `queued`, `pending` o `processing`; solo allora assegna i topic.
+
+Contesto passato al topic assignment:
+
+```text
+- document_type
+- titolo, se presente
+- summary generale
+- entita' generiche leggere
+- topic candidati recuperati
+- risultati specialistici compattati, se presenti
+```
 
 La decisione finale puo' essere:
 
@@ -676,7 +690,7 @@ Attualmente questo livello serve soprattutto per browsing/review e per suggerime
 
 ## 18. Specialist Routing
 
-Dopo la knowledge generale, il sistema puo' creare job specialistici per ogni `document_unit`.
+Dopo segmentazione, routing per segmento, classificazione ed entity extraction generale, il sistema puo' creare job specialistici per ogni `document_unit`.
 
 Routing specialistico basato su:
 
@@ -716,6 +730,8 @@ specialist_job
 ```text
 ocr_result_id:start_page-end_page
 ```
+
+Quando gli specialisti hanno finito, `finalize_scan_topics_task` esegue topic retrieval, topic assignment e consolidamento usando anche i risultati specialistici disponibili.
 
 ## 19. Risultato Specialista Bollette
 

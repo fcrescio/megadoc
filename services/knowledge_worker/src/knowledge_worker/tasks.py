@@ -99,6 +99,8 @@ def process_scan_unit_task(self, scan_unit_id: str):
             for specialist_job_id, specialist_type in specialist_dispatches:
                 dispatch_specialist_job(specialist_job_id, specialist_type)
 
+            finalize_scan_topics_task.apply_async(args=[scan_unit_id], countdown=5, queue=settings.celery_queue)
+
             _update_knowledge_job(
                 engine,
                 scan_unit_id,
@@ -121,6 +123,48 @@ def process_scan_unit_task(self, scan_unit_id: str):
                 error_message=str(e),
             )
             raise self.retry(exc=e, countdown=60 * (2 ** self.request.retries))
+        finally:
+            session.close()
+
+
+@shared_task(bind=True, max_retries=30)
+def finalize_scan_topics_task(self, scan_unit_id: str):
+    """Assign topics after specialist jobs for a scan have completed."""
+    logger.info("Task started: finalize_scan_topics %s", scan_unit_id)
+
+    settings = get_settings()
+    engine = create_engine(
+        os.getenv("DATABASE_URL", "postgresql+psycopg://megadoc:megadoc@postgres:5432/megadoc"),
+        echo=False,
+    )
+    ensure_knowledge_schema(engine)
+
+    with Session(engine) as session:
+        try:
+            if settings.use_mock_llm:
+                llm_provider = MockDeterministicProvider(model=settings.llm_model)
+            else:
+                llm_provider = OpenAICompatibleProvider(
+                    base_url=settings.llm_endpoint,
+                    model=settings.llm_model,
+                    api_key=settings.llm_api_key,
+                    timeout=settings.llm_timeout,
+                    max_tokens=settings.llm_max_tokens,
+                )
+
+            pipeline = KnowledgePipelineService(llm_provider, session)
+            result = pipeline.finalize_scan_topics(scan_unit_id)
+            session.commit()
+            logger.info("Task completed: %s", result)
+            return result
+        except RuntimeError as exc:
+            session.rollback()
+            logger.info("Topic finalization deferred for scan_unit %s: %s", scan_unit_id, exc)
+            raise self.retry(exc=exc, countdown=15)
+        except Exception as exc:
+            session.rollback()
+            logger.error("Topic finalization failed: %s", exc, exc_info=True)
+            raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))
         finally:
             session.close()
 

@@ -1,12 +1,14 @@
 """Knowledge pipeline service - orchestrates the full classification pipeline."""
 
+import json
 import logging
 import re
 import uuid
+from types import SimpleNamespace
 from typing import Any
 
 from sqlalchemy import delete, insert, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from common.db.models import (
     DocumentUnit as DBDocumentUnit,
@@ -127,23 +129,12 @@ class KnowledgePipelineService:
             logger.info("Step 5: Extracting entities")
             entity_results = self._extract_entities(document_units, ocr_result)
             
-            # Step 6: Topic assignment
-            logger.info("Step 6: Assigning topics")
-            self._assign_topics(scan_unit, document_units, entity_results, ocr_result)
-            self._postprocess_routed_document_units(
-                scan_unit,
-                document_units,
-                routing_decisions,
-                entity_results,
-                ocr_result,
-            )
-            
             # Update final status
             needs_review = any(
                 du.review_status == ReviewStatus.NEEDS_REVIEW.value 
                 for du in document_units
             )
-            scan_unit.status = ScanUnitStatus.NEEDS_REVIEW.value if needs_review else ScanUnitStatus.ASSIGNED.value
+            scan_unit.status = ScanUnitStatus.NEEDS_REVIEW.value if needs_review else ScanUnitStatus.CLASSIFIED.value
             
             # Calculate overall confidences
             confidences = [du.document_type_confidence or 0 for du in document_units]
@@ -161,6 +152,7 @@ class KnowledgePipelineService:
                 "pipeline_families": sorted({decision.family for decision in routing_decisions.values()}),
                 "segmentation_confidence": scan_unit.segmentation_confidence,
                 "classification_confidence": scan_unit.classification_confidence,
+                "topic_assignment_deferred": True,
             }
             
         except Exception as e:
@@ -168,6 +160,55 @@ class KnowledgePipelineService:
             scan_unit.status = ScanUnitStatus.FAILED.value
             self.db.flush()
             raise
+
+    def finalize_scan_topics(self, scan_unit_id: str) -> dict[str, Any]:
+        """Assign topics after specialist processing has completed."""
+        logger.info("Finalizing topic assignment for scan_unit: %s", scan_unit_id)
+        scan_unit = self._get_scan_unit(scan_unit_id)
+        if not scan_unit:
+            raise ValueError(f"Scan unit not found: {scan_unit_id}")
+
+        ocr_result = self._get_ocr_result(scan_unit.source_ocr_result_id)
+        if not ocr_result:
+            raise ValueError(f"OCR result not found: {scan_unit.source_ocr_result_id}")
+
+        document_units = self._get_document_units_for_scan(scan_unit.id)
+        if not document_units:
+            raise ValueError(f"No document units found for scan_unit: {scan_unit_id}")
+        if self._has_active_specialist_jobs(document_units):
+            raise RuntimeError("Specialist jobs are still active for this scan unit.")
+
+        self._reset_topic_outputs(document_units)
+        entity_results = {
+            doc_unit.id: SimpleNamespace(entities=list(doc_unit.entities))
+            for doc_unit in document_units
+        }
+
+        self._assign_topics(scan_unit, document_units, entity_results, ocr_result)
+        self.db.flush()
+        for doc_unit in document_units:
+            self.db.expire(doc_unit, ["topic_assignments", "proposal"])
+        routing_decisions = self._load_pipeline_routing_decisions(document_units)
+        self._postprocess_routed_document_units(
+            scan_unit,
+            document_units,
+            routing_decisions,
+            entity_results,
+            ocr_result,
+        )
+
+        needs_review = any(
+            du.review_status == ReviewStatus.NEEDS_REVIEW.value
+            for du in document_units
+        )
+        scan_unit.status = ScanUnitStatus.NEEDS_REVIEW.value if needs_review else ScanUnitStatus.ASSIGNED.value
+        self.db.flush()
+        return {
+            "scan_unit_id": str(scan_unit.id),
+            "status": scan_unit.status,
+            "document_units_count": len(document_units),
+            "topic_assignment_finalized": True,
+        }
 
     def _reset_scan_unit_outputs(self, scan_unit: DBScanUnit) -> None:
         """Remove previous per-scan outputs so retries stay idempotent."""
@@ -284,6 +325,79 @@ class KnowledgePipelineService:
             select(OCRResult).where(OCRResult.id == ocr_result_id)
         )
         return result.scalar_one_or_none()
+
+    def _get_document_units_for_scan(self, scan_unit_id: uuid.UUID) -> list[DBDocumentUnit]:
+        """Load document units with all context needed by topic assignment."""
+        return self.db.execute(
+            select(DBDocumentUnit)
+            .where(DBDocumentUnit.scan_unit_id == scan_unit_id)
+            .options(
+                selectinload(DBDocumentUnit.document_type),
+                selectinload(DBDocumentUnit.entities),
+                selectinload(DBDocumentUnit.topic_assignments),
+                selectinload(DBDocumentUnit.specialist_jobs),
+                selectinload(DBDocumentUnit.specialist_results),
+            )
+            .order_by(DBDocumentUnit.ordinal.asc())
+        ).scalars().all()
+
+    def _has_active_specialist_jobs(self, document_units: list[DBDocumentUnit]) -> bool:
+        active_statuses = {"queued", "pending", "processing"}
+        return any(
+            job.status in active_statuses
+            for doc_unit in document_units
+            for job in doc_unit.specialist_jobs
+        )
+
+    def _reset_topic_outputs(self, document_units: list[DBDocumentUnit]) -> None:
+        """Remove topic outputs so topic finalization is idempotent."""
+        document_unit_ids = [doc_unit.id for doc_unit in document_units]
+        if not document_unit_ids:
+            return
+        self.db.execute(
+            delete(TopicProposal).where(TopicProposal.source_document_unit_id.in_(document_unit_ids))
+        )
+        self.db.execute(
+            delete(LLMDecision).where(
+                LLMDecision.document_unit_id.in_(document_unit_ids),
+                LLMDecision.decision_type == "topic_assignment",
+            )
+        )
+        self.db.execute(
+            delete(DBDocumentUnitTopicAssignment).where(
+                DBDocumentUnitTopicAssignment.document_unit_id.in_(document_unit_ids)
+            )
+        )
+        self.db.flush()
+
+    def _load_pipeline_routing_decisions(
+        self,
+        document_units: list[DBDocumentUnit],
+    ) -> dict[uuid.UUID, PipelineRoutingDecision]:
+        """Load saved per-segment routing decisions, defaulting missing units to general."""
+        routing_decisions: dict[uuid.UUID, PipelineRoutingDecision] = {}
+        for doc_unit in document_units:
+            decision_row = self.db.execute(
+                select(LLMDecision)
+                .where(
+                    LLMDecision.document_unit_id == doc_unit.id,
+                    LLMDecision.decision_type == "pipeline_routing",
+                )
+                .order_by(LLMDecision.created_at.desc())
+            ).scalar_one_or_none()
+            if decision_row is not None:
+                routing_decisions[doc_unit.id] = PipelineRoutingDecision.model_validate(
+                    decision_row.output_payload_json
+                )
+            else:
+                routing_decisions[doc_unit.id] = PipelineRoutingDecision(
+                    pipeline_id="general_pipeline",
+                    family="general",
+                    confidence=0.55,
+                    rationale="No saved routing decision was found for this segment.",
+                    signals=[],
+                )
+        return routing_decisions
 
     def _create_document_units(
         self,
@@ -436,10 +550,11 @@ class KnowledgePipelineService:
             )
             
             # Retrieve candidate topics
+            document_summary = self._topic_document_summary(doc_unit)
             candidates_result = self.topic_retrieval_service.retrieve_candidates(
                 document_type_code=document_type_code,
                 document_title=doc_unit.title,
-                document_summary=doc_unit.extracted_summary,
+                document_summary=document_summary,
                 entities=entities,
             )
             
@@ -447,7 +562,7 @@ class KnowledgePipelineService:
             decision = self.topic_assignment_service.assign_topic(
                 document_type_code=document_type_code,
                 document_title=doc_unit.title,
-                document_summary=doc_unit.extracted_summary,
+                document_summary=document_summary,
                 entities=entities,
                 candidates=candidates_result.candidates,
                 language_code=language_code,
@@ -484,6 +599,27 @@ class KnowledgePipelineService:
                 input_payload={"candidates_count": len(candidates_result.candidates)},
                 output_payload=decision.model_dump(),
             )
+
+    def _topic_document_summary(self, doc_unit: DBDocumentUnit) -> str | None:
+        """Build topic-assignment context from generic and specialist extraction."""
+        parts = [doc_unit.extracted_summary or ""]
+        latest_results_by_type = {}
+        for result in sorted(doc_unit.specialist_results, key=lambda item: item.created_at, reverse=True):
+            latest_results_by_type.setdefault(result.specialist_type, result)
+
+        for specialist_type, result in latest_results_by_type.items():
+            payload = result.result_json or {}
+            compact_payload = json.dumps(payload, ensure_ascii=True, sort_keys=True, default=str)
+            if len(compact_payload) > 1800:
+                compact_payload = f"{compact_payload[:1800]}..."
+            parts.append(
+                f"Specialist {specialist_type} "
+                f"(confidence={result.confidence}, review_status={result.review_status}): "
+                f"{compact_payload}"
+            )
+
+        summary = "\n".join(part for part in parts if part).strip()
+        return summary or None
 
     def _create_topic_assignments(
         self,

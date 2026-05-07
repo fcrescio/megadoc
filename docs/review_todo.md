@@ -51,7 +51,7 @@ TODO emersi dalla review architetturale del progetto.
 
 ## Topic Pipeline
 
-- [ ] Spostare topic extraction/assignment dopo gli specialisti.
+- [x] Spostare topic extraction/assignment dopo gli specialisti.
 
   I topic sono importanti da mantenere, ma oggi risentono della struttura storica in cui gli specialisti non esistevano ancora. La proposta di topic dovrebbe usare la massima comprensione disponibile del segmento: OCR, classificazione, entity generali leggere e output specialistico.
 
@@ -68,6 +68,8 @@ TODO emersi dalla review architetturale del progetto.
     -> merge/consolidamento rigido
     -> review umana
   ```
+
+  Stato codice: il primo passaggio knowledge ora si ferma dopo segmentazione, routing per segmento, classificazione ed entity extraction generale. Il worker crea gli specialist job e accoda `finalize_scan_topics_task`, che aspetta la fine degli specialisti attivi e poi assegna i topic usando anche i risultati specialistici compattati.
 
 - [ ] Separare nettamente topic proposal e topic canonici.
 
