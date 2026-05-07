@@ -194,19 +194,19 @@ OCR Result
     ↓
 [1] Ensure Scan Unit
     ↓
-[2] Router semantico
+[2] Segmentazione → Document Units
     ↓
-[3] Segmentazione → Document Units
+[3] Routing semantico LLM per Document Unit
     ↓
 [4] Classificazione → Document Type
     ↓
 [5] Estrazione Entità → Entities
     ↓
-[6] Topic Retrieval → Candidate Topics
+[6] Specialist routing/extraction
     ↓
-[7] Topic Assignment → Assignments o Proposals
+[7] Topic Retrieval/Assignment dopo specialisti
     ↓
-[8] Post-processing e specialist routing
+[8] Post-processing e consolidamento
 ```
 
 Famiglie router correnti:

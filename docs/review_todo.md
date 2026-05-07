@@ -22,7 +22,7 @@ TODO emersi dalla review architetturale del progetto.
 
   La segmentazione va trattata come passaggio fondamentale ancora a livello documentale, prima della semantica specialistica. Idealmente dovrebbe produrre documenti figli o segmenti persistiti con PDF individuali, referenziati al documento sorgente ma trattati con la stessa dignita' operativa di un documento sorgente monolitico.
 
-  Stato codice: il routing globale scan-level e' stato rimosso dal flusso principale. La pipeline ora segmenta prima, poi esegue `pipeline_routing` per ogni `document_unit` e applica la post-elaborazione per gruppi di segmenti con la stessa pipeline.
+  Stato codice: il routing globale scan-level e' stato rimosso dal flusso principale. La pipeline ora segmenta prima, poi chiede all'LLM un `pipeline_routing` per ogni `document_unit` e applica la post-elaborazione per gruppi di segmenti con la stessa pipeline.
 
   Aspetti da progettare:
 

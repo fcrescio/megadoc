@@ -97,6 +97,42 @@ Rules:
 - Keep type_code values canonical and unchanged
 """
 
+# Pipeline routing prompt
+PIPELINE_ROUTING_PROMPT = """You are a document pipeline router. Choose which processing pipeline should post-process this already segmented document.
+
+{output_language_instruction}
+
+Available pipeline families:
+- general_pipeline / general: use for ordinary letters, reminders, notices, mixed administrative correspondence, or when no specialist family is clearly dominant.
+- normative_pipeline / normative: use for regulations, bylaws, long normative documents with articles/rules.
+- meeting_pipeline / meeting: use for actual meeting minutes, assembly records, agendas, convocations, attendance/deliberation documents. Do not choose this only because a letter mentions an assembly or a resolution.
+- financial_pipeline / financial: use for accounting statements, budgets, expense allocations, invoices, quotes, payment schedules, bank/accounting statements. Do not choose this only because legal or administrative prose contains VAT numbers or generic words like payment/client/order.
+- utility_vendor_pipeline / utility_vendor: use for utility bills, supply contracts, water/electricity/gas bills, POD/PDR/customer-code utility documents.
+- technical_admin_pipeline / technical_admin: use for technical reports, municipal/building paperwork, works documentation, permits, SCIA/DIA, feasibility or engineering attachments.
+
+Document segment:
+{document_text}
+
+Output JSON schema:
+{
+  "pipeline_id": "general_pipeline",
+  "family": "general",
+  "confidence": 0.85,
+  "rationale": "Brief reason for the routing decision",
+  "signals": ["short semantic signal 1", "short semantic signal 2"]
+}
+
+Rules:
+- Choose exactly one pipeline_id from the available list.
+- The family must match the chosen pipeline_id.
+- Route by the document's main purpose, not by isolated keywords.
+- Prefer general_pipeline when the document is correspondence/reminder/notice and no specialist workflow is clearly needed.
+- Confidence between 0 and 1.
+- Keep rationale brief, in the source document language.
+- Use semantic signals, not raw keyword dumps.
+- Stop immediately after one valid JSON object. No markdown, no prose.
+"""
+
 # Entity extraction prompt
 ENTITY_EXTRACTION_PROMPT = """You are an archival entity extraction expert for local document search.
 

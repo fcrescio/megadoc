@@ -1,4 +1,5 @@
 from common.db.models import OCRResult
+from knowledge_classifier.llm.mock import MockDeterministicProvider
 from knowledge_classifier.services.routing import PipelineRouterService
 
 
@@ -18,7 +19,7 @@ def _ocr(markdown_text: str) -> OCRResult:
 
 
 def test_router_routes_regulation_scans_to_normative_pipeline():
-    service = PipelineRouterService()
+    service = PipelineRouterService(MockDeterministicProvider())
     ocr_result = _ocr(
         "Regolamento del condominio. Art. 1 proprietà comune. "
         "Art. 2 assemblea. Articolo 3 innovazioni. Articolo 4 amministratore."
@@ -31,7 +32,7 @@ def test_router_routes_regulation_scans_to_normative_pipeline():
 
 
 def test_router_routes_financial_scans_to_financial_pipeline():
-    service = PipelineRouterService()
+    service = PipelineRouterService(MockDeterministicProvider())
     ocr_result = _ocr(
         "Bilancio consuntivo del condominio. Rendiconto gestione 2024. "
         "Riparto spese e preventivo 2025."
@@ -44,7 +45,7 @@ def test_router_routes_financial_scans_to_financial_pipeline():
 
 
 def test_router_routes_invoice_scans_to_financial_pipeline():
-    service = PipelineRouterService()
+    service = PipelineRouterService(MockDeterministicProvider())
     ocr_result = _ocr(
         "FATTURA n.13. Imponibile, iva 20%, importo fattura, totale documento."
     )
@@ -56,7 +57,7 @@ def test_router_routes_invoice_scans_to_financial_pipeline():
 
 
 def test_router_routes_noisy_invoice_ocr_to_financial_pipeline():
-    service = PipelineRouterService()
+    service = PipelineRouterService(MockDeterministicProvider())
     ocr_result = _ocr(
         "DATIIDENTIFICATIVIDELCLIENTE PartitaVA01735100503 "
         "CEDENTEOPRESTATOREDOMICILIORESIDENZACODICEFSCALEPARTITAIVA"
@@ -69,7 +70,7 @@ def test_router_routes_noisy_invoice_ocr_to_financial_pipeline():
 
 
 def test_router_routes_retail_receipt_to_financial_pipeline():
-    service = PipelineRouterService()
+    service = PipelineRouterService(MockDeterministicProvider())
     ocr_result = _ocr(
         "UNIEURO S.P.A. Totale vendita 445,00. Acconto 400,00. "
         "Cliente Crescioli Francesco. Pagamento contanti. Memoria di spesa."
@@ -82,7 +83,7 @@ def test_router_routes_retail_receipt_to_financial_pipeline():
 
 
 def test_router_falls_back_to_general_pipeline_for_unknown_scans():
-    service = PipelineRouterService()
+    service = PipelineRouterService(MockDeterministicProvider())
     ocr_result = _ocr("Testo eterogeneo senza segnali forti e senza famiglia specializzata evidente.")
 
     decision = service.route_scan(ocr_result)
@@ -92,7 +93,7 @@ def test_router_falls_back_to_general_pipeline_for_unknown_scans():
 
 
 def test_router_can_route_individual_segment_texts_independently():
-    service = PipelineRouterService()
+    service = PipelineRouterService(MockDeterministicProvider())
 
     accounting_decision = service.route_text(
         "Bilancio consuntivo. Rendiconto gestione 2024. Riparto spese."

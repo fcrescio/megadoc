@@ -3,6 +3,7 @@
 from knowledge_classifier.prompts.templates import (
     SEGMENTATION_PROMPT,
     CLASSIFICATION_PROMPT,
+    PIPELINE_ROUTING_PROMPT,
     ENTITY_EXTRACTION_PROMPT,
     TOPIC_ASSIGNMENT_PROMPT,
 )
@@ -10,6 +11,7 @@ from knowledge_classifier.prompts.templates import (
 __all__ = [
     "SEGMENTATION_PROMPT",
     "CLASSIFICATION_PROMPT",
+    "PIPELINE_ROUTING_PROMPT",
     "ENTITY_EXTRACTION_PROMPT",
     "TOPIC_ASSIGNMENT_PROMPT",
 ]

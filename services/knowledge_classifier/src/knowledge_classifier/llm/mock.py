@@ -70,6 +70,50 @@ class MockDeterministicProvider(LLMProvider):
 
     def _generate_mock_json(self, schema: type[BaseModel], user_text: str) -> dict[str, Any]:
         """Generate mock JSON data matching schema."""
+        if schema.__name__ == "PipelineRoutingDecision":
+            lower_text = user_text.lower()
+            if "document segment:" in lower_text:
+                lower_text = lower_text.split("document segment:", 1)[1].split("output json schema:", 1)[0]
+            if "regolamento" in lower_text and ("art." in lower_text or "articolo" in lower_text):
+                return {
+                    "pipeline_id": "normative_pipeline",
+                    "family": "normative",
+                    "confidence": 0.9,
+                    "rationale": "Mock routing for regulation document.",
+                    "signals": ["regulation"],
+                }
+            if "verbale" in lower_text or "convocazione" in lower_text:
+                return {
+                    "pipeline_id": "meeting_pipeline",
+                    "family": "meeting",
+                    "confidence": 0.86,
+                    "rationale": "Mock routing for meeting document.",
+                    "signals": ["meeting"],
+                }
+            if "bolletta" in lower_text or "servizio idrico" in lower_text or "pod" in lower_text or "pdr" in lower_text:
+                return {
+                    "pipeline_id": "utility_vendor_pipeline",
+                    "family": "utility_vendor",
+                    "confidence": 0.86,
+                    "rationale": "Mock routing for utility document.",
+                    "signals": ["utility"],
+                }
+            if "rendiconto" in lower_text or "riparto" in lower_text or "fattura" in lower_text:
+                return {
+                    "pipeline_id": "financial_pipeline",
+                    "family": "financial",
+                    "confidence": 0.86,
+                    "rationale": "Mock routing for financial document.",
+                    "signals": ["financial"],
+                }
+            return {
+                "pipeline_id": "general_pipeline",
+                "family": "general",
+                "confidence": 0.65,
+                "rationale": "Mock routing for general document.",
+                "signals": [],
+            }
+
         mock_data: dict[str, Any] = {}
         
         for field_name, field_info in schema.model_fields.items():

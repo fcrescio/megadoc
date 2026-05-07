@@ -210,7 +210,7 @@ Ogni `document_unit` resta referenziato allo scan sorgente tramite pagine `start
 
 ## 7. Routing Knowledge Per Segmento
 
-Dopo la segmentazione, il sistema decide una famiglia di pipeline per ogni `document_unit`, leggendo solo il testo del segmento.
+Dopo la segmentazione, il sistema chiede all'LLM di decidere una famiglia di pipeline per ogni `document_unit`, leggendo solo il testo del segmento.
 
 Famiglie possibili:
 
@@ -234,7 +234,7 @@ pipeline_routing
 - signals
 ```
 
-Questa decisione viene salvata in `llm_decisions` con `document_unit_id`, anche se oggi il router e' euristico e non LLM puro. Segmenti diversi dello stesso PDF possono quindi essere post-processati da pipeline diverse.
+Questa decisione viene salvata in `llm_decisions` con `document_unit_id`. Segmenti diversi dello stesso PDF possono quindi essere post-processati da pipeline diverse.
 
 Esempio:
 

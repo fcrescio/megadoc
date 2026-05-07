@@ -61,7 +61,7 @@ class KnowledgePipelineService:
         self.entity_extraction_service = EntityExtractionService(llm_provider, db_session)
         self.topic_retrieval_service = TopicRetrievalService(db_session)
         self.topic_assignment_service = TopicAssignmentService(llm_provider, db_session)
-        self.pipeline_router_service = PipelineRouterService()
+        self.pipeline_router_service = PipelineRouterService(llm_provider)
         self.pipeline_strategies = {
             "general_pipeline": GeneralPipelineStrategy(),
             "normative_pipeline": NormativePipelineStrategy(),
