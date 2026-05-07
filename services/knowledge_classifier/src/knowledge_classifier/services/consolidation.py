@@ -224,14 +224,14 @@ class KnowledgeBaseConsolidationService:
     }
 
     _CLASS_ENTITY_PRIORITY = {
-        "financial_period": ("condominio", "fornitore", "organizzazione", "indirizzo", "persona"),
-        "general_administration": ("condominio", "organizzazione", "persona", "indirizzo", "fornitore"),
-        "vendor_relationship": ("fornitore", "organizzazione", "persona", "indirizzo", "condominio"),
-        "meeting": ("condominio", "indirizzo", "organizzazione", "persona"),
-        "legal_matter": ("condominio", "fornitore", "organizzazione", "indirizzo", "persona"),
-        "case_file": ("condominio", "indirizzo", "fornitore", "organizzazione", "persona"),
-        "building_issue": ("condominio", "indirizzo", "fornitore", "organizzazione", "persona"),
-        "other": ("organizzazione", "fornitore", "persona", "indirizzo", "condominio"),
+        "financial_period": ("indirizzo", "organizzazione", "persona", "luogo", "condominio", "fornitore"),
+        "general_administration": ("indirizzo", "organizzazione", "persona", "luogo", "condominio", "fornitore"),
+        "vendor_relationship": ("organizzazione", "persona", "indirizzo", "luogo", "fornitore", "condominio"),
+        "meeting": ("indirizzo", "organizzazione", "persona", "luogo", "condominio"),
+        "legal_matter": ("indirizzo", "organizzazione", "persona", "luogo", "condominio", "fornitore"),
+        "case_file": ("indirizzo", "organizzazione", "persona", "luogo", "condominio", "fornitore"),
+        "building_issue": ("indirizzo", "organizzazione", "persona", "luogo", "condominio", "fornitore"),
+        "other": ("organizzazione", "persona", "indirizzo", "luogo", "fornitore", "condominio"),
     }
 
     _FAMILY_HINTS = {
@@ -637,19 +637,20 @@ class KnowledgeBaseConsolidationService:
         signature_parts: list[str] = [prefix]
 
         if topic.topic_class == "financial_period":
-            if anchors["condominio"]:
-                signature_parts.append(anchors["condominio"])
+            location_anchor = anchors["indirizzo"] or anchors["organizzazione"] or anchors["luogo"] or anchors["condominio"]
+            if location_anchor:
+                signature_parts.append(location_anchor)
                 if family:
                     signature_parts.append(family)
             elif anchors["fornitore"] or anchors["organizzazione"]:
                 signature_parts.append(anchors["fornitore"] or anchors["organizzazione"])
-                secondary = anchors["persona"] or anchors["indirizzo"] or anchors["condominio"]
+                secondary = anchors["persona"] or anchors["indirizzo"] or anchors["luogo"] or anchors["condominio"]
                 if secondary:
                     signature_parts.append(secondary)
                 if family:
                     signature_parts.append(family)
         elif topic.topic_class == "general_administration":
-            primary = anchors["condominio"] or anchors["organizzazione"] or anchors["persona"] or anchors["indirizzo"]
+            primary = anchors["indirizzo"] or anchors["organizzazione"] or anchors["persona"] or anchors["luogo"] or anchors["condominio"]
             if primary:
                 signature_parts.append(primary)
                 secondary = anchors["organizzazione"] or anchors["persona"]
@@ -658,7 +659,7 @@ class KnowledgeBaseConsolidationService:
                 if family:
                     signature_parts.append(family)
         elif topic.topic_class == "meeting":
-            primary = anchors["condominio"] or anchors["indirizzo"] or anchors["organizzazione"]
+            primary = anchors["indirizzo"] or anchors["organizzazione"] or anchors["luogo"] or anchors["condominio"]
             if primary:
                 signature_parts.append(primary)
                 signature_parts.append("assembly")
@@ -666,18 +667,20 @@ class KnowledgeBaseConsolidationService:
             primary = anchors["fornitore"] or anchors["organizzazione"]
             if primary:
                 signature_parts.append(primary)
-                secondary = anchors["persona"] or anchors["indirizzo"] or anchors["condominio"]
+                secondary = anchors["persona"] or anchors["indirizzo"] or anchors["luogo"] or anchors["condominio"]
                 if secondary:
                     signature_parts.append(secondary)
                 if family:
                     signature_parts.append(family)
         else:
             primary = (
-                anchors["condominio"]
-                or anchors["fornitore"]
+                anchors["indirizzo"]
                 or anchors["organizzazione"]
+                or anchors["luogo"]
                 or anchors["indirizzo"]
                 or anchors["persona"]
+                or anchors["condominio"]
+                or anchors["fornitore"]
             )
             if primary:
                 signature_parts.append(primary)
@@ -695,7 +698,7 @@ class KnowledgeBaseConsolidationService:
     def _topic_anchor_parts(self, topic: Topic) -> dict[str, str | None]:
         counts: dict[str, Counter[str]] = {
             entity_type: Counter()
-            for entity_type in ("condominio", "fornitore", "organizzazione", "indirizzo", "persona")
+            for entity_type in ("indirizzo", "organizzazione", "persona", "luogo", "condominio", "fornitore")
         }
         for assignment in topic.assignments:
             document_unit = assignment.document_unit
@@ -857,7 +860,7 @@ class KnowledgeBaseConsolidationService:
             return None
 
         anchors = self._topic_anchor_parts(topic)
-        primary = anchors["condominio"] or anchors["indirizzo"] or anchors["organizzazione"]
+        primary = anchors["indirizzo"] or anchors["organizzazione"] or anchors["luogo"] or anchors["condominio"]
         if primary:
             return f"meeting:{primary}"
 
@@ -879,7 +882,7 @@ class KnowledgeBaseConsolidationService:
         )
         if not tokens:
             anchors = self._topic_anchor_parts(topic)
-            primary = anchors["condominio"] or anchors["indirizzo"] or anchors["organizzazione"]
+            primary = anchors["indirizzo"] or anchors["organizzazione"] or anchors["luogo"] or anchors["condominio"]
             if not primary:
                 return None
             return f"meeting-family:{primary}"
@@ -953,7 +956,7 @@ class KnowledgeBaseConsolidationService:
     def _topic_anchor_display_value(self, topic: Topic) -> str | None:
         counts: dict[str, Counter[str]] = {
             entity_type: Counter()
-            for entity_type in ("condominio", "indirizzo", "organizzazione")
+            for entity_type in ("indirizzo", "organizzazione", "luogo", "condominio")
         }
         for assignment in topic.assignments:
             document_unit = assignment.document_unit
@@ -966,7 +969,7 @@ class KnowledgeBaseConsolidationService:
                 if display_value:
                     counts[entity.entity_type][display_value] += 1
 
-        for entity_type in ("condominio", "indirizzo", "organizzazione"):
+        for entity_type in ("indirizzo", "organizzazione", "luogo", "condominio"):
             counter = counts[entity_type]
             if counter:
                 return sorted(counter.items(), key=lambda item: (-item[1], -len(item[0]), item[0]))[0][0]
@@ -1006,7 +1009,7 @@ class KnowledgeBaseConsolidationService:
     def _document_unit_accounting_anchor(self, document_unit: DocumentUnit) -> tuple[str | None, str | None]:
         normalized_candidates: dict[str, str] = {}
         for entity in document_unit.entities:
-            if entity.entity_type not in {"condominio", "indirizzo"}:
+            if entity.entity_type not in {"indirizzo", "organizzazione", "luogo", "condominio"}:
                 continue
             normalized = self._normalize_anchor_value(entity)
             if not normalized:
@@ -1162,15 +1165,15 @@ class KnowledgeBaseConsolidationService:
 
         anchors = self._topic_anchor_parts(topic)
         if group == "admin_finance":
-            primary = anchors["fornitore"] or anchors["organizzazione"]
+            primary = anchors["organizzazione"] or anchors["fornitore"]
             if primary:
                 signature = [group, primary]
-                secondary = anchors["condominio"] or anchors["persona"] or anchors["indirizzo"]
+                secondary = anchors["indirizzo"] or anchors["persona"] or anchors["luogo"] or anchors["condominio"]
                 if secondary and secondary != primary:
                     signature.append(secondary)
                 return tuple(signature)
 
-            primary = anchors["condominio"] or anchors["persona"] or anchors["indirizzo"]
+            primary = anchors["indirizzo"] or anchors["persona"] or anchors["luogo"] or anchors["condominio"]
             if primary:
                 signature = [group, primary]
                 if family in {"tax", "statement", "cadastre", "privacy"}:
@@ -1179,11 +1182,13 @@ class KnowledgeBaseConsolidationService:
             return ()
 
         primary = (
-            anchors["condominio"]
-            or anchors["fornitore"]
+            anchors["indirizzo"]
             or anchors["organizzazione"]
+            or anchors["luogo"]
             or anchors["indirizzo"]
             or anchors["persona"]
+            or anchors["condominio"]
+            or anchors["fornitore"]
         )
         if not primary:
             return ()

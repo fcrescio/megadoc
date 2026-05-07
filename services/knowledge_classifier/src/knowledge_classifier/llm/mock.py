@@ -125,7 +125,7 @@ class MockDeterministicProvider(LLMProvider):
         elif "classify" in user_text.lower() or "type" in user_text.lower():
             return '{"primary_type": {"type_code": "verbale_assemblea", "confidence": 0.95, "salient_features": ["verbale", "assemblea"]}, "alternatives": [], "rationale": "Clear meeting minutes"}'
         elif "entity" in user_text.lower() or "extract" in user_text.lower():
-            return '{"entities": [{"entity_type": "condominio", "entity_value": "Condominio Via Roma", "confidence": 0.9}], "summary": "Document about condominium"}'
+            return '{"entities": [{"entity_type": "organizzazione", "entity_value": "Condominio Via Roma", "confidence": 0.9}], "summary": "Document about condominium"}'
         elif "topic" in user_text.lower():
             return '{"action": "assign_existing", "topic_ids": ["550e8400-e29b-41d4-a716-446655440000"], "assignment_roles": ["primary"], "confidence": 0.85, "rationale": "Matches existing topic"}'
         

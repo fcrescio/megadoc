@@ -98,33 +98,29 @@ Rules:
 """
 
 # Entity extraction prompt
-ENTITY_EXTRACTION_PROMPT = """You are an archival entity extraction expert for condominium documents.
+ENTITY_EXTRACTION_PROMPT = """You are an archival entity extraction expert for local document search.
 
 {output_language_instruction}
 
-Extract ONLY high-value filing/search entities from the document. This is not table transcription.
+Extract ONLY generic high-value filing/search entities from the document. This is not table transcription and not specialist extraction.
 
 Hard rules:
 - Return at most 25 entities total.
-- Use only these entity_type values: condominio, organizzazione, persona, fornitore, indirizzo, data, periodo, importo, numero_documento.
-- Do NOT extract every owner row, apartment row, table cell, or repeated amount.
-- For monetary amounts, return at most 8 values and only if they are document-level totals, balances, installments, or payment amounts.
-- For people, return only administrators, vendors, lawyers, signatories, or named parties central to the document. Do not list all condominium owners from allocation tables.
-- Deduplicate aggressively. Same condominium/address/date/amount appears once.
-- Use concise normalized_value. Dates as YYYY-MM-DD when unambiguous; periods as YYYY-MM-DD_to_YYYY-MM-DD.
+- Use only these entity_type values: persona, organizzazione, indirizzo, luogo.
+- Do NOT extract amounts, dates, periods, document numbers, invoice numbers, contract codes, POD/PDR, tax codes, table rows, owner rows, apartment rows, or payment references.
+- Do NOT create role-specific entity types such as fornitore, condominio, amministratore, cliente, beneficiario, or emittente. Use organizzazione/persona/indirizzo/luogo instead.
+- For people, return only named parties central to the document. Do not list every owner from allocation tables.
+- For organizations, include companies, public bodies, banks, condominiums, associations, vendors, administrators, and counterparties when they are central.
+- Deduplicate aggressively. The same person/organization/address/place appears once.
+- Use concise normalized_value with lowercase and underscores.
 - If the text is mostly a table, summarize the table in summary instead of enumerating rows.
 - Stop immediately after a single valid JSON object. No markdown, no prose.
 
 Entity types to extract:
-- condominio: Condominium name
-- organizzazione: Organizations mentioned
-- persona: People names
-- fornitore: Vendors, suppliers
-- indirizzo: Addresses
-- data: Dates (normalize to YYYY-MM-DD)
-- periodo: Periods (e.g., "2024", "Gennaio-Marzo 2024")
-- importo: Monetary amounts (extract number and currency)
-- numero_documento: Document numbers, reference codes
+- persona: People names central to the document
+- organizzazione: Companies, public bodies, banks, condominiums, associations, administrators, vendors, counterparties
+- indirizzo: Street addresses and building addresses
+- luogo: Cities, municipalities, neighborhoods, cadastral/local places when useful for search
 
 Document content:
 {document_text}
@@ -133,7 +129,7 @@ Output JSON schema:
 {
   "entities": [
     {
-      "entity_type": "condominio",
+      "entity_type": "organizzazione",
       "entity_value": "Condominio Via Roma",
       "normalized_value": "condominio_via_roma",
       "confidence": 0.9,
@@ -145,13 +141,14 @@ Output JSON schema:
 }
 
 Rules:
-- Extract only the most important archival/search entities
+- Extract only the most important generic archival/search entities
 - Normalize values for consistent matching (lowercase, underscores)
 - Confidence between 0 and 1
 - Track page locations when possible
 - Summary should capture document purpose in one sentence, max 30 words
 - Write summary in the source document language
 - Keep entity_value as it appears in the document whenever possible
+- When in doubt, omit the entity rather than inventing a domain-specific field
 """
 
 # Topic assignment prompt

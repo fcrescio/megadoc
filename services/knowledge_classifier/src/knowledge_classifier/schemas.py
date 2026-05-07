@@ -70,15 +70,10 @@ class TopicClass(str, Enum):
 
 
 class EntityTypes(str, Enum):
-    PERSON = "person"
-    ORGANIZATION = "organization"
-    CONDOMINIUM = "condominio"
+    PERSON = "persona"
+    ORGANIZATION = "organizzazione"
     ADDRESS = "indirizzo"
-    VENDOR = "fornitore"
-    DATE = "data"
-    PERIOD = "periodo"
-    AMOUNT = "importo"
-    DOCUMENT_NUMBER = "numero_documento"
+    PLACE = "luogo"
 
 
 # Page representation
@@ -133,15 +128,10 @@ class ClassificationResult(BaseModel):
 class ExtractedEntity(BaseModel):
     """An extracted entity from a document."""
     entity_type: Literal[
-        "condominio",
         "organizzazione",
         "persona",
-        "fornitore",
         "indirizzo",
-        "data",
-        "periodo",
-        "importo",
-        "numero_documento",
+        "luogo",
     ]
     entity_value: str = Field(..., max_length=256)
     normalized_value: Optional[str] = Field(default=None, max_length=256)

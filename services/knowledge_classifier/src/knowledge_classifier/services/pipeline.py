@@ -698,8 +698,8 @@ class KnowledgePipelineService:
         return None
 
     def _topic_anchor(self, entities: list[Any], *fallback_texts: str) -> str | None:
-        """Build a coarse topic anchor, preferring condominium/address entities."""
-        for preferred_type in ("condominio", "indirizzo"):
+        """Build a coarse topic anchor from generic search entities."""
+        for preferred_type in ("indirizzo", "organizzazione", "luogo", "persona", "condominio"):
             for entity in entities:
                 if entity.entity_type == preferred_type:
                     return self._proposal_key(entity.normalized_value or entity.entity_value)
@@ -885,8 +885,8 @@ class KnowledgePipelineService:
             scan_unit.assignment_confidence = sum(confidences) / len(confidences)
 
     def _financial_topic_anchor(self, entities: list[Any]) -> str | None:
-        """Build a vendor-first anchor for financial documents."""
-        for preferred_type in ("fornitore", "organizzazione", "persona", "indirizzo"):
+        """Build an anchor for financial documents from generic entities."""
+        for preferred_type in ("organizzazione", "persona", "indirizzo", "luogo", "fornitore"):
             for entity in entities:
                 if entity.entity_type == preferred_type:
                     return self._proposal_key(entity.normalized_value or entity.entity_value)
@@ -1016,10 +1016,12 @@ class KnowledgePipelineService:
             score = 0
             entity_result = entity_results.get(doc_unit.id)
             entities = entity_result.entities if entity_result else []
-            if any(entity.entity_type == "condominio" for entity in entities):
-                score += 4
             if any(entity.entity_type == "indirizzo" for entity in entities):
-                score += 2
+                score += 4
+            if any(entity.entity_type == "organizzazione" for entity in entities):
+                score += 3
+            if any(entity.entity_type == "condominio" for entity in entities):
+                score += 3
             if doc_unit.proposal is not None:
                 score += 3
             summary = (doc_unit.extracted_summary or "").lower()

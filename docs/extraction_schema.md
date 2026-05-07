@@ -302,19 +302,16 @@ Se la confidence e' bassa, `review_status` diventa `needs_review`.
 
 Per ogni `document_unit`, viene eseguita entity extraction.
 
-Tipi supportati:
+Tipi supportati dopo la semplificazione:
 
 ```text
-condominio
 organizzazione
 persona
-fornitore
 indirizzo
-data
-periodo
-importo
-numero_documento
+luogo
 ```
+
+Questa estrazione generale serve alla ricerca e agli anchor del grafo, non a descrivere il dominio del documento. Per questo non estrae piu' importi, date, periodi, numeri documento, fornitori o condomini come tipi separati. Quei dati devono appartenere agli specialisti quando il documento viene riconosciuto come bolletta, rendiconto, verbale, contratto, ecc.
 
 Ogni entita' diventa:
 
@@ -335,13 +332,10 @@ Esempio:
 
 ```text
 document_unit: bolletta acqua
-  -> fornitore = "Acque S.p.A."
+  -> organizzazione = "Acque S.p.A."
   -> persona = "Mario Rossi"
   -> indirizzo = "Via Roma 10"
-  -> data = "2024-03-15"
-  -> periodo = "gennaio-febbraio 2024"
-  -> importo = "83,42"
-  -> numero_documento = "ABC123"
+  -> luogo = "Scandicci"
 ```
 
 Le entita' sono associate al `document_unit`, non direttamente al PDF intero.
@@ -567,20 +561,21 @@ PDF composto da piu' sezioni del medesimo regolamento condominiale
 Usa anchor da:
 
 ```text
-- condominio
 - indirizzo
-- fornitore
 - organizzazione
 - persona
+- luogo
 ```
+
+I vecchi valori `condominio` e `fornitore` possono ancora essere letti come compatibilita' con dati gia' presenti, ma non vengono piu' richiesti all'estrazione LLM generale.
 
 Per documenti finanziari preferisce anchor tipo:
 
 ```text
-fornitore
 organizzazione
 persona
 indirizzo
+luogo
 ```
 
 Per regolamenti condominiali puo' forzare coerenza:

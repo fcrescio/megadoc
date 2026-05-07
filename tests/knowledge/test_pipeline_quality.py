@@ -62,8 +62,8 @@ def test_normalize_entities_offsets_pages_and_deduplicates(db_session):
             page_to=1,
         ),
         ExtractedEntity(
-            entity_type="data",
-            entity_value="2025-11-15",
+            entity_type="luogo",
+            entity_value="Scandicci",
             normalized_value=None,
             confidence=0.9,
             page_from=2,
@@ -137,7 +137,7 @@ def test_create_topic_proposal_reuses_existing_provisional_topic_in_same_scan(db
     )()
     entities = [
         ExtractedEntity(
-            entity_type="condominio",
+            entity_type="organizzazione",
             entity_value="Condominio Via Burchietti 37/39 - Scandicci",
             normalized_value="condominio_via_burchietti_37_39_scandicci",
             confidence=0.95,
@@ -260,7 +260,7 @@ def test_pick_regulation_canonical_unit_prefers_condominium_anchor(db_session):
         doc_unit_2.id: SimpleNamespace(
             entities=[
                 ExtractedEntity(
-                    entity_type="condominio",
+                    entity_type="organizzazione",
                     entity_value="Condominio Via Cesare Studiati",
                     normalized_value="condominio_via_cesare_studiati",
                     confidence=0.95,
@@ -307,7 +307,7 @@ def test_consolidate_financial_topics_merges_same_vendor_proposals(db_session):
     service = KnowledgePipelineService(MockDeterministicProvider(), db_session)
     entities_1 = [
         ExtractedEntity(
-            entity_type="fornitore",
+            entity_type="organizzazione",
             entity_value="Elettrosat snc",
             normalized_value="elettrosat_snc",
             confidence=0.95,
@@ -317,7 +317,7 @@ def test_consolidate_financial_topics_merges_same_vendor_proposals(db_session):
     ]
     entities_2 = [
         ExtractedEntity(
-            entity_type="fornitore",
+            entity_type="organizzazione",
             entity_value="Elettrosat snc",
             normalized_value="elettrosat_snc",
             confidence=0.95,
