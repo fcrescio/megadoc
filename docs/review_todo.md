@@ -36,6 +36,17 @@ TODO emersi dalla review architetturale del progetto.
   - link tra segmenti appartenenti allo stesso fascicolo/fattura/ciclo;
   - UI per navigare documento sorgente e figli.
 
+- [ ] Correggere la segmentazione dei PDF lunghi in modo che nessuna pagina venga persa.
+
+  Test reale del 2026-05-08 su due PDF contabili da 14 pagine ha mostrato che la segmentazione LLM produce segmenti solo fino a pagina 10. La causa immediata e' che `_segment_with_llm` invia al modello solo le prime 10 pagine (`pages[:10]`). Questo e' accettabile come limite di contesto solo se il sistema segmenta a finestre e poi ricompone, ma non se il risultato finale puo' omettere pagine.
+
+  Requisiti minimi:
+
+  - validare sempre copertura completa e non sovrapposta da pagina 1 a `page_count`;
+  - se l'LLM omette pagine, creare una coda esplicita di segmenti residui o fallire con `needs_review`;
+  - sostituire il cap fisso a 10 pagine con segmentazione chunked/sliding-window;
+  - aggiungere un test di regressione su PDF > 10 pagine.
+
 ## Entity Extraction
 
 - [ ] Ridimensionare le entity generali a concetti realmente trasversali.
