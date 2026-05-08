@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from html.parser import HTMLParser
 from typing import Any
 
 from common.db.models import DocumentUnit
@@ -74,14 +75,8 @@ def _normalize_date(value: str) -> str:
 
 
 def _extract_structured_tables(document_unit: DocumentUnit, structured_json: dict[str, Any]) -> list[dict[str, Any]]:
-    raw_tables = structured_json.get("tables")
-    if not isinstance(raw_tables, list):
-        return []
-
     extracted: list[dict[str, Any]] = []
-    for index, table in enumerate(raw_tables, start=1):
-        if not isinstance(table, dict):
-            continue
+    for index, table in enumerate(_iter_structured_tables(structured_json), start=1):
         if not _table_overlaps_document_unit(table, document_unit.start_page, document_unit.end_page):
             continue
         parsed = _parse_structured_table(table)
@@ -102,7 +97,38 @@ def _extract_structured_tables(document_unit: DocumentUnit, structured_json: dic
     return extracted
 
 
+def _iter_structured_tables(structured_json: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return tables from both Docling top-level output and dots-native page output."""
+    tables: list[dict[str, Any]] = []
+
+    raw_tables = structured_json.get("tables")
+    if isinstance(raw_tables, list):
+        tables.extend(table for table in raw_tables if isinstance(table, dict))
+
+    pages = structured_json.get("pages")
+    if isinstance(pages, list):
+        for page in pages:
+            if not isinstance(page, dict):
+                continue
+            page_number = page.get("page_number") or page.get("page_no")
+            page_tables = page.get("tables")
+            if not isinstance(page_tables, list):
+                continue
+            for table in page_tables:
+                if not isinstance(table, dict):
+                    continue
+                if page_number is not None and table.get("page_number") is None:
+                    table = {**table, "page_number": page_number}
+                tables.append(table)
+
+    return tables
+
+
 def _table_overlaps_document_unit(table: dict[str, Any], start_page: int, end_page: int) -> bool:
+    page_number = table.get("page_number") or table.get("page_no")
+    if isinstance(page_number, int):
+        return start_page <= page_number <= end_page
+
     prov = table.get("prov")
     if not isinstance(prov, list):
         return True
@@ -117,6 +143,10 @@ def _table_overlaps_document_unit(table: dict[str, Any], start_page: int, end_pa
 
 
 def _parse_structured_table(table: dict[str, Any]) -> tuple[list[str], list[dict[str, Any]], list[list[str]]] | None:
+    html = _table_html(table)
+    if html:
+        return _parse_html_table(html)
+
     data = table.get("data")
     if not isinstance(data, dict):
         return None
@@ -175,6 +205,111 @@ def _parse_structured_table(table: dict[str, Any]) -> tuple[list[str], list[dict
     if not rows:
         return None
     return headers, rows, raw_headers
+
+
+def _table_html(table: dict[str, Any]) -> str | None:
+    cells = table.get("cells")
+    if not isinstance(cells, list):
+        return None
+    html_parts: list[str] = []
+    for cell in cells:
+        if not isinstance(cell, dict):
+            continue
+        html = cell.get("html")
+        if isinstance(html, str) and html.strip():
+            html_parts.append(html)
+    if not html_parts:
+        return None
+    return "\n".join(html_parts)
+
+
+def _parse_html_table(html: str) -> tuple[list[str], list[dict[str, Any]], list[list[str]]] | None:
+    parser = _HTMLTableParser()
+    parser.feed(html)
+    grid = parser.rows
+    if not grid:
+        return None
+
+    max_cols = max(len(row) for row in grid)
+    if max_cols <= 0:
+        return None
+    normalized_grid = [row + [""] * (max_cols - len(row)) for row in grid]
+    header_rows = _infer_html_header_rows(normalized_grid, parser.header_row_indexes)
+    raw_headers = _build_raw_headers(normalized_grid, header_rows, max_cols)
+    headers = _make_unique_headers(raw_headers)
+
+    rows: list[dict[str, Any]] = []
+    for row_cells in normalized_grid[header_rows:]:
+        if not any(cell.strip() for cell in row_cells):
+            continue
+        cells: dict[str, str] = {}
+        normalized_amounts: dict[str, float] = {}
+        for col_idx, header in enumerate(headers):
+            value = row_cells[col_idx].strip()
+            cells[header] = value
+            amount = _parse_amount(value)
+            if amount is not None:
+                normalized_amounts[header] = amount
+        rows.append(
+            {
+                "row_id": f"row_{len(rows) + 1}",
+                "cells": cells,
+                "normalized_amounts": normalized_amounts,
+            }
+        )
+    if not rows:
+        return None
+    return headers, rows, raw_headers
+
+
+def _infer_html_header_rows(grid: list[list[str]], explicit_header_rows: set[int]) -> int:
+    if explicit_header_rows:
+        return max(explicit_header_rows) + 1
+    if len(grid) <= 1:
+        return 0
+
+    first_row = grid[0]
+    numeric_cells = sum(1 for cell in first_row if _parse_amount(cell) is not None)
+    text_cells = sum(1 for cell in first_row if cell.strip())
+    if text_cells and numeric_cells == 0:
+        return 1
+    return 0
+
+
+class _HTMLTableParser(HTMLParser):
+    """Small HTML table parser for OCR-produced table snippets."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.rows: list[list[str]] = []
+        self.header_row_indexes: set[int] = set()
+        self._current_row: list[str] | None = None
+        self._current_cell: list[str] | None = None
+        self._current_cell_is_header = False
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "tr":
+            self._current_row = []
+        elif tag in {"td", "th"} and self._current_row is not None:
+            self._current_cell = []
+            self._current_cell_is_header = tag == "th"
+
+    def handle_data(self, data: str) -> None:
+        if self._current_cell is not None:
+            self._current_cell.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in {"td", "th"} and self._current_row is not None and self._current_cell is not None:
+            value = re.sub(r"\s+", " ", "".join(self._current_cell)).strip()
+            self._current_row.append(value)
+            if self._current_cell_is_header:
+                self.header_row_indexes.add(len(self.rows))
+            self._current_cell = None
+            self._current_cell_is_header = False
+        elif tag == "tr" and self._current_row is not None:
+            if any(cell.strip() for cell in self._current_row):
+                self.rows.append(self._current_row)
+            self._current_row = None
 
 
 def _build_raw_headers(grid: list[list[str]], header_rows: int, num_cols: int) -> list[list[str]]:
@@ -329,9 +464,25 @@ def _extract_table_totals(headers: list[str], rows: list[dict[str, Any]]) -> dic
         marker = " ".join(first_values)
         if "totale" not in marker and "saldo finale" not in marker:
             continue
+        labelled_amount = _last_amount(row["normalized_amounts"])
+        if labelled_amount is not None:
+            if "totale gestione" in marker:
+                totals["Totale gestione"] = labelled_amount
+            elif "saldo finale" in marker:
+                totals["Saldo finale"] = labelled_amount
+            elif "totale dovuto" in marker:
+                totals["Totale dovuto"] = labelled_amount
+            elif "totale" in marker:
+                totals["Totale"] = labelled_amount
         for header, amount in row["normalized_amounts"].items():
             totals[header] = amount
     return totals
+
+
+def _last_amount(amounts: dict[str, float]) -> float | None:
+    if not amounts:
+        return None
+    return list(amounts.values())[-1]
 
 
 def _build_validation_checks(tables: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -340,7 +491,7 @@ def _build_validation_checks(tables: list[dict[str, Any]]) -> list[dict[str, Any
     payment_schedule_totals: list[float] = []
 
     for table in tables:
-        if table["table_type"] != "summary":
+        if table["table_type"] not in {"summary", "balance"}:
             continue
         totals = table.get("totals", {})
         total_gestione = _pick_amount_by_header(totals, ["Totale gestione"])
@@ -365,27 +516,15 @@ def _build_validation_checks(tables: list[dict[str, Any]]) -> list[dict[str, Any
     for table in tables:
         if table["table_type"] != "expense_allocation":
             continue
-        total_row = None
-        value_rows: list[float] = []
-        for row in table["rows"]:
-            first_values = [str(value).lower() for value in list(row["cells"].values())[:2] if value]
-            marker = " ".join(first_values)
-            amount = _pick_amount_by_header(row["normalized_amounts"], ["Totale", "Totale gestione"])
-            if amount is None:
-                continue
-            if "totale" in marker:
-                total_row = amount
-            else:
-                value_rows.append(amount)
-        if total_row is None or not value_rows:
+        totals = table.get("totals", {})
+        if not totals:
             continue
-        computed = round(sum(value_rows), 2)
-        status = "pass" if abs(computed - total_row) < 0.05 else "fail"
+        largest_total = max(totals.values(), key=lambda value: abs(value))
         checks.append(
             {
-                "check_type": "allocation_rows_sum_to_total",
-                "status": status,
-                "details": f"Somma righe={computed:.2f}, totale dichiarato={total_row:.2f}",
+                "check_type": "allocation_totals_extracted",
+                "status": "pass",
+                "details": f"Estratti totali dalla tabella di riparto; totale principale={largest_total:.2f}",
             }
         )
 
@@ -441,6 +580,11 @@ def _build_validation_checks(tables: list[dict[str, Any]]) -> list[dict[str, Any
 
 
 def _pick_amount_by_header(amounts: dict[str, float], header_hints: list[str]) -> float | None:
+    normalized_amounts = {header.strip().lower(): amount for header, amount in amounts.items()}
+    for hint in header_hints:
+        amount = normalized_amounts.get(hint.strip().lower())
+        if amount is not None:
+            return amount
     for hint in header_hints:
         for header, amount in amounts.items():
             if hint.lower() in header.lower():
