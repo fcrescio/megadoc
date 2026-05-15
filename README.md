@@ -35,6 +35,7 @@ Funzionalità implementate:
 - `services/knowledge_classifier`: README e modulo logico della fase knowledge.
 - `packages/common`: dominio, DB models, repository, servizi applicativi, storage, adapter OCR, knowledge e specialisti.
 - `docker-compose.yml`: stack completo con `postgres`, `redis`, `minio`, `mc-init`, `migrate`, `api`, `worker`, `worker_llm_vision`, `knowledge_worker`, specialisti e `frontend`.
+- rete interna `megadoc-net` per tutto lo stack applicativo; `ml-infra-net` per i servizi che devono parlare con l'infrastruttura ML esterna.
 
 ## Struttura Repo Per Nuovi Agenti
 
@@ -76,10 +77,10 @@ Variabili principali:
 - `OCR_BACKEND`: oggi tipicamente `dots_native`; `docling` resta disponibile; `fake` serve per test rapidi.
 - `OCR_DOTS_NATIVE_MODEL`: modello OCR dots, tipicamente `ggml-org/dots.ocr-GGUF:Q8_0`.
 - `OCR_DOTS_NATIVE_ENDPOINT`: endpoint OpenAI-compatible visto dall'API.
-- `OCR_WORKER_DOTS_NATIVE_ENDPOINT`: endpoint OpenAI-compatible visto dal worker in `network_mode: host`.
+- `OCR_WORKER_DOTS_NATIVE_ENDPOINT`: endpoint OpenAI-compatible visto dal worker OCR.
 - `KN_LLM_MODEL`: modello knowledge, oggi tipicamente `qwen3.6-A3B`.
 - `KN_LLM_ENDPOINT`: endpoint LLM visto dall'API.
-- `KN_WORKER_LLM_ENDPOINT`: endpoint LLM visto dal worker knowledge in `network_mode: host`.
+- `KN_WORKER_LLM_ENDPOINT`: endpoint LLM visto dal worker knowledge.
 - `STORAGE_BACKEND`: `s3` in compose, `filesystem` nei test.
 
 Nota: il backend locale LLM/OCR carica un solo modello alla volta. La pipeline dà priorità agli OCR rispetto alla knowledge per evitare thrashing tra `dots.ocr` e Qwen.

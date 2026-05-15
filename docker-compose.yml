@@ -15,6 +15,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+    networks:
+      - megadoc-net
 
   redis:
     image: redis:7-alpine
@@ -29,6 +31,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+    networks:
+      - megadoc-net
 
   minio:
     image: minio/minio:latest
@@ -47,6 +51,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+    networks:
+      - megadoc-net
 
   mc-init:
     image: minio/mc:latest
@@ -61,6 +67,8 @@ services:
       - ./infra/init/create-buckets.sh:/create-buckets.sh:ro
     entrypoint: ["/bin/sh", "/create-buckets.sh"]
     restart: "no"
+    networks:
+      - megadoc-net
 
   migrate:
     build:
@@ -73,6 +81,8 @@ services:
         condition: service_healthy
     command: ["alembic", "upgrade", "head"]
     restart: "no"
+    networks:
+      - megadoc-net
 
   api:
     build:
@@ -110,6 +120,9 @@ services:
       interval: 15s
       timeout: 5s
       retries: 10
+    networks:
+      - megadoc-net
+      - ml-infra-net
 
   worker:
     build:
@@ -122,14 +135,13 @@ services:
     env_file:
       - .env
     environment:
-      CELERY_BROKER_URL: redis://127.0.0.1:6379/1
-      CELERY_RESULT_BACKEND: redis://127.0.0.1:6379/2
-      DATABASE_URL: postgresql+psycopg://megadoc:megadoc@127.0.0.1:5432/megadoc
-      S3_ENDPOINT_URL: http://127.0.0.1:9000
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      DATABASE_URL: postgresql+psycopg://megadoc:megadoc@postgres:5432/megadoc
+      S3_ENDPOINT_URL: http://minio:9000
       OCR_DOTS_NATIVE_ENDPOINT: ${OCR_WORKER_DOTS_NATIVE_ENDPOINT:-http://10.89.0.3:8080/v1}
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
-    network_mode: host
     depends_on:
       redis:
         condition: service_healthy
@@ -151,6 +163,9 @@ services:
         "-Q",
         "${INGESTION_QUEUE_DEFAULT:-ingestion}"
       ]
+    networks:
+      - megadoc-net
+      - ml-infra-net
 
   worker_llm_vision:
     build:
@@ -162,13 +177,12 @@ services:
     env_file:
       - .env
     environment:
-      CELERY_BROKER_URL: redis://127.0.0.1:6379/1
-      CELERY_RESULT_BACKEND: redis://127.0.0.1:6379/2
-      DATABASE_URL: postgresql+psycopg://megadoc:megadoc@127.0.0.1:5432/megadoc
-      S3_ENDPOINT_URL: http://127.0.0.1:9000
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      DATABASE_URL: postgresql+psycopg://megadoc:megadoc@postgres:5432/megadoc
+      S3_ENDPOINT_URL: http://minio:9000
       OCR_BACKEND: llm_vision
       OCR_LLM_VISION_MODEL: ${OCR_LLM_VISION_MODEL:-devstral2}
-    network_mode: host
     depends_on:
       redis:
         condition: service_healthy
@@ -191,6 +205,9 @@ services:
         "-Q",
         "${INGESTION_QUEUE_LLM_VISION:-ingestion_llm_vision}"
       ]
+    networks:
+      - megadoc-net
+      - ml-infra-net
 
   knowledge_worker:
     build:
@@ -200,9 +217,9 @@ services:
     env_file:
       - .env
     environment:
-      CELERY_BROKER_URL: redis://127.0.0.1:6379/1
-      CELERY_RESULT_BACKEND: redis://127.0.0.1:6379/2
-      DATABASE_URL: postgresql+psycopg://megadoc:megadoc@127.0.0.1:5432/megadoc
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      DATABASE_URL: postgresql+psycopg://megadoc:megadoc@postgres:5432/megadoc
       KN_LLM_ENDPOINT: ${KN_WORKER_LLM_ENDPOINT:-http://10.89.0.3:8080/v1}
       PYTHONPATH: /app/packages/common/src:/app/services/api/src:/app/services/worker/src:/app/services/cli/src:/app/services/knowledge_classifier/src:/app/services/knowledge_worker/src:/app/services/specialist_worker/src
     depends_on:
@@ -212,7 +229,6 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
-    network_mode: host
     command:
       [
         "celery",
@@ -224,6 +240,9 @@ services:
         "-Q",
         "knowledge"
       ]
+    networks:
+      - megadoc-net
+      - ml-infra-net
 
   specialist_utility_worker:
     build:
@@ -233,9 +252,9 @@ services:
     env_file:
       - .env
     environment:
-      CELERY_BROKER_URL: redis://127.0.0.1:6379/1
-      CELERY_RESULT_BACKEND: redis://127.0.0.1:6379/2
-      DATABASE_URL: postgresql+psycopg://megadoc:megadoc@127.0.0.1:5432/megadoc
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      DATABASE_URL: postgresql+psycopg://megadoc:megadoc@postgres:5432/megadoc
       PYTHONPATH: /app/packages/common/src:/app/services/api/src:/app/services/worker/src:/app/services/cli/src:/app/services/knowledge_classifier/src:/app/services/knowledge_worker/src:/app/services/specialist_worker/src
     depends_on:
       redis:
@@ -244,7 +263,6 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
-    network_mode: host
     command:
       [
         "celery",
@@ -256,6 +274,8 @@ services:
         "-Q",
         "${SPECIALIST_QUEUE_UTILITY:-specialist_utility}"
       ]
+    networks:
+      - megadoc-net
 
   specialist_accounting_worker:
     build:
@@ -265,9 +285,9 @@ services:
     env_file:
       - .env
     environment:
-      CELERY_BROKER_URL: redis://127.0.0.1:6379/1
-      CELERY_RESULT_BACKEND: redis://127.0.0.1:6379/2
-      DATABASE_URL: postgresql+psycopg://megadoc:megadoc@127.0.0.1:5432/megadoc
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      DATABASE_URL: postgresql+psycopg://megadoc:megadoc@postgres:5432/megadoc
       PYTHONPATH: /app/packages/common/src:/app/services/api/src:/app/services/worker/src:/app/services/cli/src:/app/services/knowledge_classifier/src:/app/services/knowledge_worker/src:/app/services/specialist_worker/src
     depends_on:
       redis:
@@ -276,7 +296,6 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
-    network_mode: host
     command:
       [
         "celery",
@@ -288,6 +307,8 @@ services:
         "-Q",
         "${SPECIALIST_QUEUE_ACCOUNTING:-specialist_accounting}"
       ]
+    networks:
+      - megadoc-net
 
   cli:
     build:
@@ -297,6 +318,8 @@ services:
     env_file:
       - .env
     entrypoint: ["python", "-m", "cli.main"]
+    networks:
+      - megadoc-net
 
   frontend:
     build:
@@ -308,8 +331,18 @@ services:
         condition: service_healthy
     ports:
       - "3000:3000"
+    networks:
+      - megadoc-net
 
 volumes:
   postgres-data:
   redis-data:
   minio-data:
+
+networks:
+  megadoc-net:
+    name: megadoc-net
+    internal: true
+  ml-infra-net:
+    name: ml-infra-net
+    external: true

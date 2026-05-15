@@ -38,7 +38,7 @@ Servizi principali in `docker-compose.yml`:
 - `minio`: object storage S3-compatible.
 - `migrate` e `mc-init`: bootstrap DB e bucket.
 
-Nota importante: alcuni worker usano `network_mode: host`. Per questo le variabili endpoint possono differire tra API container e worker.
+Nota importante: i worker usano sia `megadoc-net` sia `ml-infra-net`. Per questo le variabili endpoint possono differire tra API container e worker.
 
 ## LLM/OCR Backend
 
