@@ -254,6 +254,8 @@ class DocumentUnit(Base):
     scan_unit: Mapped["ScanUnit"] = relationship(back_populates="document_units")
     document_type: Mapped["DocumentType | None"] = relationship(back_populates="document_units")
     entities: Mapped[list["DocumentUnitEntity"]] = relationship(back_populates="document_unit", cascade="all, delete-orphan")
+    mentions: Mapped[list["DocumentUnitMention"]] = relationship(back_populates="document_unit", cascade="all, delete-orphan")
+    assertions: Mapped[list["KnowledgeAssertion"]] = relationship(back_populates="document_unit", cascade="all, delete-orphan")
     topic_assignments: Mapped[list["DocumentUnitTopicAssignment"]] = relationship(
         back_populates="document_unit", cascade="all, delete-orphan"
     )
@@ -337,6 +339,7 @@ class SpecialistResult(Base):
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     document_unit: Mapped["DocumentUnit"] = relationship(back_populates="specialist_results")
+    assertions: Mapped[list["KnowledgeAssertion"]] = relationship(back_populates="specialist_result")
 
 
 class DocumentUnitLink(Base):
@@ -402,6 +405,132 @@ class CanonicalEntityVariant(Base):
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     canonical_entity: Mapped["CanonicalEntity"] = relationship(back_populates="variants")
+
+
+class KnowledgeNode(Base):
+    __tablename__ = "knowledge_nodes"
+    __table_args__ = (
+        UniqueConstraint("node_kind", "canonical_key", name="uq_knowledge_nodes_kind_key"),
+        Index("ix_knowledge_nodes_kind_label", "node_kind", "label"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    node_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    canonical_key: Mapped[str] = mapped_column(String(512), nullable=False)
+    label: Mapped[str] = mapped_column(String(512), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    review_status: Mapped[str] = mapped_column(String(32), nullable=False, default="auto")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    aliases: Mapped[list["KnowledgeNodeAlias"]] = relationship(back_populates="node", cascade="all, delete-orphan")
+    mentions: Mapped[list["DocumentUnitMention"]] = relationship(back_populates="node", cascade="all, delete-orphan")
+    subject_assertions: Mapped[list["KnowledgeAssertion"]] = relationship(
+        foreign_keys="KnowledgeAssertion.subject_node_id",
+        back_populates="subject_node",
+    )
+    object_assertions: Mapped[list["KnowledgeAssertion"]] = relationship(
+        foreign_keys="KnowledgeAssertion.object_node_id",
+        back_populates="object_node",
+    )
+
+
+class KnowledgeNodeAlias(Base):
+    __tablename__ = "knowledge_node_aliases"
+    __table_args__ = (
+        UniqueConstraint("node_id", "normalized_alias", name="uq_knowledge_node_aliases_node_alias"),
+        Index("ix_knowledge_node_aliases_normalized", "normalized_alias"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    node_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("knowledge_nodes.id", ondelete="CASCADE"), nullable=False)
+    alias: Mapped[str] = mapped_column(String(512), nullable=False)
+    normalized_alias: Mapped[str] = mapped_column(String(512), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    node: Mapped["KnowledgeNode"] = relationship(back_populates="aliases")
+
+
+class KnowledgePredicate(Base):
+    __tablename__ = "knowledge_predicates"
+
+    code: Mapped[str] = mapped_column(String(64), primary_key=True)
+    label: Mapped[str] = mapped_column(String(255), nullable=False)
+    value_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_facetable: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    assertions: Mapped[list["KnowledgeAssertion"]] = relationship(back_populates="predicate")
+
+
+class DocumentUnitMention(Base):
+    __tablename__ = "document_unit_mentions"
+    __table_args__ = (
+        Index("ix_document_unit_mentions_unit", "document_unit_id"),
+        Index("ix_document_unit_mentions_node", "node_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    document_unit_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("document_units.id", ondelete="CASCADE"), nullable=False
+    )
+    node_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("knowledge_nodes.id", ondelete="CASCADE"), nullable=False)
+    mention_role: Mapped[str] = mapped_column(String(32), nullable=False, default="mentioned")
+    source_type: Mapped[str] = mapped_column(String(32), nullable=False, default="entity")
+    surface_text: Mapped[str] = mapped_column(String(512), nullable=False)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    page_from: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    page_to: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    evidence_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    document_unit: Mapped["DocumentUnit"] = relationship(back_populates="mentions")
+    node: Mapped["KnowledgeNode"] = relationship(back_populates="mentions")
+
+
+class KnowledgeAssertion(Base):
+    __tablename__ = "knowledge_assertions"
+    __table_args__ = (
+        Index("ix_knowledge_assertions_unit_predicate", "document_unit_id", "predicate_code"),
+        Index("ix_knowledge_assertions_subject_predicate", "subject_node_id", "predicate_code"),
+        Index("ix_knowledge_assertions_object_predicate", "object_node_id", "predicate_code"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    document_unit_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("document_units.id", ondelete="CASCADE"), nullable=False
+    )
+    predicate_code: Mapped[str] = mapped_column(
+        String(64), ForeignKey("knowledge_predicates.code", ondelete="RESTRICT"), nullable=False
+    )
+    subject_node_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("knowledge_nodes.id", ondelete="SET NULL"), nullable=True
+    )
+    object_node_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("knowledge_nodes.id", ondelete="SET NULL"), nullable=True
+    )
+    value_json: Mapped[dict | list | str | int | float | bool | None] = mapped_column(JSON, nullable=True)
+    value_text: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    review_status: Mapped[str] = mapped_column(String(32), nullable=False, default="auto")
+    source_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    specialist_result_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("specialist_results.id", ondelete="SET NULL"), nullable=True
+    )
+    evidence_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    document_unit: Mapped["DocumentUnit"] = relationship(back_populates="assertions")
+    predicate: Mapped["KnowledgePredicate"] = relationship(back_populates="assertions")
+    subject_node: Mapped["KnowledgeNode | None"] = relationship(
+        foreign_keys=[subject_node_id], back_populates="subject_assertions"
+    )
+    object_node: Mapped["KnowledgeNode | None"] = relationship(
+        foreign_keys=[object_node_id], back_populates="object_assertions"
+    )
+    specialist_result: Mapped["SpecialistResult | None"] = relationship(back_populates="assertions")
 
 
 class DocumentUnitTopicAssignment(Base):

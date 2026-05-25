@@ -9,6 +9,7 @@ from celery import shared_task
 from sqlalchemy import create_engine, delete, select
 from sqlalchemy.orm import Session, selectinload
 
+from common.application.graph import project_document_unit
 from common.application.specialists import extract_document_unit_text
 from common.db.models import DocumentUnit, DocumentUnitLink, ScanUnit, SpecialistJob, SpecialistResult
 from common.db.schema import ensure_knowledge_schema
@@ -97,6 +98,17 @@ def process_specialist_job(self, specialist_job_id: str):
                 existing_result.result_json = result_json
                 existing_result.updated_at = _utcnow()
 
+            session.flush()
+            projection_unit = session.execute(
+                select(DocumentUnit)
+                .where(DocumentUnit.id == document_unit.id)
+                .options(
+                    selectinload(DocumentUnit.document_type),
+                    selectinload(DocumentUnit.entities),
+                    selectinload(DocumentUnit.specialist_results),
+                )
+            ).scalar_one()
+            project_document_unit(session, projection_unit)
             session.commit()
             _update_specialist_job(engine, specialist_job_id, status="succeeded", finished_at=_utcnow(), error_message=None)
             return {"specialist_job_id": specialist_job_id, "status": "succeeded", "specialist_type": specialist_job.specialist_type}

@@ -346,6 +346,47 @@ class CanonicalEntityMergeRequest(BaseModel):
     create_canonical_entity: CanonicalEntityCreate | None = None
 
 
+class KnowledgeGraphStatsResponse(BaseModel):
+    document_units: int
+    nodes: int
+    mentions: int
+    assertions: int
+
+
+class KnowledgeNodeSummaryResponse(BaseModel):
+    id: str
+    node_kind: str
+    canonical_key: str
+    label: str
+    description: Optional[str] = None
+    review_status: str
+    alias_count: int
+    document_count: int
+    assertion_count: int
+
+
+class KnowledgeAssertionResponse(BaseModel):
+    id: str
+    document_unit_id: str
+    predicate_code: str
+    predicate_label: str
+    value_kind: str
+    object_node_id: Optional[str] = None
+    object_node_label: Optional[str] = None
+    value_json: Any = None
+    value_text: Optional[str] = None
+    confidence: Optional[float] = None
+    review_status: str
+    source_type: str
+
+
+class KnowledgeNodeDetailResponse(BaseModel):
+    node: KnowledgeNodeSummaryResponse
+    aliases: list[str] = Field(default_factory=list)
+    documents: list[KnowledgeEntityDocumentHitResponse] = Field(default_factory=list)
+    assertions: list[KnowledgeAssertionResponse] = Field(default_factory=list)
+
+
 class ConsolidationResponse(BaseModel):
     topics_before: int
     topics_after: int

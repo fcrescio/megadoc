@@ -10,6 +10,7 @@ from typing import Any
 from sqlalchemy import delete, insert, select
 from sqlalchemy.orm import Session, selectinload
 
+from common.application.graph import project_document_unit
 from common.db.models import (
     DocumentUnit as DBDocumentUnit,
     DocumentUnitEntity as DBDocumentUnitEntity,
@@ -202,6 +203,8 @@ class KnowledgePipelineService:
             for du in document_units
         )
         scan_unit.status = ScanUnitStatus.NEEDS_REVIEW.value if needs_review else ScanUnitStatus.ASSIGNED.value
+        for doc_unit in document_units:
+            project_document_unit(self.db, doc_unit)
         self.db.flush()
         return {
             "scan_unit_id": str(scan_unit.id),

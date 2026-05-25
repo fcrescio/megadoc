@@ -16,6 +16,7 @@ from common.application.knowledge import (
     has_active_ingestion_jobs,
     mark_knowledge_job_pending_dispatch,
 )
+from common.application.graph import graph_stats, rebuild_knowledge_graph
 from common.application.specialists import ensure_specialist_jobs_for_scan_unit
 from common.db.models import (
     CanonicalEntity,
@@ -35,6 +36,10 @@ from common.db.models import (
     SpecialistJob,
     SpecialistResult,
     DocumentUnitLink,
+    DocumentUnitMention,
+    KnowledgeAssertion,
+    KnowledgeNode,
+    KnowledgeNodeAlias,
 )
 from common.db.session import SessionLocal, get_db_session
 from knowledge_classifier.schemas import (
@@ -56,6 +61,10 @@ from knowledge_classifier.schemas import (
     CanonicalEntityVariantResponse,
     CanonicalEntityDetailResponse,
     CanonicalEntityMergeRequest,
+    KnowledgeAssertionResponse,
+    KnowledgeGraphStatsResponse,
+    KnowledgeNodeDetailResponse,
+    KnowledgeNodeSummaryResponse,
     TopicCreate,
     TopicProposalResponse,
     DocumentTypeResponse,
@@ -476,6 +485,51 @@ def _serialize_canonical_entity_summary(entity: CanonicalEntity, document_count:
         review_status=entity.review_status,
         variant_count=len(entity.variants),
         document_count=document_count,
+    )
+
+
+def _node_document_units(node: KnowledgeNode) -> list[DocumentUnit]:
+    units_by_id: dict[str, DocumentUnit] = {}
+    for mention in node.mentions:
+        units_by_id[str(mention.document_unit_id)] = mention.document_unit
+    for assertion in node.object_assertions:
+        units_by_id[str(assertion.document_unit_id)] = assertion.document_unit
+    return [unit for unit in units_by_id.values() if unit is not None]
+
+
+def _serialize_knowledge_node_summary(node: KnowledgeNode) -> KnowledgeNodeSummaryResponse:
+    document_ids = {
+        str(unit.scan_unit.source_document_id)
+        for unit in _node_document_units(node)
+        if unit.scan_unit is not None
+    }
+    return KnowledgeNodeSummaryResponse(
+        id=str(node.id),
+        node_kind=node.node_kind,
+        canonical_key=node.canonical_key,
+        label=node.label,
+        description=node.description,
+        review_status=node.review_status,
+        alias_count=len(node.aliases),
+        document_count=len(document_ids),
+        assertion_count=len(node.object_assertions) + len(node.subject_assertions),
+    )
+
+
+def _serialize_knowledge_assertion(assertion: KnowledgeAssertion) -> KnowledgeAssertionResponse:
+    return KnowledgeAssertionResponse(
+        id=str(assertion.id),
+        document_unit_id=str(assertion.document_unit_id),
+        predicate_code=assertion.predicate_code,
+        predicate_label=assertion.predicate.label if assertion.predicate else assertion.predicate_code,
+        value_kind=assertion.predicate.value_kind if assertion.predicate else "unknown",
+        object_node_id=str(assertion.object_node_id) if assertion.object_node_id else None,
+        object_node_label=assertion.object_node.label if assertion.object_node else None,
+        value_json=assertion.value_json,
+        value_text=assertion.value_text,
+        confidence=assertion.confidence,
+        review_status=assertion.review_status,
+        source_type=assertion.source_type,
     )
 
 
@@ -1558,6 +1612,148 @@ def merge_canonical_entities(
             if doc_unit.scan_unit is not None and doc_unit.scan_unit.document is not None
         ],
     )
+
+
+def _knowledge_node_options():
+    return (
+        selectinload(KnowledgeNode.aliases),
+        selectinload(KnowledgeNode.mentions)
+        .selectinload(DocumentUnitMention.document_unit)
+        .selectinload(DocumentUnit.scan_unit)
+        .selectinload(ScanUnit.document),
+        selectinload(KnowledgeNode.mentions)
+        .selectinload(DocumentUnitMention.document_unit)
+        .selectinload(DocumentUnit.document_type),
+        selectinload(KnowledgeNode.object_assertions).selectinload(KnowledgeAssertion.predicate),
+        selectinload(KnowledgeNode.object_assertions).selectinload(KnowledgeAssertion.object_node),
+        selectinload(KnowledgeNode.object_assertions)
+        .selectinload(KnowledgeAssertion.document_unit)
+        .selectinload(DocumentUnit.scan_unit)
+        .selectinload(ScanUnit.document),
+        selectinload(KnowledgeNode.object_assertions)
+        .selectinload(KnowledgeAssertion.document_unit)
+        .selectinload(DocumentUnit.document_type),
+        selectinload(KnowledgeNode.subject_assertions),
+    )
+
+
+@router.get("/graph/stats", response_model=KnowledgeGraphStatsResponse)
+def get_knowledge_graph_stats(db: Session = Depends(get_db_session)):
+    stats = graph_stats(db)
+    return KnowledgeGraphStatsResponse(**stats.__dict__)
+
+
+@router.post("/graph/rebuild", response_model=KnowledgeGraphStatsResponse)
+def rebuild_graph_projection(db: Session = Depends(get_db_session)):
+    stats = rebuild_knowledge_graph(db)
+    db.commit()
+    return KnowledgeGraphStatsResponse(**stats.__dict__)
+
+
+@router.get("/nodes", response_model=list[KnowledgeNodeSummaryResponse])
+def list_knowledge_nodes(
+    q: str | None = None,
+    node_kind: str | None = None,
+    limit: int = Query(default=30, ge=1, le=200),
+    db: Session = Depends(get_db_session),
+):
+    query = (
+        select(KnowledgeNode)
+        .outerjoin(KnowledgeNodeAlias, KnowledgeNodeAlias.node_id == KnowledgeNode.id)
+        .options(*_knowledge_node_options())
+        .distinct()
+        .order_by(KnowledgeNode.label.asc())
+    )
+    if node_kind:
+        query = query.where(KnowledgeNode.node_kind == node_kind)
+    if q and q.strip():
+        pattern = f"%{q.strip()}%"
+        query = query.where(
+            or_(
+                KnowledgeNode.label.ilike(pattern),
+                KnowledgeNode.canonical_key.ilike(pattern),
+                KnowledgeNodeAlias.alias.ilike(pattern),
+            )
+        )
+    nodes = db.execute(query.limit(limit)).scalars().unique().all()
+    return [_serialize_knowledge_node_summary(node) for node in nodes]
+
+
+@router.get("/nodes/{node_id}", response_model=KnowledgeNodeDetailResponse)
+def get_knowledge_node(node_id: uuid.UUID, db: Session = Depends(get_db_session)):
+    node = db.execute(
+        select(KnowledgeNode)
+        .options(*_knowledge_node_options())
+        .where(KnowledgeNode.id == node_id)
+    ).scalar_one_or_none()
+    if node is None:
+        raise HTTPException(status_code=404, detail="Knowledge node not found")
+
+    documents = []
+    for document_unit in _node_document_units(node):
+        if document_unit.scan_unit is None or document_unit.scan_unit.document is None:
+            continue
+        document = document_unit.scan_unit.document
+        documents.append(
+            KnowledgeEntityDocumentHitResponse(
+                document_id=str(document.id),
+                document_unit_id=str(document_unit.id),
+                original_filename=document.original_filename,
+                external_id=document.external_id,
+                title=document_unit.title,
+                summary=document_unit.extracted_summary,
+                review_status=document_unit.review_status,
+                start_page=document_unit.start_page,
+                end_page=document_unit.end_page,
+                topic_titles=[],
+            )
+        )
+    assertions = sorted(node.object_assertions, key=lambda item: item.created_at, reverse=True)
+    return KnowledgeNodeDetailResponse(
+        node=_serialize_knowledge_node_summary(node),
+        aliases=sorted({alias.alias for alias in node.aliases}),
+        documents=documents,
+        assertions=[_serialize_knowledge_assertion(assertion) for assertion in assertions],
+    )
+
+
+@router.get("/assertions", response_model=list[KnowledgeAssertionResponse])
+def list_knowledge_assertions(
+    q: str | None = None,
+    predicate: str | None = None,
+    node_id: uuid.UUID | None = None,
+    limit: int = Query(default=60, ge=1, le=300),
+    db: Session = Depends(get_db_session),
+):
+    query = (
+        select(KnowledgeAssertion)
+        .outerjoin(KnowledgeNode, KnowledgeNode.id == KnowledgeAssertion.object_node_id)
+        .options(
+            selectinload(KnowledgeAssertion.predicate),
+            selectinload(KnowledgeAssertion.object_node),
+        )
+        .order_by(KnowledgeAssertion.created_at.desc())
+    )
+    if predicate:
+        query = query.where(KnowledgeAssertion.predicate_code == predicate)
+    if node_id:
+        query = query.where(
+            or_(
+                KnowledgeAssertion.subject_node_id == node_id,
+                KnowledgeAssertion.object_node_id == node_id,
+            )
+        )
+    if q and q.strip():
+        pattern = f"%{q.strip()}%"
+        query = query.where(
+            or_(
+                KnowledgeAssertion.value_text.ilike(pattern),
+                KnowledgeAssertion.predicate_code.ilike(pattern),
+                KnowledgeNode.label.ilike(pattern),
+            )
+        )
+    assertions = db.execute(query.limit(limit)).scalars().unique().all()
+    return [_serialize_knowledge_assertion(assertion) for assertion in assertions]
 
 
 @router.post("/topics", response_model=TopicResponse, status_code=status.HTTP_201_CREATED)

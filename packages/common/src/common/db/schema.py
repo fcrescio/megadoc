@@ -120,6 +120,83 @@ def ensure_knowledge_schema(engine) -> None:
         )""",
         "CREATE INDEX IF NOT EXISTS ix_document_unit_links_source_type ON document_unit_links(source_document_unit_id, link_type)",
         "CREATE INDEX IF NOT EXISTS ix_document_unit_links_target_type ON document_unit_links(target_document_unit_id, link_type)",
+        """CREATE TABLE IF NOT EXISTS knowledge_nodes (
+            id UUID PRIMARY KEY,
+            node_kind VARCHAR(32) NOT NULL,
+            canonical_key VARCHAR(512) NOT NULL,
+            label VARCHAR(512) NOT NULL,
+            description TEXT NULL,
+            review_status VARCHAR(32) NOT NULL DEFAULT 'auto',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NULL,
+            CONSTRAINT uq_knowledge_nodes_kind_key UNIQUE (node_kind, canonical_key)
+        )""",
+        "CREATE INDEX IF NOT EXISTS ix_knowledge_nodes_kind_label ON knowledge_nodes(node_kind, label)",
+        """CREATE TABLE IF NOT EXISTS knowledge_node_aliases (
+            id UUID PRIMARY KEY,
+            node_id UUID NOT NULL REFERENCES knowledge_nodes(id) ON DELETE CASCADE,
+            alias VARCHAR(512) NOT NULL,
+            normalized_alias VARCHAR(512) NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            CONSTRAINT uq_knowledge_node_aliases_node_alias UNIQUE (node_id, normalized_alias)
+        )""",
+        "CREATE INDEX IF NOT EXISTS ix_knowledge_node_aliases_normalized ON knowledge_node_aliases(normalized_alias)",
+        """CREATE TABLE IF NOT EXISTS knowledge_predicates (
+            code VARCHAR(64) PRIMARY KEY,
+            label VARCHAR(255) NOT NULL,
+            value_kind VARCHAR(32) NOT NULL,
+            description TEXT NULL,
+            is_facetable BOOLEAN NOT NULL DEFAULT true,
+            is_active BOOLEAN NOT NULL DEFAULT true,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )""",
+        """CREATE TABLE IF NOT EXISTS document_unit_mentions (
+            id UUID PRIMARY KEY,
+            document_unit_id UUID NOT NULL REFERENCES document_units(id) ON DELETE CASCADE,
+            node_id UUID NOT NULL REFERENCES knowledge_nodes(id) ON DELETE CASCADE,
+            mention_role VARCHAR(32) NOT NULL DEFAULT 'mentioned',
+            source_type VARCHAR(32) NOT NULL DEFAULT 'entity',
+            surface_text VARCHAR(512) NOT NULL,
+            confidence DOUBLE PRECISION NULL,
+            page_from INTEGER NULL,
+            page_to INTEGER NULL,
+            evidence_json JSON NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )""",
+        "CREATE INDEX IF NOT EXISTS ix_document_unit_mentions_unit ON document_unit_mentions(document_unit_id)",
+        "CREATE INDEX IF NOT EXISTS ix_document_unit_mentions_node ON document_unit_mentions(node_id)",
+        """CREATE TABLE IF NOT EXISTS knowledge_assertions (
+            id UUID PRIMARY KEY,
+            document_unit_id UUID NOT NULL REFERENCES document_units(id) ON DELETE CASCADE,
+            predicate_code VARCHAR(64) NOT NULL REFERENCES knowledge_predicates(code) ON DELETE RESTRICT,
+            subject_node_id UUID NULL REFERENCES knowledge_nodes(id) ON DELETE SET NULL,
+            object_node_id UUID NULL REFERENCES knowledge_nodes(id) ON DELETE SET NULL,
+            value_json JSON NULL,
+            value_text VARCHAR(1024) NULL,
+            confidence DOUBLE PRECISION NULL,
+            review_status VARCHAR(32) NOT NULL DEFAULT 'auto',
+            source_type VARCHAR(32) NOT NULL,
+            specialist_result_id UUID NULL REFERENCES specialist_results(id) ON DELETE SET NULL,
+            evidence_json JSON NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )""",
+        "CREATE INDEX IF NOT EXISTS ix_knowledge_assertions_unit_predicate ON knowledge_assertions(document_unit_id, predicate_code)",
+        "CREATE INDEX IF NOT EXISTS ix_knowledge_assertions_subject_predicate ON knowledge_assertions(subject_node_id, predicate_code)",
+        "CREATE INDEX IF NOT EXISTS ix_knowledge_assertions_object_predicate ON knowledge_assertions(object_node_id, predicate_code)",
+        """DO $$
+        BEGIN
+            IF to_regclass('public.specialist_results') IS NOT NULL
+               AND NOT EXISTS (
+                   SELECT 1 FROM pg_constraint
+                   WHERE conrelid = 'knowledge_assertions'::regclass
+                     AND confrelid = 'specialist_results'::regclass
+               )
+            THEN
+                ALTER TABLE knowledge_assertions
+                ADD CONSTRAINT fk_knowledge_assertions_specialist_result
+                FOREIGN KEY (specialist_result_id) REFERENCES specialist_results(id) ON DELETE SET NULL;
+            END IF;
+        END $$""",
     ]
     with engine.begin() as conn:
         for statement in statements:
