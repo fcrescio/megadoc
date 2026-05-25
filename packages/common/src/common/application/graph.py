@@ -9,6 +9,8 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session, selectinload
 
 from common.db.models import (
+    CanonicalEntity,
+    CanonicalEntityVariant,
     DocumentUnit,
     DocumentUnitEntity,
     DocumentUnitMention,
@@ -110,17 +112,25 @@ def project_document_unit(
         )
         session.flush()
 
+    latest_results: dict[str, SpecialistResult] = {}
+    for result in sorted(document_unit.specialist_results, key=lambda item: item.created_at, reverse=True):
+        latest_results.setdefault(result.specialist_type, result)
+
     mentioned_nodes: dict[str, list[KnowledgeNode]] = {}
     for entity in document_unit.entities:
         node_kind = ENTITY_KIND_MAP.get(entity.entity_type)
         if node_kind is None:
             continue
+        if node_kind == "person" and "accounting_statement" in latest_results:
+            continue
+        label, canonical_key = _entity_node_identity(session, entity)
         node = _get_or_create_node(
             session,
             node_kind=node_kind,
-            label=entity.entity_value,
-            canonical_key=entity.normalized_value,
+            label=label,
+            canonical_key=canonical_key,
         )
+        _ensure_alias(session, node, entity.entity_value)
         mentioned_nodes.setdefault(node_kind, []).append(node)
         session.add(
             DocumentUnitMention(
@@ -157,10 +167,6 @@ def project_document_unit(
             source_type="entity",
             confidence=source_confidence,
         )
-
-    latest_results: dict[str, SpecialistResult] = {}
-    for result in sorted(document_unit.specialist_results, key=lambda item: item.created_at, reverse=True):
-        latest_results.setdefault(result.specialist_type, result)
 
     utility_result = latest_results.get("utility_bill")
     if utility_result is not None:
@@ -305,6 +311,21 @@ def _get_or_create_node(
     return node
 
 
+def _entity_node_identity(session: Session, entity: DocumentUnitEntity) -> tuple[str, str]:
+    entity_key = (entity.normalized_value or entity.entity_value).strip().lower()
+    canonical = session.execute(
+        select(CanonicalEntity)
+        .join(CanonicalEntityVariant, CanonicalEntityVariant.canonical_entity_id == CanonicalEntity.id)
+        .where(
+            CanonicalEntityVariant.entity_type == entity.entity_type,
+            CanonicalEntityVariant.entity_key == entity_key,
+        )
+    ).scalar_one_or_none()
+    if canonical is not None:
+        return canonical.display_value, canonical.canonical_value
+    return entity.entity_value, entity.entity_value
+
+
 def _ensure_alias(session: Session, node: KnowledgeNode, alias: str) -> None:
     normalized_alias = _normalize_key(alias)
     if any(item.normalized_alias == normalized_alias for item in node.aliases):
@@ -327,7 +348,7 @@ def _ensure_alias(session: Session, node: KnowledgeNode, alias: str) -> None:
 def _select_about_node(mentioned_nodes: dict[str, list[KnowledgeNode]]) -> KnowledgeNode | None:
     organizations = mentioned_nodes.get("organization", [])
     for node in organizations:
-        if "condominio" in node.label.lower():
+        if "condominio" in node.label.lower() and node.canonical_key != "condominio":
             return node
     for kind in ("address", "organization", "place"):
         nodes = mentioned_nodes.get(kind, [])

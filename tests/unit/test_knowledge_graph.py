@@ -3,6 +3,8 @@ import uuid
 from api.routers.knowledge import get_knowledge_node, list_knowledge_nodes, rebuild_graph_projection
 from common.application.graph import graph_stats, project_document_unit, rebuild_knowledge_graph
 from common.db.models import (
+    CanonicalEntity,
+    CanonicalEntityVariant,
     Document,
     DocumentType,
     DocumentUnit,
@@ -128,3 +130,77 @@ def test_graph_api_rebuild_and_browse_node(db_session):
     detail = get_knowledge_node(node_id, db=db_session)
     assert detail.node.label == "Condominio Via Roma"
     assert detail.documents[0].original_filename == "bolletta-acqua.pdf"
+
+
+def test_projection_uses_display_text_instead_of_inconsistent_extracted_keys(db_session):
+    unit = _make_utility_unit(db_session)
+    unit.entities.append(
+        DocumentUnitEntity(
+            entity_type="organizzazione",
+            entity_value="Condominio Via Roma",
+            normalized_value="condominio_via__roma_v2",
+            confidence=0.8,
+            page_from=1,
+            page_to=1,
+        )
+    )
+
+    project_document_unit(db_session, unit)
+
+    condominium_nodes = db_session.query(KnowledgeNode).filter_by(node_kind="organization").all()
+    assert [node.label for node in condominium_nodes if node.label == "Condominio Via Roma"] == [
+        "Condominio Via Roma"
+    ]
+
+
+def test_projection_respects_reviewed_canonical_entity_variants(db_session):
+    unit = _make_utility_unit(db_session)
+    canonical = CanonicalEntity(
+        entity_type="organizzazione",
+        canonical_value="condominio_studiati",
+        display_value="Condominio Studiati",
+        review_status="human_reviewed",
+    )
+    canonical.variants.append(
+        CanonicalEntityVariant(
+            entity_type="organizzazione",
+            entity_key="condominio_via_roma",
+            display_value="Condominio Via Roma",
+            review_status="human_reviewed",
+        )
+    )
+    db_session.add(canonical)
+    db_session.flush()
+
+    project_document_unit(db_session, unit)
+
+    node = db_session.query(KnowledgeNode).filter_by(canonical_key="condominio_studiati").one()
+    assert node.label == "Condominio Studiati"
+    assert {alias.alias for alias in node.aliases} >= {"Condominio Studiati", "Condominio Via Roma"}
+
+
+def test_accounting_projection_does_not_promote_allocation_people_to_nodes(db_session):
+    unit = _make_utility_unit(db_session)
+    unit.entities.append(
+        DocumentUnitEntity(
+            entity_type="persona",
+            entity_value="Rossi Mario / Bianchi Lucia",
+            normalized_value="rossi_mario_bianchi_lucia",
+            confidence=0.7,
+            page_from=1,
+            page_to=1,
+        )
+    )
+    unit.specialist_results.append(
+        SpecialistResult(
+            specialist_type="accounting_statement",
+            schema_version="accounting_v1",
+            confidence=0.91,
+            review_status="auto_accepted",
+            result_json={"statement_type": "riparto"},
+        )
+    )
+
+    project_document_unit(db_session, unit)
+
+    assert db_session.query(KnowledgeNode).filter_by(node_kind="person").count() == 0

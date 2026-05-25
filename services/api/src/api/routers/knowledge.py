@@ -1562,6 +1562,9 @@ def merge_canonical_entities(
     canonical_entity.updated_at = _utcnow()
     db.commit()
 
+    rebuild_knowledge_graph(db)
+    db.commit()
+
     db.refresh(canonical_entity)
     document_units = db.execute(
         select(DocumentUnit)
