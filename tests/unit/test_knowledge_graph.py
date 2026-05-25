@@ -232,5 +232,4 @@ def test_projection_excludes_malformed_table_content_from_navigation(db_session)
     assertions = db_session.query(KnowledgeAssertion).all()
     assert graph_stats(db_session).mentions == 2
     assert not any("<table" in node.label for node in db_session.query(KnowledgeNode).all())
-    assert not any(assertion.predicate_code == "issued_by" for assertion in assertions)
-    assert not any(assertion.predicate_code == "service_type" for assertion in assertions)
+    assert not any(assertion.source_type == "utility_bill" for assertion in assertions)

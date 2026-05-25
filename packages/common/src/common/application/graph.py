@@ -203,9 +203,13 @@ def _project_utility_bill(
 ) -> None:
     payload = result.result_json or {}
     confidence = result.confidence
-    _add_value_assertion(session, document_unit, "document_type", "utility_bill", result, confidence)
+    raw_issuer = payload.get("issuer")
+    issuer = _navigable_label(raw_issuer)
+    issuer_supplied = raw_issuer is not None and str(raw_issuer).strip().lower() not in {"", "unknown"}
+    if issuer_supplied and issuer is None:
+        return
 
-    issuer = _navigable_label(payload.get("issuer"))
+    _add_value_assertion(session, document_unit, "document_type", "utility_bill", result, confidence)
     if issuer is not None:
         issuer_node = _get_or_create_node(session, node_kind="organization", label=issuer)
         _add_node_assertion(session, document_unit, "issued_by", issuer_node, result, confidence)
