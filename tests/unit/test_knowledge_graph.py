@@ -177,6 +177,7 @@ def test_projection_respects_reviewed_canonical_entity_variants(db_session):
 
     node = db_session.query(KnowledgeNode).filter_by(canonical_key="condominio_studiati").one()
     assert node.label == "Condominio Studiati"
+    assert node.review_status == "human_reviewed"
     assert {alias.alias for alias in node.aliases} >= {"Condominio Studiati", "Condominio Via Roma"}
 
 
