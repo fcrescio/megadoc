@@ -17,6 +17,10 @@ import type {
   CanonicalEntitySummary,
   CanonicalEntityDetail,
   CanonicalEntityMergePayload,
+  KnowledgeGraphStats,
+  KnowledgeNodeSummary,
+  KnowledgeNodeDetail,
+  KnowledgeAssertion,
   ManualDocument,
   ManualComment,
   ManualCommentCreatePayload,
@@ -48,6 +52,10 @@ import {
   getKnowledgeEntityDetail,
   getCanonicalEntities,
   mergeCanonicalEntity,
+  getKnowledgeGraphStats,
+  getKnowledgeNodes,
+  getKnowledgeNode,
+  getKnowledgeAssertions,
   getManual,
   createManualComment,
   updateManualComment,
@@ -234,7 +242,40 @@ export function useMergeCanonicalEntity() {
       queryClient.invalidateQueries({ queryKey: ['knowledge-entity-detail'] });
       queryClient.invalidateQueries({ queryKey: ['canonical-entities'] });
       queryClient.invalidateQueries({ queryKey: ['knowledge-search'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-graph'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-nodes'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-node'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-assertions'] });
     },
+  });
+}
+
+export function useKnowledgeGraphStats() {
+  return useQuery<KnowledgeGraphStats>({
+    queryKey: ['knowledge-graph'],
+    queryFn: () => getKnowledgeGraphStats(),
+  });
+}
+
+export function useKnowledgeNodes(options?: { query?: string; nodeKind?: string; limit?: number }) {
+  return useQuery<KnowledgeNodeSummary[]>({
+    queryKey: ['knowledge-nodes', options?.query, options?.nodeKind, options?.limit],
+    queryFn: () => getKnowledgeNodes(options),
+  });
+}
+
+export function useKnowledgeNode(nodeId: string | null) {
+  return useQuery<KnowledgeNodeDetail | null>({
+    queryKey: ['knowledge-node', nodeId],
+    queryFn: () => getKnowledgeNode(nodeId!),
+    enabled: !!nodeId,
+  });
+}
+
+export function useKnowledgeAssertions(options?: { query?: string; predicate?: string; nodeId?: string; limit?: number }) {
+  return useQuery<KnowledgeAssertion[]>({
+    queryKey: ['knowledge-assertions', options?.query, options?.predicate, options?.nodeId, options?.limit],
+    queryFn: () => getKnowledgeAssertions(options),
   });
 }
 

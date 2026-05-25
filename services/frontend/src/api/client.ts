@@ -17,6 +17,10 @@ import type {
   CanonicalEntitySummary,
   CanonicalEntityDetail,
   CanonicalEntityMergePayload,
+  KnowledgeGraphStats,
+  KnowledgeNodeSummary,
+  KnowledgeNodeDetail,
+  KnowledgeAssertion,
   ManualDocument,
   ManualComment,
   ManualCommentCreatePayload,
@@ -218,6 +222,39 @@ export async function mergeCanonicalEntity(payload: CanonicalEntityMergePayload)
     body: JSON.stringify(payload),
   });
   return handleResponse<CanonicalEntityDetail>(response);
+}
+
+export async function getKnowledgeGraphStats(): Promise<KnowledgeGraphStats> {
+  const response = await fetch(`${API_BASE}/knowledge/graph/stats`);
+  return handleResponse<KnowledgeGraphStats>(response);
+}
+
+export async function getKnowledgeNodes(
+  options?: { query?: string; nodeKind?: string; limit?: number },
+): Promise<KnowledgeNodeSummary[]> {
+  const params = new URLSearchParams();
+  if (options?.query) params.set('q', options.query);
+  if (options?.nodeKind && options.nodeKind !== 'all') params.set('node_kind', options.nodeKind);
+  if (options?.limit) params.set('limit', String(options.limit));
+  const response = await fetch(`${API_BASE}/knowledge/nodes?${params.toString()}`);
+  return handleResponse<KnowledgeNodeSummary[]>(response);
+}
+
+export async function getKnowledgeNode(nodeId: string): Promise<KnowledgeNodeDetail> {
+  const response = await fetch(`${API_BASE}/knowledge/nodes/${nodeId}`);
+  return handleResponse<KnowledgeNodeDetail>(response);
+}
+
+export async function getKnowledgeAssertions(
+  options?: { query?: string; predicate?: string; nodeId?: string; limit?: number },
+): Promise<KnowledgeAssertion[]> {
+  const params = new URLSearchParams();
+  if (options?.query) params.set('q', options.query);
+  if (options?.predicate && options.predicate !== 'all') params.set('predicate', options.predicate);
+  if (options?.nodeId) params.set('node_id', options.nodeId);
+  if (options?.limit) params.set('limit', String(options.limit));
+  const response = await fetch(`${API_BASE}/knowledge/assertions?${params.toString()}`);
+  return handleResponse<KnowledgeAssertion[]>(response);
 }
 
 export async function getManual(slug: string): Promise<ManualDocument> {

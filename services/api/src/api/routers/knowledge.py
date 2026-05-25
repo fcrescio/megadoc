@@ -1711,7 +1711,16 @@ def get_knowledge_node(node_id: uuid.UUID, db: Session = Depends(get_db_session)
                 topic_titles=[],
             )
         )
-    assertions = sorted(node.object_assertions, key=lambda item: item.created_at, reverse=True)
+    linked_unit_ids = [unit.id for unit in _node_document_units(node)]
+    assertions = db.execute(
+        select(KnowledgeAssertion)
+        .options(
+            selectinload(KnowledgeAssertion.predicate),
+            selectinload(KnowledgeAssertion.object_node),
+        )
+        .where(KnowledgeAssertion.document_unit_id.in_(linked_unit_ids))
+        .order_by(KnowledgeAssertion.created_at.desc())
+    ).scalars().unique().all()
     return KnowledgeNodeDetailResponse(
         node=_serialize_knowledge_node_summary(node),
         aliases=sorted({alias.alias for alias in node.aliases}),
@@ -1740,12 +1749,17 @@ def list_knowledge_assertions(
     if predicate:
         query = query.where(KnowledgeAssertion.predicate_code == predicate)
     if node_id:
-        query = query.where(
-            or_(
-                KnowledgeAssertion.subject_node_id == node_id,
-                KnowledgeAssertion.object_node_id == node_id,
+        linked_unit_ids = select(DocumentUnitMention.document_unit_id).where(
+            DocumentUnitMention.node_id == node_id
+        ).union(
+            select(KnowledgeAssertion.document_unit_id).where(
+                or_(
+                    KnowledgeAssertion.subject_node_id == node_id,
+                    KnowledgeAssertion.object_node_id == node_id,
+                )
             )
         )
+        query = query.where(KnowledgeAssertion.document_unit_id.in_(linked_unit_ids))
     if q and q.strip():
         pattern = f"%{q.strip()}%"
         query = query.where(

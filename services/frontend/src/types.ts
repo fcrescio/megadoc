@@ -394,6 +394,47 @@ export interface CanonicalEntityMergePayload {
   create_canonical_entity?: CanonicalEntityCreatePayload;
 }
 
+export interface KnowledgeGraphStats {
+  document_units: number;
+  nodes: number;
+  mentions: number;
+  assertions: number;
+}
+
+export interface KnowledgeNodeSummary {
+  id: string;
+  node_kind: string;
+  canonical_key: string;
+  label: string;
+  description: string | null;
+  review_status: string;
+  alias_count: number;
+  document_count: number;
+  assertion_count: number;
+}
+
+export interface KnowledgeAssertion {
+  id: string;
+  document_unit_id: string;
+  predicate_code: string;
+  predicate_label: string;
+  value_kind: string;
+  object_node_id: string | null;
+  object_node_label: string | null;
+  value_json: unknown;
+  value_text: string | null;
+  confidence: number | null;
+  review_status: string;
+  source_type: string;
+}
+
+export interface KnowledgeNodeDetail {
+  node: KnowledgeNodeSummary;
+  aliases: string[];
+  documents: KnowledgeEntityDocumentHit[];
+  assertions: KnowledgeAssertion[];
+}
+
 export interface ManualComment {
   id: string;
   manual_slug: string;

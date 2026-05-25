@@ -2,8 +2,12 @@ import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import {
   useCanonicalEntities,
   useGraphConsolidationSuggestions,
+  useKnowledgeAssertions,
   useKnowledgeEntities,
   useKnowledgeEntityDetail,
+  useKnowledgeGraphStats,
+  useKnowledgeNode,
+  useKnowledgeNodes,
   useMergeCanonicalEntity,
   useKnowledgeSearch,
   useKnowledgeTopic,
@@ -14,6 +18,7 @@ import {
   useRunKnowledgeConsolidation,
   useTopicProposals,
 } from '../hooks/useDocuments';
+import type { KnowledgeAssertion } from '../types';
 import ProposalList from './ProposalList';
 
 interface Props {
@@ -30,6 +35,10 @@ function formatDate(value: string | null | undefined) {
 function formatCurrency(value: number | null | undefined) {
   if (typeof value !== 'number') return 'n/d';
   return new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(value);
+}
+
+function formatAssertionValue(assertion: KnowledgeAssertion) {
+  return assertion.object_node_label ?? assertion.value_text ?? 'n/d';
 }
 
 function KnowledgeBase({ onOpenDocument }: Props) {
@@ -49,6 +58,8 @@ function KnowledgeBase({ onOpenDocument }: Props) {
   const [utilityOverdueOnly, setUtilityOverdueOnly] = useState(false);
   const [accountingTypeFilter, setAccountingTypeFilter] = useState('all');
   const [accountingCheckFilter, setAccountingCheckFilter] = useState('all');
+  const [nodeKindFilter, setNodeKindFilter] = useState('all');
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const deferredSearch = useDeferredValue(searchInput.trim());
 
   const { data: topics, isLoading, error } = useKnowledgeTopics(includeInactive);
@@ -67,6 +78,18 @@ function KnowledgeBase({ onOpenDocument }: Props) {
     selectedEntityType,
     selectedEntityKey,
   );
+  const graphStats = useKnowledgeGraphStats();
+  const { data: graphNodes = [], isLoading: graphNodesLoading } = useKnowledgeNodes({
+    query: deferredSearch || undefined,
+    nodeKind: nodeKindFilter,
+    limit: 16,
+  });
+  const { data: nodeDetail, isLoading: nodeDetailLoading } = useKnowledgeNode(selectedNodeId);
+  const { data: assertions = [], isLoading: assertionsLoading } = useKnowledgeAssertions({
+    query: deferredSearch || undefined,
+    nodeId: selectedNodeId || undefined,
+    limit: 24,
+  });
   const mergeCanonicalEntity = useMergeCanonicalEntity();
   const { data: proposals } = useTopicProposals();
   const search = useKnowledgeSearch(deferredSearch, {
@@ -173,6 +196,16 @@ function KnowledgeBase({ onOpenDocument }: Props) {
     }
   }, [entityDetail]);
 
+  useEffect(() => {
+    if (!graphNodes.length) {
+      setSelectedNodeId(null);
+      return;
+    }
+    if (!selectedNodeId || !graphNodes.some((node) => node.id === selectedNodeId)) {
+      setSelectedNodeId(graphNodes[0].id);
+    }
+  }, [graphNodes, selectedNodeId]);
+
   if (isLoading) {
     return (
       <div className="animate-pulse space-y-4">
@@ -228,6 +261,7 @@ function KnowledgeBase({ onOpenDocument }: Props) {
                 <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1">topics</span>
                 <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1">document units</span>
                 <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1">entities</span>
+                <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1">typed facts</span>
                 <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1">aliases</span>
                 <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1">summaries</span>
                 {search.isFetching && searchActive && (
@@ -477,6 +511,148 @@ function KnowledgeBase({ onOpenDocument }: Props) {
           </div>
         </section>
       </div>
+
+      <section className="rounded-[28px] border border-indigo-300/15 bg-[linear-gradient(135deg,rgba(49,46,129,0.22),rgba(15,23,42,0.9))] p-6 shadow-[0_24px_80px_rgba(30,27,75,0.28)]">
+        <div className="flex flex-wrap items-start justify-between gap-5">
+          <div>
+            <p className="text-xs uppercase tracking-[0.35em] text-indigo-200/70">Typed Fact Graph</p>
+            <h3 className="mt-2 text-2xl font-semibold text-white">Soggetti e fatti navigabili</h3>
+            <p className="mt-2 max-w-2xl text-sm text-slate-300">
+              Le entita' consolidate sono nodi stabili; importi, periodi, stati e ruoli restano fatti tipizzati collegati ai documenti sorgente.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2 text-sm">
+            <span className="rounded-full border border-indigo-300/20 bg-indigo-400/10 px-3 py-2 text-indigo-100">
+              {graphStats.data?.nodes ?? 0} nodi
+            </span>
+            <span className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-slate-100">
+              {graphStats.data?.assertions ?? 0} fatti
+            </span>
+            <span className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-slate-100">
+              {graphStats.data?.document_units ?? 0} segmenti
+            </span>
+          </div>
+        </div>
+
+        <div className="mt-5 flex flex-wrap gap-2">
+          {[
+            { value: 'all', label: 'Tutti i nodi' },
+            { value: 'organization', label: 'Organizzazioni' },
+            { value: 'address', label: 'Indirizzi' },
+            { value: 'person', label: 'Persone' },
+            { value: 'place', label: 'Luoghi' },
+          ].map((option) => (
+            <button
+              key={option.value}
+              onClick={() => setNodeKindFilter(option.value)}
+              className={`rounded-full border px-3 py-2 text-xs transition-colors ${
+                nodeKindFilter === option.value
+                  ? 'border-indigo-300/35 bg-indigo-400/20 text-indigo-50'
+                  : 'border-white/10 bg-white/5 text-slate-300 hover:bg-white/10'
+              }`}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="mt-5 grid gap-4 xl:grid-cols-[0.8fr_1fr_1fr]">
+          <div className="rounded-2xl border border-white/10 bg-slate-950/35 p-4">
+            <p className="mb-3 text-xs uppercase tracking-[0.22em] text-indigo-200/70">Nodi</p>
+            <div className="space-y-2 max-h-[29rem] overflow-y-auto pr-1">
+              {graphNodesLoading ? (
+                <p className="text-sm text-slate-400">Caricamento nodi...</p>
+              ) : graphNodes.length === 0 ? (
+                <p className="text-sm text-slate-400">Nessun nodo corrisponde alla ricerca.</p>
+              ) : (
+                graphNodes.map((node) => (
+                  <button
+                    key={node.id}
+                    onClick={() => setSelectedNodeId(node.id)}
+                    className={`w-full rounded-xl border p-3 text-left ${
+                      node.id === selectedNodeId
+                        ? 'border-indigo-300/35 bg-indigo-400/15'
+                        : 'border-white/10 bg-white/5 hover:bg-white/10'
+                    }`}
+                  >
+                    <p className="text-sm font-medium text-white">{node.label}</p>
+                    <p className="mt-1 text-xs text-slate-400">
+                      {node.node_kind} · {node.document_count} documenti · {node.alias_count} alias
+                    </p>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-white/10 bg-slate-950/35 p-4">
+            <p className="mb-3 text-xs uppercase tracking-[0.22em] text-indigo-200/70">Fatti collegati</p>
+            <div className="space-y-2 max-h-[29rem] overflow-y-auto pr-1">
+              {assertionsLoading ? (
+                <p className="text-sm text-slate-400">Caricamento fatti...</p>
+              ) : assertions.length === 0 ? (
+                <p className="text-sm text-slate-400">Nessun fatto collegato al nodo selezionato.</p>
+              ) : (
+                assertions.map((assertion) => (
+                  <div key={assertion.id} className="rounded-xl border border-white/10 bg-white/5 p-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-xs uppercase tracking-wide text-indigo-200/80">{assertion.predicate_label}</p>
+                      <span className="text-[11px] text-slate-500">{assertion.source_type}</span>
+                    </div>
+                    <p className="mt-2 text-sm text-white">{formatAssertionValue(assertion)}</p>
+                    {assertion.confidence !== null && (
+                      <p className="mt-1 text-xs text-slate-400">{Math.round(assertion.confidence * 100)}% confidence</p>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-white/10 bg-slate-950/35 p-4">
+            <p className="mb-3 text-xs uppercase tracking-[0.22em] text-indigo-200/70">Fonti</p>
+            {!selectedNodeId ? (
+              <p className="text-sm text-slate-400">Seleziona un nodo per aprire le fonti.</p>
+            ) : nodeDetailLoading ? (
+              <p className="text-sm text-slate-400">Caricamento fonti...</p>
+            ) : nodeDetail ? (
+              <div className="space-y-4">
+                <div>
+                  <p className="font-medium text-white">{nodeDetail.node.label}</p>
+                  {nodeDetail.aliases.length > 1 && (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {nodeDetail.aliases.map((alias) => (
+                        <span key={alias} className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[11px] text-slate-300">
+                          {alias}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="space-y-2 max-h-[22rem] overflow-y-auto pr-1">
+                  {nodeDetail.documents.length === 0 ? (
+                    <p className="text-sm text-slate-400">Nessuna fonte collegata.</p>
+                  ) : (
+                    nodeDetail.documents.map((document) => (
+                      <button
+                        key={document.document_unit_id}
+                        onClick={() => onOpenDocument(document.document_id)}
+                        className="w-full rounded-xl border border-white/10 bg-white/5 p-3 text-left hover:bg-white/10"
+                      >
+                        <p className="text-sm font-medium text-cyan-200">{document.original_filename}</p>
+                        <p className="mt-1 text-xs text-slate-400">Pagine {document.start_page}-{document.end_page}</p>
+                        {document.summary && <p className="mt-2 text-xs text-slate-300 line-clamp-2">{document.summary}</p>}
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-slate-400">Dettaglio nodo non disponibile.</p>
+            )}
+          </div>
+        </div>
+      </section>
 
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>

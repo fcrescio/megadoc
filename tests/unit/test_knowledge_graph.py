@@ -130,6 +130,7 @@ def test_graph_api_rebuild_and_browse_node(db_session):
     detail = get_knowledge_node(node_id, db=db_session)
     assert detail.node.label == "Condominio Via Roma"
     assert detail.documents[0].original_filename == "bolletta-acqua.pdf"
+    assert {assertion.predicate_code for assertion in detail.assertions} >= {"about", "due_date", "amount_total"}
 
 
 def test_projection_uses_display_text_instead_of_inconsistent_extracted_keys(db_session):
