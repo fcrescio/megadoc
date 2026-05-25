@@ -205,3 +205,32 @@ def test_accounting_projection_does_not_promote_allocation_people_to_nodes(db_se
     project_document_unit(db_session, unit)
 
     assert db_session.query(KnowledgeNode).filter_by(node_kind="person").count() == 0
+
+
+def test_projection_excludes_malformed_table_content_from_navigation(db_session):
+    unit = _make_utility_unit(db_session)
+    table_payload = "<table><tr><td>" + ("Acque Spa - Fattura " * 60) + "</td></tr></table>"
+    unit.entities.append(
+        DocumentUnitEntity(
+            entity_type="organizzazione",
+            entity_value=table_payload,
+            normalized_value="malformed_table",
+            confidence=0.3,
+            page_from=1,
+            page_to=1,
+        )
+    )
+    utility_result = unit.specialist_results[0]
+    utility_result.result_json = {
+        **utility_result.result_json,
+        "issuer": table_payload,
+        "service_type": table_payload,
+    }
+
+    project_document_unit(db_session, unit)
+
+    assertions = db_session.query(KnowledgeAssertion).all()
+    assert graph_stats(db_session).mentions == 2
+    assert not any("<table" in node.label for node in db_session.query(KnowledgeNode).all())
+    assert not any(assertion.predicate_code == "issued_by" for assertion in assertions)
+    assert not any(assertion.predicate_code == "service_type" for assertion in assertions)

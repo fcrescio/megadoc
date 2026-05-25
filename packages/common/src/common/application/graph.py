@@ -47,6 +47,10 @@ ENTITY_KIND_MAP = {
     "luogo": "place",
 }
 
+MAX_NODE_TEXT_LENGTH = 512
+MAX_ASSERTION_TEXT_LENGTH = 1024
+TABLE_MARKUP_PATTERN = re.compile(r"</?(?:table|tbody|thead|tr|td|th)\b", re.IGNORECASE)
+
 
 @dataclass
 class GraphProjectionStats:
@@ -123,6 +127,9 @@ def project_document_unit(
             continue
         if node_kind == "person" and "accounting_statement" in latest_results:
             continue
+        surface_text = _navigable_label(entity.entity_value)
+        if surface_text is None:
+            continue
         label, canonical_key = _entity_node_identity(session, entity)
         node = _get_or_create_node(
             session,
@@ -130,7 +137,7 @@ def project_document_unit(
             label=label,
             canonical_key=canonical_key,
         )
-        _ensure_alias(session, node, entity.entity_value)
+        _ensure_alias(session, node, surface_text)
         mentioned_nodes.setdefault(node_kind, []).append(node)
         session.add(
             DocumentUnitMention(
@@ -138,7 +145,7 @@ def project_document_unit(
                 node_id=node.id,
                 mention_role="mentioned",
                 source_type="entity",
-                surface_text=entity.entity_value,
+                surface_text=surface_text,
                 confidence=entity.confidence,
                 page_from=entity.page_from,
                 page_to=entity.page_to,
@@ -198,20 +205,21 @@ def _project_utility_bill(
     confidence = result.confidence
     _add_value_assertion(session, document_unit, "document_type", "utility_bill", result, confidence)
 
-    issuer = payload.get("issuer")
-    if issuer:
-        issuer_node = _get_or_create_node(session, node_kind="organization", label=str(issuer))
+    issuer = _navigable_label(payload.get("issuer"))
+    if issuer is not None:
+        issuer_node = _get_or_create_node(session, node_kind="organization", label=issuer)
         _add_node_assertion(session, document_unit, "issued_by", issuer_node, result, confidence)
 
-    holder = payload.get("account_holder")
-    if holder:
-        holder_kind = "organization" if "condominio" in str(holder).lower() else "person"
-        holder_node = _get_or_create_node(session, node_kind=holder_kind, label=str(holder))
+    holder = _navigable_label(payload.get("account_holder"))
+    if holder is not None:
+        holder_kind = "organization" if "condominio" in holder.lower() else "person"
+        holder_node = _get_or_create_node(session, node_kind=holder_kind, label=holder)
         _add_node_assertion(session, document_unit, "addressed_to", holder_node, result, confidence)
 
-    if about_node is None and payload.get("supply_reference"):
+    supply_reference = _navigable_label(payload.get("supply_reference"))
+    if about_node is None and supply_reference is not None:
         reference_node = _get_or_create_node(
-            session, node_kind="address", label=str(payload["supply_reference"])
+            session, node_kind="address", label=supply_reference
         )
         _add_node_assertion(session, document_unit, "about", reference_node, result, confidence)
 
@@ -291,7 +299,8 @@ def _get_or_create_node(
     label: str,
     canonical_key: str | None = None,
 ) -> KnowledgeNode:
-    normalized_key = _normalize_key(canonical_key or label)
+    safe_label = _bounded_text(label, MAX_NODE_TEXT_LENGTH) or "unknown"
+    normalized_key = _normalize_key(canonical_key or safe_label)
     node = session.execute(
         select(KnowledgeNode).where(
             KnowledgeNode.node_kind == node_kind,
@@ -302,12 +311,12 @@ def _get_or_create_node(
         node = KnowledgeNode(
             node_kind=node_kind,
             canonical_key=normalized_key,
-            label=label.strip(),
+            label=safe_label,
             review_status="auto",
         )
         session.add(node)
         session.flush()
-    _ensure_alias(session, node, label)
+    _ensure_alias(session, node, safe_label)
     return node
 
 
@@ -327,7 +336,10 @@ def _entity_node_identity(session: Session, entity: DocumentUnitEntity) -> tuple
 
 
 def _ensure_alias(session: Session, node: KnowledgeNode, alias: str) -> None:
-    normalized_alias = _normalize_key(alias)
+    safe_alias = _bounded_text(alias, MAX_NODE_TEXT_LENGTH)
+    if not safe_alias:
+        return
+    normalized_alias = _normalize_key(safe_alias)
     if any(item.normalized_alias == normalized_alias for item in node.aliases):
         return
     existing = session.execute(
@@ -339,7 +351,7 @@ def _ensure_alias(session: Session, node: KnowledgeNode, alias: str) -> None:
     if existing is None:
         node.aliases.append(
             KnowledgeNodeAlias(
-                alias=alias.strip(),
+                alias=safe_alias,
                 normalized_alias=normalized_alias,
             )
         )
@@ -390,7 +402,9 @@ def _add_value_assertion(
     *,
     source_type: str | None = None,
 ) -> None:
-    text_value = _display_value(value)
+    text_value = _navigable_assertion_text(value)
+    if text_value is None:
+        return
     session.add(
         KnowledgeAssertion(
             document_unit_id=document_unit.id,
@@ -411,6 +425,31 @@ def _display_value(value: Any) -> str:
             return f"{value['amount']} {value.get('currency') or ''}".strip()
         return " - ".join(str(item) for item in (value.get("from"), value.get("to")) if item)
     return str(value)
+
+
+def _navigable_label(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = _bounded_text(str(value), MAX_NODE_TEXT_LENGTH, reject_oversized=True)
+    if not text or TABLE_MARKUP_PATTERN.search(text):
+        return None
+    return text
+
+
+def _navigable_assertion_text(value: Any) -> str | None:
+    text = _bounded_text(_display_value(value), MAX_ASSERTION_TEXT_LENGTH, reject_oversized=True)
+    if not text or TABLE_MARKUP_PATTERN.search(text):
+        return None
+    return text
+
+
+def _bounded_text(value: str, limit: int, *, reject_oversized: bool = False) -> str | None:
+    text = re.sub(r"\s+", " ", value.strip())
+    if not text:
+        return None
+    if len(text) > limit:
+        return None if reject_oversized else text[:limit]
+    return text
 
 
 def _normalize_key(value: str) -> str:
