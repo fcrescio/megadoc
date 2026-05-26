@@ -70,7 +70,7 @@ def process_specialist_job(self, specialist_job_id: str):
                     specialist_job.input_version or "",
                     structured_json=ocr_result.structured_json,
                 )
-                schema_version = "accounting_statement_v3"
+                schema_version = "accounting_statement_v4"
             else:
                 raise ValueError(f"Unsupported specialist type: {specialist_job.specialist_type}")
 

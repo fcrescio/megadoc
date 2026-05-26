@@ -122,3 +122,18 @@ def test_accounting_statement_locates_context_for_structured_table():
     )
     assert fact["accounting_role"] == "actual_allocation"
     assert fact["period_context"]["review_status"] == "inferred"
+
+
+def test_accounting_statement_classifies_booked_personal_charges_as_actual():
+    text = """
+Periodo: 01/07/2022 - 30/06/2023
+| Movimento | Importo |
+| --- | ---: |
+| - B11 BONACCI FABIO - 31/01/23 - (P13) - Riparazione citofono | -155,66 |
+"""
+
+    result, _ = process_accounting_statement(_document_unit(), text, "fixture:v4")
+
+    fact = result["accounts"][0]["facts"][0]
+    assert fact["fact_type"] == "personal_charge"
+    assert fact["accounting_role"] == "actual_personal_charge"

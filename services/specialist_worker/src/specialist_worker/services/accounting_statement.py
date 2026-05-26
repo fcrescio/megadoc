@@ -856,6 +856,9 @@ def _extract_row_facts(
         )
         if fact_type is None:
             continue
+        accounting_role = accounting_context.get("role")
+        if accounting_role is None and fact_type == "personal_charge":
+            accounting_role = "actual_personal_charge"
         amount = float(raw_amount)
         normalized_amount = (
             abs(amount)
@@ -874,7 +877,7 @@ def _extract_row_facts(
         facts.append(
             {
                 "fact_type": fact_type,
-                "accounting_role": accounting_context.get("role"),
+                "accounting_role": accounting_role,
                 "category_key": _normalize_key(category_label) if category_label else None,
                 "category_label": category_label,
                 "amount": normalized_amount,
