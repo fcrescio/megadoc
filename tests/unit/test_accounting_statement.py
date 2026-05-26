@@ -65,6 +65,25 @@ Periodo: 01/07/2022 - 30/06/2023
     assert [fact["category_key"] for fact in account["facts"]] == ["totale_gestione"]
 
 
+def test_accounting_statement_keeps_currency_values_in_millesimal_headers():
+    text = """
+Consuntivo Ripartizioni per unita
+Periodo: 01/07/2022 - 30/06/2023
+| Unita | Nominativo | Spese generali / mill. | Riscaldamento / mill. | Ascensore / mill. | Totale gestione / mill. |
+| --- | --- | ---: | ---: | ---: | ---: |
+| B11 | BONACCI FABIO | -362,59 | 121,2958 | 0,00 | -1.419,21 |
+"""
+
+    result, _ = process_accounting_statement(_document_unit(), text, "fixture:v5")
+
+    account = result["accounts"][0]
+    categories = {fact["category_key"]: fact["amount"] for fact in account["facts"]}
+    assert categories["spese_generali_mill"] == 362.59
+    assert categories["totale_gestione"] == 1419.21
+    assert "riscaldamento_mill" not in categories
+    assert "ascensore_mill" not in categories
+
+
 def test_accounting_statement_scopes_period_and_role_to_each_section():
     text = """
 Consuntivo Ripartizioni per unita

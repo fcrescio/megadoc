@@ -853,6 +853,7 @@ def _extract_row_facts(
             str(column),
             table_type=str(table.get("table_type") or "unknown"),
             payment_ledger=payment_ledger,
+            raw_value=str(cells.get(column) or ""),
         )
         if fact_type is None:
             continue
@@ -860,6 +861,8 @@ def _extract_row_facts(
         if accounting_role is None and fact_type == "personal_charge":
             accounting_role = "actual_personal_charge"
         amount = float(raw_amount)
+        if abs(amount) < 0.005:
+            continue
         normalized_amount = (
             abs(amount)
             if fact_type
@@ -908,9 +911,12 @@ def _classify_fact_column(
     *,
     table_type: str,
     payment_ledger: bool,
+    raw_value: str,
 ) -> tuple[str | None, str | None, bool]:
     lowered = column.lower()
-    if "mill" in lowered or re.fullmatch(r"column_\d+", lowered):
+    if re.fullmatch(r"column_\d+", lowered):
+        return None, None, False
+    if "mill" in lowered and _has_fractional_precision(raw_value, minimum_digits=3):
         return None, None, False
     if payment_ledger and lowered == "importo":
         return "payment_received", None, False
@@ -935,6 +941,12 @@ def _classify_fact_column(
     if table_type == "expense_allocation":
         return "allocated_expense", column, False
     return None, None, False
+
+
+def _has_fractional_precision(value: str, *, minimum_digits: int) -> bool:
+    compact = value.replace("€", "").replace(" ", "")
+    match = re.search(r",(\d+)$", compact)
+    return bool(match and len(match.group(1)) >= minimum_digits)
 
 
 def _normalize_key(value: str) -> str:

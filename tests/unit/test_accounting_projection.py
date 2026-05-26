@@ -53,7 +53,7 @@ def _make_statement_unit(db_session) -> tuple[DocumentUnit, SpecialistResult]:
     result = SpecialistResult(
         document_unit=unit,
         specialist_type="accounting_statement",
-        schema_version="accounting_statement_v4",
+        schema_version="accounting_statement_v5",
         confidence=0.93,
         review_status="auto_accepted",
         result_json={
