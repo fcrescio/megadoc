@@ -9,6 +9,7 @@ from celery import shared_task
 from sqlalchemy import create_engine, delete, select
 from sqlalchemy.orm import Session, selectinload
 
+from common.application.accounting import project_accounting_result
 from common.application.graph import project_document_unit
 from common.application.specialists import extract_document_unit_text
 from common.db.models import DocumentUnit, DocumentUnitLink, ScanUnit, SpecialistJob, SpecialistResult
@@ -92,11 +93,12 @@ def process_specialist_job(self, specialist_job_id: str):
                 )
                 session.add(specialist_result)
             else:
-                existing_result.schema_version = schema_version
-                existing_result.confidence = confidence
-                existing_result.review_status = "auto_accepted" if confidence >= 0.7 else "needs_review"
-                existing_result.result_json = result_json
-                existing_result.updated_at = _utcnow()
+                specialist_result = existing_result
+                specialist_result.schema_version = schema_version
+                specialist_result.confidence = confidence
+                specialist_result.review_status = "auto_accepted" if confidence >= 0.7 else "needs_review"
+                specialist_result.result_json = result_json
+                specialist_result.updated_at = _utcnow()
 
             session.flush()
             projection_unit = session.execute(
@@ -109,6 +111,8 @@ def process_specialist_job(self, specialist_job_id: str):
                 )
             ).scalar_one()
             project_document_unit(session, projection_unit)
+            if specialist_job.specialist_type == "accounting_statement":
+                project_accounting_result(session, projection_unit, specialist_result)
             session.commit()
             _update_specialist_job(engine, specialist_job_id, status="succeeded", finished_at=_utcnow(), error_message=None)
             return {"specialist_job_id": specialist_job_id, "status": "succeeded", "specialist_type": specialist_job.specialist_type}

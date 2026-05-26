@@ -183,6 +183,52 @@ def ensure_knowledge_schema(engine) -> None:
         "CREATE INDEX IF NOT EXISTS ix_knowledge_assertions_unit_predicate ON knowledge_assertions(document_unit_id, predicate_code)",
         "CREATE INDEX IF NOT EXISTS ix_knowledge_assertions_subject_predicate ON knowledge_assertions(subject_node_id, predicate_code)",
         "CREATE INDEX IF NOT EXISTS ix_knowledge_assertions_object_predicate ON knowledge_assertions(object_node_id, predicate_code)",
+        """CREATE TABLE IF NOT EXISTS accounting_accounts (
+            id UUID PRIMARY KEY,
+            scope_node_id UUID NULL REFERENCES knowledge_nodes(id) ON DELETE SET NULL,
+            scope_key VARCHAR(512) NOT NULL,
+            account_key VARCHAR(512) NOT NULL,
+            unit_code VARCHAR(64) NULL,
+            subject_label VARCHAR(512) NOT NULL,
+            review_status VARCHAR(32) NOT NULL DEFAULT 'auto',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NULL,
+            CONSTRAINT uq_accounting_accounts_scope_key UNIQUE (scope_key, account_key)
+        )""",
+        "CREATE INDEX IF NOT EXISTS ix_accounting_accounts_label_unit ON accounting_accounts(subject_label, unit_code)",
+        """CREATE TABLE IF NOT EXISTS accounting_account_aliases (
+            id UUID PRIMARY KEY,
+            account_id UUID NOT NULL REFERENCES accounting_accounts(id) ON DELETE CASCADE,
+            alias VARCHAR(512) NOT NULL,
+            normalized_alias VARCHAR(512) NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            CONSTRAINT uq_accounting_account_aliases_account_alias UNIQUE (account_id, normalized_alias)
+        )""",
+        "CREATE INDEX IF NOT EXISTS ix_accounting_account_aliases_normalized ON accounting_account_aliases(normalized_alias)",
+        """CREATE TABLE IF NOT EXISTS accounting_facts (
+            id UUID PRIMARY KEY,
+            document_unit_id UUID NOT NULL REFERENCES document_units(id) ON DELETE CASCADE,
+            specialist_result_id UUID NULL REFERENCES specialist_results(id) ON DELETE CASCADE,
+            account_id UUID NOT NULL REFERENCES accounting_accounts(id) ON DELETE CASCADE,
+            fact_type VARCHAR(64) NOT NULL,
+            category_key VARCHAR(512) NULL,
+            category_label VARCHAR(512) NULL,
+            amount NUMERIC(14, 2) NOT NULL,
+            raw_amount NUMERIC(14, 2) NOT NULL,
+            currency VARCHAR(3) NOT NULL DEFAULT 'EUR',
+            period_context_from DATE NULL,
+            period_context_to DATE NULL,
+            period_source VARCHAR(32) NULL,
+            period_review_status VARCHAR(32) NULL,
+            is_total BOOLEAN NOT NULL DEFAULT false,
+            confidence DOUBLE PRECISION NULL,
+            review_status VARCHAR(32) NOT NULL DEFAULT 'auto',
+            evidence_json JSON NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )""",
+        "CREATE INDEX IF NOT EXISTS ix_accounting_facts_account_type ON accounting_facts(account_id, fact_type)",
+        "CREATE INDEX IF NOT EXISTS ix_accounting_facts_unit_type ON accounting_facts(document_unit_id, fact_type)",
+        "CREATE INDEX IF NOT EXISTS ix_accounting_facts_category ON accounting_facts(category_key)",
         """DO $$
         BEGIN
             IF to_regclass('public.specialist_results') IS NOT NULL

@@ -1,7 +1,8 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint, Uuid, func
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, JSON, Numeric, String, Text, UniqueConstraint, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from common.db.base import Base
@@ -265,6 +266,9 @@ class DocumentUnit(Base):
     specialist_results: Mapped[list["SpecialistResult"]] = relationship(
         back_populates="document_unit", cascade="all, delete-orphan"
     )
+    accounting_facts: Mapped[list["AccountingFact"]] = relationship(
+        back_populates="document_unit", cascade="all, delete-orphan"
+    )
     outgoing_links: Mapped[list["DocumentUnitLink"]] = relationship(
         foreign_keys="DocumentUnitLink.source_document_unit_id",
         back_populates="source_document_unit",
@@ -340,6 +344,7 @@ class SpecialistResult(Base):
 
     document_unit: Mapped["DocumentUnit"] = relationship(back_populates="specialist_results")
     assertions: Mapped[list["KnowledgeAssertion"]] = relationship(back_populates="specialist_result")
+    accounting_facts: Mapped[list["AccountingFact"]] = relationship(back_populates="specialist_result")
 
 
 class DocumentUnitLink(Base):
@@ -433,6 +438,7 @@ class KnowledgeNode(Base):
         foreign_keys="KnowledgeAssertion.object_node_id",
         back_populates="object_node",
     )
+    accounting_accounts: Mapped[list["AccountingAccount"]] = relationship(back_populates="scope_node")
 
 
 class KnowledgeNodeAlias(Base):
@@ -463,6 +469,89 @@ class KnowledgePredicate(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     assertions: Mapped[list["KnowledgeAssertion"]] = relationship(back_populates="predicate")
+
+
+class AccountingAccount(Base):
+    __tablename__ = "accounting_accounts"
+    __table_args__ = (
+        UniqueConstraint("scope_key", "account_key", name="uq_accounting_accounts_scope_key"),
+        Index("ix_accounting_accounts_label_unit", "subject_label", "unit_code"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    scope_node_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("knowledge_nodes.id", ondelete="SET NULL"), nullable=True
+    )
+    scope_key: Mapped[str] = mapped_column(String(512), nullable=False)
+    account_key: Mapped[str] = mapped_column(String(512), nullable=False)
+    unit_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    subject_label: Mapped[str] = mapped_column(String(512), nullable=False)
+    review_status: Mapped[str] = mapped_column(String(32), nullable=False, default="auto")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    scope_node: Mapped["KnowledgeNode | None"] = relationship(back_populates="accounting_accounts")
+    aliases: Mapped[list["AccountingAccountAlias"]] = relationship(
+        back_populates="account", cascade="all, delete-orphan"
+    )
+    facts: Mapped[list["AccountingFact"]] = relationship(back_populates="account", cascade="all, delete-orphan")
+
+
+class AccountingAccountAlias(Base):
+    __tablename__ = "accounting_account_aliases"
+    __table_args__ = (
+        UniqueConstraint("account_id", "normalized_alias", name="uq_accounting_account_aliases_account_alias"),
+        Index("ix_accounting_account_aliases_normalized", "normalized_alias"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    account_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("accounting_accounts.id", ondelete="CASCADE"), nullable=False
+    )
+    alias: Mapped[str] = mapped_column(String(512), nullable=False)
+    normalized_alias: Mapped[str] = mapped_column(String(512), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    account: Mapped["AccountingAccount"] = relationship(back_populates="aliases")
+
+
+class AccountingFact(Base):
+    __tablename__ = "accounting_facts"
+    __table_args__ = (
+        Index("ix_accounting_facts_account_type", "account_id", "fact_type"),
+        Index("ix_accounting_facts_unit_type", "document_unit_id", "fact_type"),
+        Index("ix_accounting_facts_category", "category_key"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    document_unit_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("document_units.id", ondelete="CASCADE"), nullable=False
+    )
+    specialist_result_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("specialist_results.id", ondelete="CASCADE"), nullable=True
+    )
+    account_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("accounting_accounts.id", ondelete="CASCADE"), nullable=False
+    )
+    fact_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    category_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    category_label: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    raw_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="EUR")
+    period_context_from: Mapped[date | None] = mapped_column(Date, nullable=True)
+    period_context_to: Mapped[date | None] = mapped_column(Date, nullable=True)
+    period_source: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    period_review_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    is_total: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    review_status: Mapped[str] = mapped_column(String(32), nullable=False, default="auto")
+    evidence_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    document_unit: Mapped["DocumentUnit"] = relationship(back_populates="accounting_facts")
+    specialist_result: Mapped["SpecialistResult | None"] = relationship(back_populates="accounting_facts")
+    account: Mapped["AccountingAccount"] = relationship(back_populates="facts")
 
 
 class DocumentUnitMention(Base):
