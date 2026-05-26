@@ -38,9 +38,13 @@ def rebuild_knowledge_contexts(session: Session) -> ContextProjectionStats:
     multiple source documents. This keeps one-off extraction noise out of the
     navigation layer while allowing corrections to be projected deterministically.
     """
+    existing_contexts = session.execute(select(KnowledgeContext)).scalars().all()
+    existing_by_primary = {
+        (context.context_kind, context.canonical_entity_id): context
+        for context in existing_contexts
+    }
     session.execute(delete(KnowledgeContextMembership))
     session.execute(delete(KnowledgeContextAnchor))
-    session.execute(delete(KnowledgeContext))
 
     canonical_entities = session.execute(
         select(CanonicalEntity).options(selectinload(CanonicalEntity.variants))
@@ -57,7 +61,6 @@ def rebuild_knowledge_contexts(session: Session) -> ContextProjectionStats:
     ).scalars().unique().all()
 
     direct_by_unit: dict[uuid.UUID, dict[uuid.UUID, _DirectMatch]] = {}
-    unit_by_id = {unit.id: unit for unit in units}
     unit_ids_by_document: dict[uuid.UUID, list[uuid.UUID]] = {}
     documents_by_entity: dict[uuid.UUID, set[uuid.UUID]] = {}
     source_units_by_entity: dict[tuple[uuid.UUID, uuid.UUID], set[uuid.UUID]] = {}
@@ -90,19 +93,26 @@ def rebuild_knowledge_contexts(session: Session) -> ContextProjectionStats:
     }
     context_groups = _group_context_entities(eligible_entities, documents_by_entity)
     context_by_entity: dict[uuid.UUID, KnowledgeContext] = {}
+    active_context_ids: set[uuid.UUID] = set()
     for entity_ids in context_groups:
         primary_entity = min(
             (eligible_entities[entity_id] for entity_id in entity_ids),
             key=_primary_entity_rank,
         )
-        context = KnowledgeContext(
-            context_kind="entity",
-            canonical_entity_id=primary_entity.id,
-            label=primary_entity.display_value,
-            review_status=primary_entity.review_status,
-        )
-        session.add(context)
+        context = existing_by_primary.get(("entity", primary_entity.id))
+        if context is None:
+            context = KnowledgeContext(
+                context_kind="entity",
+                canonical_entity_id=primary_entity.id,
+                label=primary_entity.display_value,
+                review_status=primary_entity.review_status,
+            )
+            session.add(context)
+        else:
+            context.label = primary_entity.display_value
+            context.review_status = primary_entity.review_status
         session.flush()
+        active_context_ids.add(context.id)
         for entity_id in entity_ids:
             session.add(
                 KnowledgeContextAnchor(
@@ -113,6 +123,12 @@ def rebuild_knowledge_contexts(session: Session) -> ContextProjectionStats:
             )
             context_by_entity[entity_id] = context
     session.flush()
+    obsolete_context_ids = [
+        context.id for context in existing_contexts if context.id not in active_context_ids
+    ]
+    if obsolete_context_ids:
+        session.execute(delete(KnowledgeContext).where(KnowledgeContext.id.in_(obsolete_context_ids)))
+        session.flush()
 
     source_units_by_context: dict[tuple[uuid.UUID, uuid.UUID], dict[uuid.UUID, list[_DirectMatch]]] = {}
     contexts_by_id: dict[uuid.UUID, KnowledgeContext] = {}

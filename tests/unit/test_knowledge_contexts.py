@@ -146,6 +146,10 @@ def test_context_projection_groups_variants_and_propagates_document_scope(db_ses
     assert memberships[first_units[1].id].source_type == "same_source_document"
     assert memberships[second_units[0].id].membership_role == "direct"
 
+    rebuilt = rebuild_knowledge_contexts(db_session)
+    assert rebuilt == stats
+    assert db_session.query(KnowledgeContext).one().id == context.id
+
 
 def test_context_projection_requires_review_or_cross_document_repetition(db_session):
     canonical = CanonicalEntity(
