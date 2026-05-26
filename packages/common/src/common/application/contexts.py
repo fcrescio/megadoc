@@ -10,6 +10,7 @@ from common.db.models import (
     CanonicalEntity,
     DocumentUnit,
     KnowledgeContext,
+    KnowledgeContextAnchor,
     KnowledgeContextMembership,
 )
 
@@ -38,6 +39,7 @@ def rebuild_knowledge_contexts(session: Session) -> ContextProjectionStats:
     navigation layer while allowing corrections to be projected deterministically.
     """
     session.execute(delete(KnowledgeContextMembership))
+    session.execute(delete(KnowledgeContextAnchor))
     session.execute(delete(KnowledgeContext))
 
     canonical_entities = session.execute(
@@ -86,49 +88,110 @@ def rebuild_knowledge_contexts(session: Session) -> ContextProjectionStats:
         for entity in canonical_entities
         if entity.review_status in STABLE_REVIEW_STATUSES or len(documents_by_entity.get(entity.id, set())) >= 2
     }
-    contexts: dict[uuid.UUID, KnowledgeContext] = {}
-    for entity_id, entity in eligible_entities.items():
+    context_groups = _group_context_entities(eligible_entities, documents_by_entity)
+    context_by_entity: dict[uuid.UUID, KnowledgeContext] = {}
+    for entity_ids in context_groups:
+        primary_entity = min(
+            (eligible_entities[entity_id] for entity_id in entity_ids),
+            key=_primary_entity_rank,
+        )
         context = KnowledgeContext(
             context_kind="entity",
-            canonical_entity_id=entity_id,
-            label=entity.display_value,
-            review_status=entity.review_status,
+            canonical_entity_id=primary_entity.id,
+            label=primary_entity.display_value,
+            review_status=primary_entity.review_status,
         )
         session.add(context)
-        contexts[entity_id] = context
+        session.flush()
+        for entity_id in entity_ids:
+            session.add(
+                KnowledgeContextAnchor(
+                    context_id=context.id,
+                    canonical_entity_id=entity_id,
+                    anchor_role="primary" if entity_id == primary_entity.id else "related",
+                )
+            )
+            context_by_entity[entity_id] = context
     session.flush()
 
+    source_units_by_context: dict[tuple[uuid.UUID, uuid.UUID], dict[uuid.UUID, list[_DirectMatch]]] = {}
+    contexts_by_id: dict[uuid.UUID, KnowledgeContext] = {}
     for (source_document_id, entity_id), direct_unit_ids in source_units_by_entity.items():
-        context = contexts.get(entity_id)
-        if context is None:
-            continue
+        context = context_by_entity.get(entity_id)
+        if context is not None:
+            contexts_by_id[context.id] = context
+            unit_matches = source_units_by_context.setdefault((source_document_id, context.id), {})
+            for unit_id in direct_unit_ids:
+                unit_matches.setdefault(unit_id, []).append(direct_by_unit[unit_id][entity_id])
+
+    for (source_document_id, context_id), direct_by_context_unit in source_units_by_context.items():
+        context = contexts_by_id[context_id]
         direct_matches = [
-            direct_by_unit[unit_id][entity_id]
-            for unit_id in direct_unit_ids
-            if entity_id in direct_by_unit[unit_id]
+            match for matches in direct_by_context_unit.values() for match in matches
         ]
         direct_confidences = [match.confidence for match in direct_matches if match.confidence is not None]
         inherited_confidence = min(max(direct_confidences, default=0.8), 0.8)
         source_surfaces = sorted({match.surface_text for match in direct_matches})
         for unit_id in unit_ids_by_document[source_document_id]:
-            direct_match = direct_by_unit[unit_id].get(entity_id)
-            is_direct = direct_match is not None
+            unit_matches = direct_by_context_unit.get(unit_id, [])
+            is_direct = bool(unit_matches)
             session.add(
                 KnowledgeContextMembership(
                     context_id=context.id,
                     document_unit_id=unit_id,
                     membership_role="direct" if is_direct else "document_scope",
-                    confidence=direct_match.confidence if is_direct else inherited_confidence,
+                    confidence=max(
+                        (match.confidence for match in unit_matches if match.confidence is not None),
+                        default=None,
+                    ) if is_direct else inherited_confidence,
                     source_type="canonical_entity" if is_direct else "same_source_document",
                     evidence_json={
-                        "canonical_entity_id": str(entity_id),
-                        "matched_surface": direct_match.surface_text if is_direct else None,
+                        "canonical_entity_ids": sorted(
+                            str(entity_id)
+                            for entity_id, candidate_context in context_by_entity.items()
+                            if candidate_context.id == context_id
+                        ),
+                        "matched_surfaces": sorted({match.surface_text for match in unit_matches}) if is_direct else None,
                         "source_surfaces": source_surfaces if not is_direct else None,
                     },
                 )
             )
     session.flush()
     return context_stats(session)
+
+
+def _group_context_entities(
+    entities: dict[uuid.UUID, CanonicalEntity],
+    documents_by_entity: dict[uuid.UUID, set[uuid.UUID]],
+) -> list[set[uuid.UUID]]:
+    groups: list[set[uuid.UUID]] = []
+    for entity in sorted(entities.values(), key=_primary_entity_rank):
+        entity_documents = documents_by_entity.get(entity.id, set())
+        merged = False
+        if len(entity_documents) >= 2:
+            for group in groups:
+                primary = entities[next(iter(group))]
+                primary_documents = documents_by_entity.get(primary.id, set())
+                if entity_documents == primary_documents and any(
+                    _can_share_context(entities[group_entity_id], entity)
+                    for group_entity_id in group
+                ):
+                    group.add(entity.id)
+                    merged = True
+                    break
+        if not merged:
+            groups.append({entity.id})
+    return groups
+
+
+def _can_share_context(left: CanonicalEntity, right: CanonicalEntity) -> bool:
+    types = {left.entity_type, right.entity_type}
+    return "organizzazione" in types and bool(types & {"indirizzo", "luogo"})
+
+
+def _primary_entity_rank(entity: CanonicalEntity) -> tuple[int, str]:
+    rank = {"organizzazione": 0, "indirizzo": 1, "luogo": 2, "persona": 3}
+    return rank.get(entity.entity_type, 4), entity.display_value.lower()
 
 
 def context_stats(session: Session) -> ContextProjectionStats:

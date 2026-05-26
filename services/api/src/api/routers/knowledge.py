@@ -23,6 +23,7 @@ from common.db.models import (
     CanonicalEntity,
     CanonicalEntityVariant,
     KnowledgeContext,
+    KnowledgeContextAnchor,
     KnowledgeContextMembership,
     Document,
     DocumentType,
@@ -65,6 +66,7 @@ from knowledge_classifier.schemas import (
     CanonicalEntityDetailResponse,
     CanonicalEntityMergeRequest,
     KnowledgeContextDetailResponse,
+    KnowledgeContextAnchorResponse,
     KnowledgeContextMembershipResponse,
     KnowledgeContextStatsResponse,
     KnowledgeContextSummaryResponse,
@@ -510,6 +512,7 @@ def _serialize_knowledge_context_summary(context: KnowledgeContext) -> Knowledge
         canonical_entity_id=str(context.canonical_entity_id),
         canonical_entity_type=context.canonical_entity.entity_type,
         canonical_value=context.canonical_entity.canonical_value,
+        anchor_count=len(context.anchors),
         document_count=len(document_ids),
         document_unit_count=len(memberships),
         direct_membership_count=sum(
@@ -521,6 +524,7 @@ def _serialize_knowledge_context_summary(context: KnowledgeContext) -> Knowledge
 def _knowledge_context_options():
     return (
         selectinload(KnowledgeContext.canonical_entity),
+        selectinload(KnowledgeContext.anchors).selectinload(KnowledgeContextAnchor.canonical_entity),
         selectinload(KnowledgeContext.memberships)
         .selectinload(KnowledgeContextMembership.document_unit)
         .selectinload(DocumentUnit.scan_unit)
@@ -1671,8 +1675,10 @@ def list_knowledge_contexts(
 ):
     query = (
         select(KnowledgeContext)
-        .join(CanonicalEntity, CanonicalEntity.id == KnowledgeContext.canonical_entity_id)
+        .join(KnowledgeContextAnchor, KnowledgeContextAnchor.context_id == KnowledgeContext.id)
+        .join(CanonicalEntity, CanonicalEntity.id == KnowledgeContextAnchor.canonical_entity_id)
         .options(*_knowledge_context_options())
+        .distinct()
         .order_by(KnowledgeContext.label.asc())
     )
     if entity_type:
@@ -1730,6 +1736,16 @@ def get_knowledge_context(context_id: uuid.UUID, db: Session = Depends(get_db_se
         )
     return KnowledgeContextDetailResponse(
         context=_serialize_knowledge_context_summary(context),
+        anchors=[
+            KnowledgeContextAnchorResponse(
+                canonical_entity_id=str(anchor.canonical_entity_id),
+                entity_type=anchor.canonical_entity.entity_type,
+                canonical_value=anchor.canonical_entity.canonical_value,
+                display_value=anchor.canonical_entity.display_value,
+                anchor_role=anchor.anchor_role,
+            )
+            for anchor in context.anchors
+        ],
         memberships=memberships,
     )
 

@@ -13,6 +13,7 @@ from common.db.models import (
     DocumentUnit,
     DocumentUnitEntity,
     KnowledgeContext,
+    KnowledgeContextAnchor,
     KnowledgeContextMembership,
     ScanUnit,
 )
@@ -84,19 +85,49 @@ def test_context_projection_groups_variants_and_propagates_document_scope(db_ses
             ),
         ]
     )
-    db_session.add(canonical)
+    address = CanonicalEntity(
+        entity_type="indirizzo",
+        canonical_value="via_cesare_studiati_6_10a_pisa",
+        display_value="Via Cesare Studiati 6-10/A, Pisa",
+        review_status="human_reviewed",
+    )
+    address.variants.append(
+        CanonicalEntityVariant(
+            entity_type="indirizzo",
+            entity_key="via_cesare_studiati_6_10a",
+            display_value="Via Cesare Studiati 6-10/A",
+            review_status="human_reviewed",
+        )
+    )
+    db_session.add_all([canonical, address])
     first_units = _make_document_units(
         db_session,
         "allegato-contabile.pdf",
         [
-            [_entity("CONDOMINIO STUDIATI 6/10A (VIA)", "condominio_studiati_6_10a_via")],
+            [
+                _entity("CONDOMINIO STUDIATI 6/10A (VIA)", "condominio_studiati_6_10a_via"),
+                DocumentUnitEntity(
+                    entity_type="indirizzo",
+                    entity_value="Via Cesare Studiati 6-10/A",
+                    normalized_value="via_cesare_studiati_6_10a",
+                    confidence=0.9,
+                ),
+            ],
             [_entity("Studio Amministratore", "studio_amministratore", confidence=0.7)],
         ],
     )
     second_units = _make_document_units(
         db_session,
         "estratto-conto.pdf",
-        [[_entity("Condominio Cesare Studiati 6-10/A", "condominio_cesare_studiati_6_10a")]],
+        [[
+            _entity("Condominio Cesare Studiati 6-10/A", "condominio_cesare_studiati_6_10a"),
+            DocumentUnitEntity(
+                entity_type="indirizzo",
+                entity_value="Via Cesare Studiati 6-10/A",
+                normalized_value="via_cesare_studiati_6_10a",
+                confidence=0.9,
+            ),
+        ]],
     )
 
     stats = rebuild_knowledge_contexts(db_session)
@@ -105,6 +136,7 @@ def test_context_projection_groups_variants_and_propagates_document_scope(db_ses
     assert stats.memberships == 3
     context = db_session.query(KnowledgeContext).one()
     assert context.canonical_entity_id == canonical.id
+    assert db_session.query(KnowledgeContextAnchor).count() == 2
     memberships = {
         membership.document_unit_id: membership
         for membership in db_session.query(KnowledgeContextMembership).all()

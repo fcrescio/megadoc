@@ -341,6 +341,7 @@ class KnowledgeContextSummaryResponse(BaseModel):
     canonical_entity_id: str
     canonical_entity_type: str
     canonical_value: str
+    anchor_count: int
     document_count: int
     document_unit_count: int
     direct_membership_count: int
@@ -354,8 +355,17 @@ class KnowledgeContextMembershipResponse(BaseModel):
     evidence_json: dict[str, Any] | None = None
 
 
+class KnowledgeContextAnchorResponse(BaseModel):
+    canonical_entity_id: str
+    entity_type: str
+    canonical_value: str
+    display_value: str
+    anchor_role: str
+
+
 class KnowledgeContextDetailResponse(BaseModel):
     context: KnowledgeContextSummaryResponse
+    anchors: list[KnowledgeContextAnchorResponse] = Field(default_factory=list)
     memberships: list[KnowledgeContextMembershipResponse] = Field(default_factory=list)
 
 

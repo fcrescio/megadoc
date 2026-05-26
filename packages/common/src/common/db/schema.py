@@ -64,6 +64,15 @@ def ensure_knowledge_schema(engine) -> None:
             CONSTRAINT uq_knowledge_contexts_kind_entity UNIQUE (context_kind, canonical_entity_id)
         )""",
         "CREATE INDEX IF NOT EXISTS ix_knowledge_contexts_kind_label ON knowledge_contexts(context_kind, label)",
+        """CREATE TABLE IF NOT EXISTS knowledge_context_anchors (
+            id UUID PRIMARY KEY,
+            context_id UUID NOT NULL REFERENCES knowledge_contexts(id) ON DELETE CASCADE,
+            canonical_entity_id UUID NOT NULL REFERENCES canonical_entities(id) ON DELETE CASCADE,
+            anchor_role VARCHAR(32) NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            CONSTRAINT uq_knowledge_context_anchors_entity UNIQUE (context_id, canonical_entity_id)
+        )""",
+        "CREATE INDEX IF NOT EXISTS ix_knowledge_context_anchors_entity ON knowledge_context_anchors(canonical_entity_id)",
         """CREATE TABLE IF NOT EXISTS knowledge_context_memberships (
             id UUID PRIMARY KEY,
             context_id UUID NOT NULL REFERENCES knowledge_contexts(id) ON DELETE CASCADE,

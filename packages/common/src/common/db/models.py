@@ -394,7 +394,10 @@ class CanonicalEntity(Base):
         back_populates="canonical_entity",
         cascade="all, delete-orphan",
     )
-    contexts: Mapped[list["KnowledgeContext"]] = relationship(back_populates="canonical_entity")
+    primary_contexts: Mapped[list["KnowledgeContext"]] = relationship(back_populates="canonical_entity")
+    context_anchors: Mapped[list["KnowledgeContextAnchor"]] = relationship(
+        back_populates="canonical_entity", cascade="all, delete-orphan"
+    )
 
 
 class CanonicalEntityVariant(Base):
@@ -433,10 +436,34 @@ class KnowledgeContext(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    canonical_entity: Mapped["CanonicalEntity"] = relationship(back_populates="contexts")
+    canonical_entity: Mapped["CanonicalEntity"] = relationship(back_populates="primary_contexts")
+    anchors: Mapped[list["KnowledgeContextAnchor"]] = relationship(
+        back_populates="context", cascade="all, delete-orphan"
+    )
     memberships: Mapped[list["KnowledgeContextMembership"]] = relationship(
         back_populates="context", cascade="all, delete-orphan"
     )
+
+
+class KnowledgeContextAnchor(Base):
+    __tablename__ = "knowledge_context_anchors"
+    __table_args__ = (
+        UniqueConstraint("context_id", "canonical_entity_id", name="uq_knowledge_context_anchors_entity"),
+        Index("ix_knowledge_context_anchors_entity", "canonical_entity_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    context_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("knowledge_contexts.id", ondelete="CASCADE"), nullable=False
+    )
+    canonical_entity_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("canonical_entities.id", ondelete="CASCADE"), nullable=False
+    )
+    anchor_role: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    context: Mapped["KnowledgeContext"] = relationship(back_populates="anchors")
+    canonical_entity: Mapped["CanonicalEntity"] = relationship(back_populates="context_anchors")
 
 
 class KnowledgeContextMembership(Base):
