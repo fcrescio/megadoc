@@ -333,6 +333,37 @@ class CanonicalEntityDetailResponse(BaseModel):
     documents: list[KnowledgeEntityDocumentHitResponse] = Field(default_factory=list)
 
 
+class KnowledgeContextSummaryResponse(BaseModel):
+    id: str
+    context_kind: str
+    label: str
+    review_status: str
+    canonical_entity_id: str
+    canonical_entity_type: str
+    canonical_value: str
+    document_count: int
+    document_unit_count: int
+    direct_membership_count: int
+
+
+class KnowledgeContextMembershipResponse(BaseModel):
+    document: KnowledgeEntityDocumentHitResponse
+    membership_role: str
+    confidence: Optional[float] = None
+    source_type: str
+    evidence_json: dict[str, Any] | None = None
+
+
+class KnowledgeContextDetailResponse(BaseModel):
+    context: KnowledgeContextSummaryResponse
+    memberships: list[KnowledgeContextMembershipResponse] = Field(default_factory=list)
+
+
+class KnowledgeContextStatsResponse(BaseModel):
+    contexts: int
+    memberships: int
+
+
 class CanonicalEntityCreate(BaseModel):
     entity_type: str
     canonical_value: str

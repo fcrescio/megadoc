@@ -53,6 +53,30 @@ def ensure_knowledge_schema(engine) -> None:
             updated_at TIMESTAMPTZ NULL
         )""",
         "CREATE INDEX IF NOT EXISTS ix_canonical_entity_variants_type_key ON canonical_entity_variants(entity_type, entity_key)",
+        """CREATE TABLE IF NOT EXISTS knowledge_contexts (
+            id UUID PRIMARY KEY,
+            context_kind VARCHAR(32) NOT NULL DEFAULT 'entity',
+            canonical_entity_id UUID NOT NULL REFERENCES canonical_entities(id) ON DELETE CASCADE,
+            label VARCHAR(512) NOT NULL,
+            review_status VARCHAR(32) NOT NULL DEFAULT 'auto',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NULL,
+            CONSTRAINT uq_knowledge_contexts_kind_entity UNIQUE (context_kind, canonical_entity_id)
+        )""",
+        "CREATE INDEX IF NOT EXISTS ix_knowledge_contexts_kind_label ON knowledge_contexts(context_kind, label)",
+        """CREATE TABLE IF NOT EXISTS knowledge_context_memberships (
+            id UUID PRIMARY KEY,
+            context_id UUID NOT NULL REFERENCES knowledge_contexts(id) ON DELETE CASCADE,
+            document_unit_id UUID NOT NULL REFERENCES document_units(id) ON DELETE CASCADE,
+            membership_role VARCHAR(32) NOT NULL,
+            confidence DOUBLE PRECISION NULL,
+            source_type VARCHAR(32) NOT NULL,
+            evidence_json JSON NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            CONSTRAINT uq_knowledge_context_memberships_unit UNIQUE (context_id, document_unit_id)
+        )""",
+        "CREATE INDEX IF NOT EXISTS ix_knowledge_context_memberships_unit ON knowledge_context_memberships(document_unit_id)",
+        "CREATE INDEX IF NOT EXISTS ix_knowledge_context_memberships_context_role ON knowledge_context_memberships(context_id, membership_role)",
         """CREATE TABLE IF NOT EXISTS manual_comments (
             id UUID PRIMARY KEY,
             manual_slug VARCHAR(128) NOT NULL,

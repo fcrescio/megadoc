@@ -266,6 +266,9 @@ class DocumentUnit(Base):
     specialist_results: Mapped[list["SpecialistResult"]] = relationship(
         back_populates="document_unit", cascade="all, delete-orphan"
     )
+    context_memberships: Mapped[list["KnowledgeContextMembership"]] = relationship(
+        back_populates="document_unit", cascade="all, delete-orphan"
+    )
     accounting_facts: Mapped[list["AccountingFact"]] = relationship(
         back_populates="document_unit", cascade="all, delete-orphan"
     )
@@ -391,6 +394,7 @@ class CanonicalEntity(Base):
         back_populates="canonical_entity",
         cascade="all, delete-orphan",
     )
+    contexts: Mapped[list["KnowledgeContext"]] = relationship(back_populates="canonical_entity")
 
 
 class CanonicalEntityVariant(Base):
@@ -410,6 +414,54 @@ class CanonicalEntityVariant(Base):
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     canonical_entity: Mapped["CanonicalEntity"] = relationship(back_populates="variants")
+
+
+class KnowledgeContext(Base):
+    __tablename__ = "knowledge_contexts"
+    __table_args__ = (
+        UniqueConstraint("context_kind", "canonical_entity_id", name="uq_knowledge_contexts_kind_entity"),
+        Index("ix_knowledge_contexts_kind_label", "context_kind", "label"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    context_kind: Mapped[str] = mapped_column(String(32), nullable=False, default="entity")
+    canonical_entity_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("canonical_entities.id", ondelete="CASCADE"), nullable=False
+    )
+    label: Mapped[str] = mapped_column(String(512), nullable=False)
+    review_status: Mapped[str] = mapped_column(String(32), nullable=False, default="auto")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    canonical_entity: Mapped["CanonicalEntity"] = relationship(back_populates="contexts")
+    memberships: Mapped[list["KnowledgeContextMembership"]] = relationship(
+        back_populates="context", cascade="all, delete-orphan"
+    )
+
+
+class KnowledgeContextMembership(Base):
+    __tablename__ = "knowledge_context_memberships"
+    __table_args__ = (
+        UniqueConstraint("context_id", "document_unit_id", name="uq_knowledge_context_memberships_unit"),
+        Index("ix_knowledge_context_memberships_unit", "document_unit_id"),
+        Index("ix_knowledge_context_memberships_context_role", "context_id", "membership_role"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    context_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("knowledge_contexts.id", ondelete="CASCADE"), nullable=False
+    )
+    document_unit_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("document_units.id", ondelete="CASCADE"), nullable=False
+    )
+    membership_role: Mapped[str] = mapped_column(String(32), nullable=False)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    source_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    evidence_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    context: Mapped["KnowledgeContext"] = relationship(back_populates="memberships")
+    document_unit: Mapped["DocumentUnit"] = relationship(back_populates="context_memberships")
 
 
 class KnowledgeNode(Base):

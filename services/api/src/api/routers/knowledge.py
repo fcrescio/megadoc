@@ -17,10 +17,13 @@ from common.application.knowledge import (
     mark_knowledge_job_pending_dispatch,
 )
 from common.application.graph import graph_stats, rebuild_knowledge_graph
+from common.application.contexts import rebuild_knowledge_contexts
 from common.application.specialists import ensure_specialist_jobs_for_scan_unit
 from common.db.models import (
     CanonicalEntity,
     CanonicalEntityVariant,
+    KnowledgeContext,
+    KnowledgeContextMembership,
     Document,
     DocumentType,
     OCRResult,
@@ -61,6 +64,10 @@ from knowledge_classifier.schemas import (
     CanonicalEntityVariantResponse,
     CanonicalEntityDetailResponse,
     CanonicalEntityMergeRequest,
+    KnowledgeContextDetailResponse,
+    KnowledgeContextMembershipResponse,
+    KnowledgeContextStatsResponse,
+    KnowledgeContextSummaryResponse,
     KnowledgeAssertionResponse,
     KnowledgeGraphStatsResponse,
     KnowledgeNodeDetailResponse,
@@ -485,6 +492,43 @@ def _serialize_canonical_entity_summary(entity: CanonicalEntity, document_count:
         review_status=entity.review_status,
         variant_count=len(entity.variants),
         document_count=document_count,
+    )
+
+
+def _serialize_knowledge_context_summary(context: KnowledgeContext) -> KnowledgeContextSummaryResponse:
+    memberships = context.memberships
+    document_ids = {
+        str(membership.document_unit.scan_unit.source_document_id)
+        for membership in memberships
+        if membership.document_unit.scan_unit is not None
+    }
+    return KnowledgeContextSummaryResponse(
+        id=str(context.id),
+        context_kind=context.context_kind,
+        label=context.label,
+        review_status=context.review_status,
+        canonical_entity_id=str(context.canonical_entity_id),
+        canonical_entity_type=context.canonical_entity.entity_type,
+        canonical_value=context.canonical_entity.canonical_value,
+        document_count=len(document_ids),
+        document_unit_count=len(memberships),
+        direct_membership_count=sum(
+            membership.membership_role == "direct" for membership in memberships
+        ),
+    )
+
+
+def _knowledge_context_options():
+    return (
+        selectinload(KnowledgeContext.canonical_entity),
+        selectinload(KnowledgeContext.memberships)
+        .selectinload(KnowledgeContextMembership.document_unit)
+        .selectinload(DocumentUnit.scan_unit)
+        .selectinload(ScanUnit.document),
+        selectinload(KnowledgeContext.memberships)
+        .selectinload(KnowledgeContextMembership.document_unit)
+        .selectinload(DocumentUnit.topic_assignments)
+        .selectinload(DocumentUnitTopicAssignment.topic),
     )
 
 
@@ -1563,6 +1607,7 @@ def merge_canonical_entities(
     db.commit()
 
     rebuild_knowledge_graph(db)
+    rebuild_knowledge_contexts(db)
     db.commit()
 
     db.refresh(canonical_entity)
@@ -1617,6 +1662,85 @@ def merge_canonical_entities(
     )
 
 
+@router.get("/contexts", response_model=list[KnowledgeContextSummaryResponse])
+def list_knowledge_contexts(
+    q: str | None = None,
+    entity_type: str | None = None,
+    limit: int = Query(default=30, ge=1, le=200),
+    db: Session = Depends(get_db_session),
+):
+    query = (
+        select(KnowledgeContext)
+        .join(CanonicalEntity, CanonicalEntity.id == KnowledgeContext.canonical_entity_id)
+        .options(*_knowledge_context_options())
+        .order_by(KnowledgeContext.label.asc())
+    )
+    if entity_type:
+        query = query.where(CanonicalEntity.entity_type == entity_type)
+    if q and q.strip():
+        pattern = f"%{q.strip()}%"
+        query = query.where(
+            or_(
+                KnowledgeContext.label.ilike(pattern),
+                CanonicalEntity.canonical_value.ilike(pattern),
+            )
+        )
+    contexts = db.execute(query.limit(limit)).scalars().unique().all()
+    return [_serialize_knowledge_context_summary(context) for context in contexts]
+
+
+@router.get("/contexts/{context_id}", response_model=KnowledgeContextDetailResponse)
+def get_knowledge_context(context_id: uuid.UUID, db: Session = Depends(get_db_session)):
+    context = db.execute(
+        select(KnowledgeContext)
+        .options(*_knowledge_context_options())
+        .where(KnowledgeContext.id == context_id)
+    ).scalar_one_or_none()
+    if context is None:
+        raise HTTPException(status_code=404, detail="Knowledge context not found")
+    memberships = []
+    for membership in context.memberships:
+        document_unit = membership.document_unit
+        if document_unit.scan_unit is None or document_unit.scan_unit.document is None:
+            continue
+        document = document_unit.scan_unit.document
+        memberships.append(
+            KnowledgeContextMembershipResponse(
+                document=KnowledgeEntityDocumentHitResponse(
+                    document_id=str(document.id),
+                    document_unit_id=str(document_unit.id),
+                    original_filename=document.original_filename,
+                    external_id=document.external_id,
+                    title=document_unit.title,
+                    summary=document_unit.extracted_summary,
+                    review_status=document_unit.review_status,
+                    start_page=document_unit.start_page,
+                    end_page=document_unit.end_page,
+                    topic_titles=[
+                        assignment.topic.title
+                        for assignment in document_unit.topic_assignments
+                        if assignment.topic is not None and assignment.topic.is_active
+                    ],
+                ),
+                membership_role=membership.membership_role,
+                confidence=membership.confidence,
+                source_type=membership.source_type,
+                evidence_json=membership.evidence_json,
+            )
+        )
+    return KnowledgeContextDetailResponse(
+        context=_serialize_knowledge_context_summary(context),
+        memberships=memberships,
+    )
+
+
+@router.post("/contexts/rebuild", response_model=KnowledgeContextStatsResponse)
+def rebuild_context_projection(db: Session = Depends(get_db_session)):
+    stats = rebuild_knowledge_contexts(db)
+    db.commit()
+    return KnowledgeContextStatsResponse(**stats.__dict__)
+
+
 def _knowledge_node_options():
     return (
         selectinload(KnowledgeNode.aliases),
@@ -1649,6 +1773,7 @@ def get_knowledge_graph_stats(db: Session = Depends(get_db_session)):
 @router.post("/graph/rebuild", response_model=KnowledgeGraphStatsResponse)
 def rebuild_graph_projection(db: Session = Depends(get_db_session)):
     stats = rebuild_knowledge_graph(db)
+    rebuild_knowledge_contexts(db)
     db.commit()
     return KnowledgeGraphStatsResponse(**stats.__dict__)
 
