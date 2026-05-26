@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from html.parser import HTMLParser
 from typing import Any
 
@@ -18,6 +19,7 @@ def process_accounting_statement(
     period_from, period_to = _extract_period(text)
     tables = _extract_structured_tables(document_unit, structured_json or {}) or _extract_markdown_tables(text)
     validation_checks = _build_validation_checks(tables)
+    accounts = _extract_accounts(tables, period_from, period_to)
 
     confidence = 0.45
     if tables:
@@ -41,6 +43,7 @@ def process_accounting_statement(
         "currency": "EUR",
         "tables": tables,
         "validation_checks": validation_checks,
+        "accounts": accounts,
     }
     return result, confidence
 
@@ -577,6 +580,256 @@ def _build_validation_checks(tables: list[dict[str, Any]]) -> list[dict[str, Any
             }
         )
     return checks
+
+
+def _extract_accounts(
+    tables: list[dict[str, Any]],
+    period_from: str | None,
+    period_to: str | None,
+) -> list[dict[str, Any]]:
+    grouped: dict[str, dict[str, Any]] = {}
+    alias_counts: dict[str, dict[str, int]] = {}
+
+    for table in tables:
+        if (
+            table.get("table_type") not in {"expense_allocation", "payment_schedule"}
+            and not _is_payment_ledger(table)
+        ):
+            continue
+        rows = table.get("rows")
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            identity = _extract_account_identity(row)
+            if identity is None:
+                continue
+            unit_code, subject_label = identity
+            account_key = _normalize_key(unit_code)
+            account = grouped.setdefault(
+                account_key,
+                {
+                    "account_key": account_key,
+                    "unit_code": unit_code,
+                    "subject_label": subject_label,
+                    "subject_aliases": [],
+                    "facts": [],
+                },
+            )
+            aliases = alias_counts.setdefault(account_key, {})
+            aliases[subject_label] = aliases.get(subject_label, 0) + 1
+            account["facts"].extend(
+                _extract_row_facts(
+                    table,
+                    row,
+                    period_from=period_from,
+                    period_to=period_to,
+                )
+            )
+
+    accounts: list[dict[str, Any]] = []
+    for account_key, account in grouped.items():
+        aliases = alias_counts[account_key]
+        account["subject_label"] = max(aliases, key=lambda value: (aliases[value], len(value), value))
+        account["subject_aliases"] = sorted(aliases)
+        if account["facts"]:
+            accounts.append(account)
+    return sorted(accounts, key=lambda account: (account["unit_code"], account["subject_label"]))
+
+
+def _extract_account_identity(row: dict[str, Any]) -> tuple[str, str] | None:
+    cells = row.get("cells")
+    if not isinstance(cells, dict):
+        return None
+    textual_cells = {
+        str(header): str(value).strip()
+        for header, value in cells.items()
+        if isinstance(value, str) and value.strip()
+    }
+
+    for header, value in textual_cells.items():
+        if any(token in header.lower() for token in ("nominativo", "condomino", "proprietario")):
+            parsed = _parse_name_and_unit(value)
+            if parsed is not None:
+                return parsed
+
+    for value in textual_cells.values():
+        parsed = _parse_prefixed_account(value)
+        if parsed is not None:
+            return parsed
+
+    unit_code = next(
+        (
+            match.group(1).upper().replace(" ", "")
+            for value in textual_cells.values()
+            if (
+                match := re.fullmatch(
+                    r"\s*([A-Z]{1,2}\s*\d{1,3})(?:\s*\([^)]*\))?\s*",
+                    value,
+                    re.IGNORECASE,
+                )
+            )
+        ),
+        None,
+    )
+    if unit_code is None:
+        return None
+    subject = next(
+        (
+            value
+            for value in textual_cells.values()
+            if _looks_like_subject(value) and unit_code.lower() not in value.lower()
+        ),
+        None,
+    )
+    if subject is None:
+        return None
+    return unit_code, subject
+
+
+def _parse_name_and_unit(value: str) -> tuple[str, str] | None:
+    parenthesized = re.match(r"^\s*(.+?)\s*\(([A-Z]{1,2}\s*\d{1,3})\)\s*$", value, re.IGNORECASE)
+    if parenthesized and _looks_like_subject(parenthesized.group(1)):
+        return parenthesized.group(2).upper().replace(" ", ""), parenthesized.group(1).strip()
+    return _parse_prefixed_account(value)
+
+
+def _parse_prefixed_account(value: str) -> tuple[str, str] | None:
+    match = re.match(
+        r"^\s*-?\s*([A-Z]{1,2}\s*\d{1,3})\s+([A-ZÀ-ÖØ-Ý' ]{3,60}?)(?:\s+-|$)",
+        value,
+        re.IGNORECASE,
+    )
+    if match is None:
+        return None
+    subject = re.sub(r"\s+", " ", match.group(2)).strip()
+    if not _looks_like_subject(subject):
+        return None
+    return match.group(1).upper().replace(" ", ""), subject
+
+
+def _looks_like_subject(value: str) -> bool:
+    lowered = value.lower()
+    if len(value) > 72 or any(token in lowered for token in ("fatt.", "rata ", "totale", "saldo", "euro")):
+        return False
+    words = re.findall(r"[A-Za-zÀ-ÖØ-öø-ÿ']+", value)
+    return len(words) >= 2
+
+
+def _is_payment_ledger(table: dict[str, Any]) -> bool:
+    headers = {
+        str(header).lower()
+        for row in table.get("rows", [])
+        if isinstance(row, dict)
+        for header in (row.get("cells") or {}).keys()
+    }
+    return {"nominativo", "importo"}.issubset(headers) and any("data pag" in header for header in headers)
+
+
+def _extract_row_facts(
+    table: dict[str, Any],
+    row: dict[str, Any],
+    *,
+    period_from: str | None,
+    period_to: str | None,
+) -> list[dict[str, Any]]:
+    amounts = row.get("normalized_amounts")
+    cells = row.get("cells")
+    if not isinstance(amounts, dict) or not isinstance(cells, dict):
+        return []
+    payment_ledger = _is_payment_ledger(table)
+    facts: list[dict[str, Any]] = []
+    for column, raw_amount in amounts.items():
+        if not isinstance(raw_amount, (int, float)):
+            continue
+        fact_type, category_label, is_total = _classify_fact_column(
+            str(column),
+            table_type=str(table.get("table_type") or "unknown"),
+            payment_ledger=payment_ledger,
+        )
+        if fact_type is None:
+            continue
+        amount = float(raw_amount)
+        normalized_amount = (
+            abs(amount)
+            if fact_type
+            in {
+                "allocated_expense",
+                "personal_charge",
+                "amount_due",
+                "payment_received",
+                "budgeted_expense",
+                "reimbursement",
+                "installment_due",
+            }
+            else amount
+        )
+        facts.append(
+            {
+                "fact_type": fact_type,
+                "category_key": _normalize_key(category_label) if category_label else None,
+                "category_label": category_label,
+                "amount": normalized_amount,
+                "raw_amount": amount,
+                "currency": "EUR",
+                "period_context": {
+                    "from": period_from,
+                    "to": period_to,
+                    "source": "document_unit",
+                    "review_status": "unverified",
+                },
+                "is_total": is_total,
+                "evidence": {
+                    "table_id": table.get("table_id"),
+                    "table_type": table.get("table_type"),
+                    "row_id": row.get("row_id"),
+                    "column": column,
+                    "raw_value": cells.get(column),
+                },
+            }
+        )
+    return facts
+
+
+def _classify_fact_column(
+    column: str,
+    *,
+    table_type: str,
+    payment_ledger: bool,
+) -> tuple[str | None, str | None, bool]:
+    lowered = column.lower()
+    if "mill" in lowered or re.fullmatch(r"column_\d+", lowered):
+        return None, None, False
+    if payment_ledger and lowered == "importo":
+        return "payment_received", None, False
+    if "totale dovuto" in lowered:
+        return "amount_due", None, True
+    if "totale preventivo" in lowered:
+        return "budgeted_expense", None, True
+    if "rata n." in lowered:
+        return "installment_due", column, False
+    if "quote a rimborso" in lowered:
+        return "reimbursement", None, False
+    if "rate versate" in lowered:
+        return "payment_received", None, True
+    if "saldo finale" in lowered:
+        return "closing_balance", None, True
+    if "saldi di fine" in lowered or "saldo iniziale" in lowered:
+        return "opening_balance", None, True
+    if "totale gestione" in lowered or lowered == "totale":
+        return "allocated_expense", "Totale gestione", True
+    if table_type == "expense_allocation" and lowered == "importo":
+        return "personal_charge", None, False
+    if table_type == "expense_allocation":
+        return "allocated_expense", column, False
+    return None, None, False
+
+
+def _normalize_key(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value.strip().lower())
+    ascii_value = normalized.encode("ascii", "ignore").decode("ascii")
+    return re.sub(r"[^a-z0-9]+", "_", ascii_value).strip("_") or "unknown"
 
 
 def _pick_amount_by_header(amounts: dict[str, float], header_hints: list[str]) -> float | None:
