@@ -15,6 +15,22 @@ def _utcnow() -> datetime:
 
 
 def extract_document_unit_text(document_unit: DocumentUnit, ocr_result: OCRResult) -> str:
+    pages = ocr_result.structured_json.get("pages") if isinstance(ocr_result.structured_json, dict) else None
+    if isinstance(pages, list):
+        selected: list[tuple[int, str]] = []
+        for page in pages:
+            if not isinstance(page, dict):
+                continue
+            page_number = page.get("page_number") or page.get("page_no")
+            if not isinstance(page_number, int) or not (document_unit.start_page <= page_number <= document_unit.end_page):
+                continue
+            page_text = page.get("markdown") or page.get("text")
+            if isinstance(page_text, str) and page_text.strip():
+                selected.append((page_number, page_text.strip()))
+        expected_pages = set(range(document_unit.start_page, document_unit.end_page + 1))
+        if {page_number for page_number, _ in selected} == expected_pages:
+            return "\n".join(text for _, text in sorted(selected)).strip()
+
     markdown = ocr_result.markdown_text or ""
     if not markdown or ocr_result.page_count <= 0:
         return ""
