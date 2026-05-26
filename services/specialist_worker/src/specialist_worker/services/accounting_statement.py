@@ -17,7 +17,13 @@ def process_accounting_statement(
     text = segment_text or ""
     statement_type = _statement_type(text)
     period_from, period_to = _extract_period(text)
-    tables = _extract_structured_tables(document_unit, structured_json or {}) or _extract_markdown_tables(text)
+    tables = _extract_structured_tables(
+        document_unit,
+        structured_json or {},
+        text,
+        period_from=period_from,
+        period_to=period_to,
+    ) or _extract_markdown_tables(text, period_from=period_from, period_to=period_to)
     validation_checks = _build_validation_checks(tables)
     accounts = _extract_accounts(tables, period_from, period_to)
 
@@ -70,6 +76,20 @@ def _extract_period(text: str) -> tuple[str | None, str | None]:
     return _normalize_date(match.group(1)), _normalize_date(match.group(2))
 
 
+def _extract_last_period(text: str) -> tuple[str | None, str | None]:
+    matches = list(
+        re.finditer(
+            r"Periodo:\s*(\d{1,2}/\d{1,2}/\d{2,4})\s*-\s*(\d{1,2}/\d{1,2}/\d{2,4})",
+            text,
+            re.IGNORECASE,
+        )
+    )
+    if not matches:
+        return None, None
+    match = matches[-1]
+    return _normalize_date(match.group(1)), _normalize_date(match.group(2))
+
+
 def _normalize_date(value: str) -> str:
     day, month, year = re.split(r"[/-]", value)
     if len(year) == 2:
@@ -77,8 +97,63 @@ def _normalize_date(value: str) -> str:
     return f"{year}-{month.zfill(2)}-{day.zfill(2)}"
 
 
-def _extract_structured_tables(document_unit: DocumentUnit, structured_json: dict[str, Any]) -> list[dict[str, Any]]:
+def _accounting_context(
+    table: dict[str, Any],
+    preceding_text: str | None,
+    *,
+    period_from: str | None,
+    period_to: str | None,
+) -> dict[str, Any]:
+    if preceding_text is None:
+        return {
+            "role": _semantic_table_role(table, ""),
+            "period_from": period_from,
+            "period_to": period_to,
+            "source": "document_unit",
+            "review_status": "unverified",
+        }
+
+    context_from, context_to = _extract_last_period(preceding_text)
+    context_is_localized = context_from is not None or context_to is not None
+    return {
+        "role": _semantic_table_role(table, preceding_text),
+        "period_from": context_from if context_is_localized else period_from,
+        "period_to": context_to if context_is_localized else period_to,
+        "source": "preceding_section" if context_is_localized else "document_unit",
+        "review_status": "inferred" if context_is_localized else "unverified",
+    }
+
+
+def _semantic_table_role(table: dict[str, Any], preceding_text: str) -> str | None:
+    if table.get("table_type") == "payment_schedule":
+        return "budget_installment_schedule"
+    if _is_payment_ledger(table):
+        return "actual_payments"
+
+    role_patterns = (
+        ("actual_allocation", r"consuntivo\s+ripartizioni|riparto\s+consuntivo"),
+        ("budget_allocation", r"preventivo\s+ripartizioni|ripartizione\s+preventivo"),
+        ("budget_summary", r"bilancio\s+preventivo"),
+        ("actual_summary", r"consuntivo\s+gestione|bilancio\s+consuntivo"),
+    )
+    selected: tuple[int, str] | None = None
+    for role, pattern in role_patterns:
+        matches = list(re.finditer(pattern, preceding_text, re.IGNORECASE))
+        if matches and (selected is None or matches[-1].start() > selected[0]):
+            selected = (matches[-1].start(), role)
+    return selected[1] if selected is not None else None
+
+
+def _extract_structured_tables(
+    document_unit: DocumentUnit,
+    structured_json: dict[str, Any],
+    text: str,
+    *,
+    period_from: str | None,
+    period_to: str | None,
+) -> list[dict[str, Any]]:
     extracted: list[dict[str, Any]] = []
+    search_offset = 0
     for index, table in enumerate(_iter_structured_tables(structured_json), start=1):
         if not _table_overlaps_document_unit(table, document_unit.start_page, document_unit.end_page):
             continue
@@ -86,17 +161,28 @@ def _extract_structured_tables(document_unit: DocumentUnit, structured_json: dic
         if parsed is None:
             continue
         headers, rows, raw_headers = parsed
-        extracted.append(
-            {
-                "table_id": table.get("self_ref", f"table_{index}").split("/")[-1] or f"table_{index}",
-                "table_type": _classify_table(headers, rows),
-                "headers": headers,
-                "raw_headers": raw_headers,
-                "rows": rows,
-                "totals": _extract_table_totals(headers, rows),
-                "source": "docling_structured",
-            }
+        parsed_table = {
+            "table_id": table.get("self_ref", f"table_{index}").split("/")[-1] or f"table_{index}",
+            "table_type": _classify_table(headers, rows),
+            "headers": headers,
+            "raw_headers": raw_headers,
+            "rows": rows,
+            "totals": _extract_table_totals(headers, rows),
+            "source": "docling_structured",
+        }
+        html = _table_html(table)
+        table_position = text.find(html, search_offset) if html else -1
+        prefix = None
+        if table_position >= 0:
+            prefix = text[:table_position]
+            search_offset = table_position + len(html)
+        parsed_table["accounting_context"] = _accounting_context(
+            parsed_table,
+            prefix,
+            period_from=period_from,
+            period_to=period_to,
         )
+        extracted.append(parsed_table)
     return extracted
 
 
@@ -351,36 +437,49 @@ def _make_unique_headers(raw_headers: list[list[str]]) -> list[str]:
     return headers
 
 
-def _extract_markdown_tables(text: str) -> list[dict[str, Any]]:
+def _extract_markdown_tables(
+    text: str,
+    *,
+    period_from: str | None,
+    period_to: str | None,
+) -> list[dict[str, Any]]:
     lines = text.splitlines()
-    blocks: list[list[str]] = []
+    blocks: list[tuple[int, list[str]]] = []
     current: list[str] = []
-    for line in lines:
+    block_start = 0
+    for line_number, line in enumerate(lines):
         if line.count("|") >= 2:
+            if not current:
+                block_start = line_number
             current.append(line)
         else:
             if current:
-                blocks.append(current)
+                blocks.append((block_start, current))
                 current = []
     if current:
-        blocks.append(current)
+        blocks.append((block_start, current))
 
     tables: list[dict[str, Any]] = []
-    for index, block in enumerate(blocks, start=1):
+    for index, (start_line, block) in enumerate(blocks, start=1):
         parsed = _parse_table_block(block)
         if parsed is None:
             continue
         headers, rows = parsed
-        tables.append(
-            {
-                "table_id": f"table_{index}",
-                "table_type": _classify_table(headers, rows),
-                "headers": headers,
-                "rows": rows,
-                "totals": _extract_table_totals(headers, rows),
-                "source": "markdown_fallback",
-            }
+        parsed_table = {
+            "table_id": f"table_{index}",
+            "table_type": _classify_table(headers, rows),
+            "headers": headers,
+            "rows": rows,
+            "totals": _extract_table_totals(headers, rows),
+            "source": "markdown_fallback",
+        }
+        parsed_table["accounting_context"] = _accounting_context(
+            parsed_table,
+            "\n".join(lines[:start_line]),
+            period_from=period_from,
+            period_to=period_to,
         )
+        tables.append(parsed_table)
     return tables
 
 
@@ -739,6 +838,13 @@ def _extract_row_facts(
     if not isinstance(amounts, dict) or not isinstance(cells, dict):
         return []
     payment_ledger = _is_payment_ledger(table)
+    accounting_context = table.get("accounting_context")
+    if not isinstance(accounting_context, dict):
+        accounting_context = {}
+    context_from = accounting_context.get("period_from") or period_from
+    context_to = accounting_context.get("period_to") or period_to
+    context_source = accounting_context.get("source") or "document_unit"
+    context_review_status = accounting_context.get("review_status") or "unverified"
     facts: list[dict[str, Any]] = []
     for column, raw_amount in amounts.items():
         if not isinstance(raw_amount, (int, float)):
@@ -768,21 +874,23 @@ def _extract_row_facts(
         facts.append(
             {
                 "fact_type": fact_type,
+                "accounting_role": accounting_context.get("role"),
                 "category_key": _normalize_key(category_label) if category_label else None,
                 "category_label": category_label,
                 "amount": normalized_amount,
                 "raw_amount": amount,
                 "currency": "EUR",
                 "period_context": {
-                    "from": period_from,
-                    "to": period_to,
-                    "source": "document_unit",
-                    "review_status": "unverified",
+                    "from": context_from,
+                    "to": context_to,
+                    "source": context_source,
+                    "review_status": context_review_status,
                 },
                 "is_total": is_total,
                 "evidence": {
                     "table_id": table.get("table_id"),
                     "table_type": table.get("table_type"),
+                    "accounting_context": accounting_context,
                     "row_id": row.get("row_id"),
                     "column": column,
                     "raw_value": cells.get(column),

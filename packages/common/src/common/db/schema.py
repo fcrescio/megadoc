@@ -210,6 +210,7 @@ def ensure_knowledge_schema(engine) -> None:
             document_unit_id UUID NOT NULL REFERENCES document_units(id) ON DELETE CASCADE,
             specialist_result_id UUID NULL REFERENCES specialist_results(id) ON DELETE CASCADE,
             account_id UUID NOT NULL REFERENCES accounting_accounts(id) ON DELETE CASCADE,
+            accounting_role VARCHAR(64) NULL,
             fact_type VARCHAR(64) NOT NULL,
             category_key VARCHAR(512) NULL,
             category_label VARCHAR(512) NULL,
@@ -226,6 +227,7 @@ def ensure_knowledge_schema(engine) -> None:
             evidence_json JSON NULL,
             created_at TIMESTAMPTZ NOT NULL DEFAULT now()
         )""",
+        "ALTER TABLE accounting_facts ADD COLUMN IF NOT EXISTS accounting_role VARCHAR(64) NULL",
         "CREATE INDEX IF NOT EXISTS ix_accounting_facts_account_type ON accounting_facts(account_id, fact_type)",
         "CREATE INDEX IF NOT EXISTS ix_accounting_facts_unit_type ON accounting_facts(document_unit_id, fact_type)",
         "CREATE INDEX IF NOT EXISTS ix_accounting_facts_category ON accounting_facts(category_key)",

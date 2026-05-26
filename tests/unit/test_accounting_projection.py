@@ -53,7 +53,7 @@ def _make_statement_unit(db_session) -> tuple[DocumentUnit, SpecialistResult]:
     result = SpecialistResult(
         document_unit=unit,
         specialist_type="accounting_statement",
-        schema_version="accounting_statement_v2",
+        schema_version="accounting_statement_v3",
         confidence=0.93,
         review_status="auto_accepted",
         result_json={
@@ -66,6 +66,7 @@ def _make_statement_unit(db_session) -> tuple[DocumentUnit, SpecialistResult]:
                     "facts": [
                         {
                             "fact_type": "allocated_expense",
+                            "accounting_role": "actual_allocation",
                             "category_key": "spese_generali",
                             "category_label": "Spese generali",
                             "amount": 362.59,
@@ -103,6 +104,7 @@ def test_accounting_projection_materializes_scoped_facts(db_session):
     assert account.unit_code == "B11"
     assert {alias.alias for alias in account.aliases} == {"BONACCI FABIO", "Fabio Bonacci"}
     assert fact.fact_type == "allocated_expense"
+    assert fact.accounting_role == "actual_allocation"
     assert fact.amount == Decimal("362.59")
     assert fact.raw_amount == Decimal("-362.59")
     assert fact.period_source == "document_unit"

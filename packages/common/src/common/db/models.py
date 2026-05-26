@@ -533,6 +533,7 @@ class AccountingFact(Base):
     account_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("accounting_accounts.id", ondelete="CASCADE"), nullable=False
     )
+    accounting_role: Mapped[str | None] = mapped_column(String(64), nullable=True)
     fact_type: Mapped[str] = mapped_column(String(64), nullable=False)
     category_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
     category_label: Mapped[str | None] = mapped_column(String(512), nullable=True)

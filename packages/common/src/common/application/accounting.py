@@ -182,6 +182,7 @@ def _build_fact(
         document_unit_id=document_unit.id,
         specialist_result_id=specialist_result.id,
         account_id=account.id,
+        accounting_role=_safe_text(payload.get("accounting_role"), limit=64),
         fact_type=fact_type,
         category_key=_safe_key(payload.get("category_key")),
         category_label=_safe_text(payload.get("category_label")),

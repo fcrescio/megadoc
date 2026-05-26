@@ -39,12 +39,13 @@ Periodo: 01/07/2022 - 30/06/2023
     assert general_expense["period_context"] == {
         "from": "2022-07-01",
         "to": "2023-06-30",
-        "source": "document_unit",
-        "review_status": "unverified",
+        "source": "preceding_section",
+        "review_status": "inferred",
     }
     assert general_expense["evidence"]["column"] == "Propr. Generale / Spese generali"
 
     total_due = next(fact for fact in account["facts"] if fact["fact_type"] == "amount_due")
+    assert total_due["accounting_role"] == "budget_installment_schedule"
     assert total_due["amount"] == 1897.45
     assert total_due["evidence"]["raw_value"] == "1.897,45"
 
@@ -62,3 +63,62 @@ Periodo: 01/07/2022 - 30/06/2023
     account = result["accounts"][0]
     assert account["unit_code"] == "C28"
     assert [fact["category_key"] for fact in account["facts"]] == ["totale_gestione"]
+
+
+def test_accounting_statement_scopes_period_and_role_to_each_section():
+    text = """
+Consuntivo Ripartizioni per unita
+Periodo: 01/07/2022 - 30/06/2023
+| Unita | Nominativo | Totale gestione | Rate versate | Saldo finale |
+| --- | --- | ---: | ---: | ---: |
+| B11 | BONACCI FABIO | -1.419,21 | -2.030,41 | 636,41 |
+
+Preventivo ripartizioni per unita
+Periodo: 01/07/2023 - 30/06/2024
+| Nominativo | Unita | Totale preventivo | Rata n. 1 01/09/2023 | Totale dovuto |
+| --- | --- | ---: | ---: | ---: |
+| BONACCI FABIO | B11 (Pr) | -1.897,45 | 847,45 | 1.897,45 |
+"""
+
+    result, _ = process_accounting_statement(_document_unit(), text, "fixture:v2")
+
+    facts = result["accounts"][0]["facts"]
+    closing_balance = next(fact for fact in facts if fact["fact_type"] == "closing_balance")
+    due = next(fact for fact in facts if fact["fact_type"] == "amount_due")
+
+    assert closing_balance["accounting_role"] == "actual_allocation"
+    assert closing_balance["period_context"]["from"] == "2022-07-01"
+    assert due["accounting_role"] == "budget_installment_schedule"
+    assert due["period_context"] == {
+        "from": "2023-07-01",
+        "to": "2024-06-30",
+        "source": "preceding_section",
+        "review_status": "inferred",
+    }
+
+
+def test_accounting_statement_locates_context_for_structured_table():
+    html = (
+        "<table><thead><tr><th>Unita</th><th>Nominativo</th><th>Totale gestione</th>"
+        "<th>Saldo finale</th></tr></thead><tbody><tr><td>B11</td><td>BONACCI FABIO</td>"
+        "<td>-1.419,21</td><td>636,41</td></tr></tbody></table>"
+    )
+    text = f"Consuntivo Ripartizioni per unita\nPeriodo: 01/07/2022 - 30/06/2023\n{html}"
+    structured_json = {
+        "tables": [{"self_ref": "#/tables/table_1", "cells": [{"html": html}], "page_number": 1}]
+    }
+
+    result, _ = process_accounting_statement(
+        _document_unit(),
+        text,
+        "fixture:v3",
+        structured_json=structured_json,
+    )
+
+    fact = next(
+        fact
+        for fact in result["accounts"][0]["facts"]
+        if fact["fact_type"] == "closing_balance"
+    )
+    assert fact["accounting_role"] == "actual_allocation"
+    assert fact["period_context"]["review_status"] == "inferred"
