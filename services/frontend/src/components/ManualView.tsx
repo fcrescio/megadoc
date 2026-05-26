@@ -165,7 +165,7 @@ function ManualView() {
               <p className="mt-2 text-2xl font-semibold text-white">{commentStats.commentedPassages}</p>
             </div>
             <div className="rounded-2xl border border-white/10 bg-white/5 p-4 col-span-2">
-              <p className="text-xs uppercase tracking-wide text-fuchsia-200/70">Come annotare</p>
+              <p className="text-xs uppercase tracking-wide text-fuchsia-200/70">Annotazione</p>
               <p className="mt-2 text-sm text-slate-200">
                 Evidenzia una frase del manuale e lascia una nota. I commenti vengono salvati insieme al testo
                 selezionato e servono a migliorare questo documento nel tempo.

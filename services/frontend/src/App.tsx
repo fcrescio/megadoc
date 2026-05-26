@@ -92,10 +92,10 @@ function App() {
       <div className="absolute inset-0 pointer-events-none opacity-40 bg-[linear-gradient(rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-[size:32px_32px]" />
 
       <header className="sticky top-0 z-20 backdrop-blur-xl bg-slate-950/55 border-b border-white/10">
-        <div className="max-w-7xl mx-auto px-5 py-4 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="max-w-7xl mx-auto px-5 py-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <p className="text-xs uppercase tracking-[0.35em] text-cyan-300/80">Megadoc Knowledge Console</p>
-            <h1 className="text-2xl lg:text-3xl font-semibold text-white">Document intelligence, now navigable</h1>
+            <p className="text-xs uppercase tracking-[0.35em] text-cyan-300/80">Megadoc</p>
+            <h1 className="text-lg font-semibold text-white">Console documentale</h1>
           </div>
 
           <div className="flex flex-wrap items-center gap-3 justify-end">
@@ -124,15 +124,13 @@ function App() {
         </div>
       </header>
 
-      <main className="relative max-w-7xl mx-auto px-5 py-8">
-        {!route.selectedDoc && (
+      <main className="relative max-w-7xl mx-auto px-5 py-4">
+        {!route.selectedDoc && route.view !== 'knowledge' && (
           <section className="mb-8 rounded-[28px] border border-white/10 bg-white/5 backdrop-blur-md shadow-[0_24px_80px_rgba(0,0,0,0.35)] overflow-hidden">
             <div className="grid gap-6 lg:grid-cols-[1.4fr_0.9fr] p-6 lg:p-8">
               <div>
-                <p className="text-sm text-cyan-200/80 mb-3">OCR, routing, consolidation and topic memory in one surface.</p>
-                <h2 className="text-3xl lg:text-5xl leading-tight font-semibold text-white">
-                  Navigate the corpus as a living knowledge graph, not a pile of PDFs.
-                </h2>
+                <p className="text-sm text-cyan-200/80 mb-3">OCR, classificazione e consultazione.</p>
+                <h2 className="text-3xl lg:text-4xl leading-tight font-semibold text-white">Archivio documentale</h2>
               </div>
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div className="rounded-2xl border border-cyan-300/15 bg-slate-900/45 p-4">
