@@ -121,8 +121,9 @@ services:
       timeout: 5s
       retries: 10
     networks:
-      - megadoc-net
-      - ml-infra-net
+      megadoc-net:
+      ml-infra-net:
+        ipv4_address: 10.89.0.51
 
   worker:
     build:
@@ -164,8 +165,9 @@ services:
         "${INGESTION_QUEUE_DEFAULT:-ingestion}"
       ]
     networks:
-      - megadoc-net
-      - ml-infra-net
+      megadoc-net:
+      ml-infra-net:
+        ipv4_address: 10.89.0.52
 
   worker_llm_vision:
     build:
@@ -206,8 +208,9 @@ services:
         "${INGESTION_QUEUE_LLM_VISION:-ingestion_llm_vision}"
       ]
     networks:
-      - megadoc-net
-      - ml-infra-net
+      megadoc-net:
+      ml-infra-net:
+        ipv4_address: 10.89.0.53
 
   knowledge_worker:
     build:
@@ -241,8 +244,9 @@ services:
         "knowledge"
       ]
     networks:
-      - megadoc-net
-      - ml-infra-net
+      megadoc-net:
+      ml-infra-net:
+        ipv4_address: 10.89.0.54
 
   specialist_utility_worker:
     build:
@@ -308,8 +312,9 @@ services:
         "${SPECIALIST_QUEUE_ACCOUNTING:-specialist_accounting}"
       ]
     networks:
-      - megadoc-net
-      - ml-infra-net
+      megadoc-net:
+      ml-infra-net:
+        ipv4_address: 10.89.0.55
 
   cli:
     build:
