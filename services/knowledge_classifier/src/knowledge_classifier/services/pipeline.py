@@ -28,6 +28,7 @@ from knowledge_classifier.llm.base import LLMProvider
 from knowledge_classifier.schemas import (
     ReviewStatus,
     ScanUnitStatus,
+    TopicCandidate,
     TopicProposalStatus,
 )
 from knowledge_classifier.services.classification import ClassificationService
@@ -575,9 +576,9 @@ class KnowledgePipelineService:
             
             # Execute decision
             if decision.action == "assign_existing":
-                self._create_topic_assignments(doc_unit, decision)
+                self._create_topic_assignments(doc_unit, decision, candidates_result.candidates)
             elif decision.action == "assign_multiple":
-                self._create_topic_assignments(doc_unit, decision)
+                self._create_topic_assignments(doc_unit, decision, candidates_result.candidates)
             elif decision.action == "propose_new":
                 reused_proposal = self._find_reusable_topic_proposal(scan_unit, decision, entities)
                 if reused_proposal and reused_proposal.matched_existing_topic_id:
@@ -595,7 +596,7 @@ class KnowledgePipelineService:
             elif decision.action == "needs_review":
                 doc_unit.review_status = ReviewStatus.NEEDS_REVIEW.value
                 # Still create tentative assignment
-                self._create_topic_assignments(doc_unit, decision)
+                self._create_topic_assignments(doc_unit, decision, candidates_result.candidates)
             
             # Save LLM decision
             self._save_llm_decision(
@@ -630,18 +631,54 @@ class KnowledgePipelineService:
         self,
         doc_unit: DBDocumentUnit,
         decision: Any,
+        candidates: list[TopicCandidate] | None = None,
     ):
         """Create topic assignments from decision."""
-        for topic_id, role in zip(decision.topic_ids, decision.assignment_roles):
+        for topic_reference, role in zip(decision.topic_ids, decision.assignment_roles):
+            topic_id = self._resolve_topic_reference(topic_reference, candidates or [])
+            if topic_id is None:
+                logger.warning(
+                    "Ignoring unresolved topic reference returned by LLM: %r",
+                    topic_reference,
+                )
+                doc_unit.review_status = ReviewStatus.NEEDS_REVIEW.value
+                continue
             normalized_role = self._normalize_assignment_role(role)
             assignment = DBDocumentUnitTopicAssignment(
                 document_unit_id=doc_unit.id,
-                topic_id=uuid.UUID(topic_id),
+                topic_id=topic_id,
                 assignment_role=normalized_role,
                 confidence=decision.confidence,
                 rationale=decision.rationale,
             )
             self.db.add(assignment)
+
+    def _resolve_topic_reference(
+        self,
+        topic_reference: str,
+        candidates: list[TopicCandidate],
+    ) -> uuid.UUID | None:
+        """Resolve model output only against topics made available in its prompt."""
+        reference = str(topic_reference).strip().strip("[]")
+        if not candidates:
+            try:
+                return uuid.UUID(reference)
+            except ValueError:
+                return None
+
+        normalized = reference.casefold()
+        for candidate in candidates:
+            values = {
+                candidate.topic_id.casefold(),
+                candidate.slug.casefold(),
+                candidate.title.casefold(),
+            }
+            if normalized in values or candidate.topic_id.casefold() in normalized:
+                return uuid.UUID(candidate.topic_id)
+
+        if len(candidates) == 1 and candidates[0].score >= 0.7:
+            return uuid.UUID(candidates[0].topic_id)
+        return None
 
     def _create_topic_proposal(
         self,

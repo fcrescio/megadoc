@@ -9,10 +9,11 @@ from common.db.models import (
     DocumentUnitEntity,
     DocumentUnitTopicAssignment,
     ScanUnit,
+    Topic,
     TopicProposal,
 )
 from knowledge_classifier.llm.mock import MockDeterministicProvider
-from knowledge_classifier.schemas import ExtractedEntity
+from knowledge_classifier.schemas import ExtractedEntity, TopicCandidate
 from knowledge_classifier.services.pipeline import KnowledgePipelineService
 
 
@@ -183,6 +184,55 @@ def test_create_topic_proposal_reuses_existing_provisional_topic_in_same_scan(db
     assert len(assignments) == 2
     assert assignments[0].topic_id == assignments[1].topic_id == reused_topic_id
     assert entities_count == 0
+
+
+def test_create_topic_assignments_resolves_malformed_reference_to_single_strong_candidate(
+    db_session,
+):
+    scan_unit = ScanUnit(
+        source_document_id=uuid.uuid4(),
+        source_ocr_result_id=uuid.uuid4(),
+        page_count=1,
+        status="processing",
+    )
+    doc_unit = DocumentUnit(
+        scan_unit=scan_unit,
+        ordinal=1,
+        start_page=1,
+        end_page=1,
+        review_status="auto_accepted",
+    )
+    topic = Topic(
+        slug="contabilita-condominio-cesare-studiati-pisa",
+        title="Contabilita Condominio Cesare Studiati Pisa",
+        topic_class="financial_period",
+        topic_kind="family",
+        canonical=True,
+        is_active=True,
+    )
+    db_session.add_all([scan_unit, doc_unit, topic])
+    db_session.flush()
+
+    service = KnowledgePipelineService(MockDeterministicProvider(), db_session)
+    decision = SimpleNamespace(
+        topic_ids=["contabilita-condominio-cesare-studiati-pisa"],
+        assignment_roles=["primary"],
+        confidence=0.93,
+        rationale="Same condominium accounting archive.",
+    )
+    candidate = TopicCandidate(
+        topic_id=str(topic.id),
+        slug=topic.slug,
+        title=topic.title,
+        score=0.95,
+        reasons=["Address match"],
+    )
+
+    service._create_topic_assignments(doc_unit, decision, [candidate])
+    db_session.flush()
+
+    assignment = db_session.query(DocumentUnitTopicAssignment).one()
+    assert assignment.topic_id == topic.id
 
 
 def test_looks_like_condominium_regulation_detects_fragmented_regulation_scan(db_session):
