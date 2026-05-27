@@ -149,13 +149,13 @@ def _accounting_reconciliation_provider() -> OpenAICompatibleProvider | None:
     endpoint = os.getenv("KN_WORKER_LLM_ENDPOINT", settings.llm_endpoint)
     if endpoint.startswith("mock://"):
         return None
-    timeout = int(os.getenv("SPECIALIST_ACCOUNTING_LLM_RECONCILIATION_TIMEOUT", "45"))
-    max_tokens = int(os.getenv("SPECIALIST_ACCOUNTING_LLM_RECONCILIATION_MAX_TOKENS", "1024"))
+    timeout = int(os.getenv("SPECIALIST_ACCOUNTING_LLM_RECONCILIATION_TIMEOUT", "240"))
+    max_tokens = int(os.getenv("SPECIALIST_ACCOUNTING_LLM_RECONCILIATION_MAX_TOKENS", "4096"))
     return OpenAICompatibleProvider(
         base_url=endpoint,
         model=settings.llm_model,
         api_key=settings.llm_api_key,
-        timeout=min(timeout, settings.llm_timeout),
+        timeout=timeout,
         max_tokens=min(max_tokens, settings.llm_max_tokens),
     )
 

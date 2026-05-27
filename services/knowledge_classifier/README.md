@@ -166,7 +166,7 @@ GET /knowledge/specialist-results/{result_id}/export?format=json|csv
 | `KN_WORKER_LLM_ENDPOINT` | Endpoint LLM visto dal worker in host network | `http://10.89.0.3:8080/v1` |
 | `KN_LLM_MODEL` | Nome modello LLM | `qwen3.6-A3B` |
 | `KN_LLM_API_KEY` | API key LLM | - |
-| `KN_LLM_TIMEOUT` | Timeout richieste | `120` |
+| `KN_LLM_TIMEOUT` | Timeout richieste | `240` |
 | `KN_LLM_TEMPERATURE` | Temperature LLM | `0.1` |
 | `KN_LLM_MAX_TOKENS` | Token massimi generati per singola richiesta LLM | `4096` |
 | `KN_CONFIDENCE_THRESHOLD_SEGMENTATION` | Threshold segmentazione | `0.7` |
