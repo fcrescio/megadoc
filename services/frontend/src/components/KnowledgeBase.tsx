@@ -538,6 +538,7 @@ function KnowledgeBase({ onOpenDocument }: Props) {
                 <>
                   <select value={accountingTypeFilter} onChange={(event) => setAccountingTypeFilter(event.target.value)} className="rounded-full border border-white/10 bg-slate-950 px-3 py-2 text-sm">
                     <option value="all">Tutti i tipi</option>
+                    <option value="rendiconto_composito">Rendiconto composito</option>
                     <option value="bilancio_preventivo">Bilancio preventivo</option>
                     <option value="riparto_spese">Riparto spese</option>
                     <option value="rendiconto">Rendiconto</option>
@@ -584,8 +585,22 @@ function KnowledgeBase({ onOpenDocument }: Props) {
                         </div>
                         <p className="mt-3 line-clamp-2 text-sm text-slate-300">{statement.summary ?? 'Nessun riassunto.'}</p>
                         <p className="mt-3 text-xs text-slate-300">
-                          {formatDate(statement.accounting_period_from)} - {formatDate(statement.accounting_period_to)} · {statement.table_count} tabelle
+                          {formatDate(statement.accounting_period_from)} - {formatDate(statement.accounting_period_to)} · {statement.section_count} sezioni · {statement.table_count} tabelle
                         </p>
+                        {statement.sections.length > 0 && (
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {statement.sections.slice(0, 6).map((section) => (
+                              <span key={String(section.section_id)} className="rounded-full border border-white/10 bg-slate-950/50 px-2 py-1 text-xs text-slate-300">
+                                {String(section.label || 'Sezione')} · {String(section.table_count || 0)}
+                              </span>
+                            ))}
+                            {statement.sections.length > 6 && (
+                              <span className="rounded-full border border-white/10 bg-slate-950/50 px-2 py-1 text-xs text-slate-400">
+                                +{statement.sections.length - 6}
+                              </span>
+                            )}
+                          </div>
+                        )}
                         <div className="mt-3 flex gap-2">
                           {statement.document_id && (
                             <button onClick={() => onOpenDocument(statement.document_id!)} className={tabClass(false)}>Documento</button>

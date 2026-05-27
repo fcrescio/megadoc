@@ -160,9 +160,25 @@ function UtilityBillSpecialistCard({
 
 function AccountingSpecialistCard({ result }: { result: Record<string, unknown> }) {
   const tables = Array.isArray(result.tables) ? (result.tables as Record<string, unknown>[]) : [];
+  const sections = Array.isArray(result.sections) ? (result.sections as Record<string, unknown>[]) : [];
   const validationChecks = Array.isArray(result.validation_checks)
     ? (result.validation_checks as Record<string, unknown>[])
     : [];
+  const [activeSectionId, setActiveSectionId] = useState<string | null>(
+    typeof sections[0]?.section_id === 'string' ? sections[0].section_id : null,
+  );
+  useEffect(() => {
+    if (!sections.length) {
+      setActiveSectionId(null);
+      return;
+    }
+    if (!sections.some((section) => section.section_id === activeSectionId)) {
+      setActiveSectionId(typeof sections[0].section_id === 'string' ? sections[0].section_id : null);
+    }
+  }, [activeSectionId, sections]);
+  const visibleTables = activeSectionId
+    ? tables.filter((table) => table.section_id === activeSectionId)
+    : tables;
 
   return (
     <div className="rounded-xl border border-emerald-100 bg-emerald-50/80 p-4 space-y-4">
@@ -198,6 +214,28 @@ function AccountingSpecialistCard({ result }: { result: Record<string, unknown> 
           </>
         )}
       </div>
+
+      {sections.length > 0 && (
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Sezioni</p>
+          <div className="flex flex-wrap gap-2">
+            {sections.map((section) => (
+              <button
+                key={String(section.section_id)}
+                type="button"
+                onClick={() => setActiveSectionId(String(section.section_id))}
+                className={`rounded-full border px-3 py-1 text-xs font-medium ${
+                  activeSectionId === section.section_id
+                    ? 'border-emerald-300 bg-emerald-600 text-white'
+                    : 'border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50'
+                }`}
+              >
+                {String(section.label || 'Sezione')} · {String(section.table_count || 0)}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="grid gap-3 md:grid-cols-3">
         <div className="rounded-lg bg-white p-3 border border-emerald-100">
@@ -236,14 +274,17 @@ function AccountingSpecialistCard({ result }: { result: Record<string, unknown> 
 
       {tables.length > 0 && (
         <div className="space-y-4">
-          {tables.map((table: Record<string, unknown>, tableIndex: number) => {
+          {visibleTables.map((table: Record<string, unknown>, tableIndex: number) => {
             const headers = Array.isArray(table.headers) ? (table.headers as unknown[]) : [];
             const rows = Array.isArray(table.rows) ? (table.rows as Record<string, unknown>[]) : [];
             const previewRows = rows.slice(0, 6);
             return (
               <div key={tableIndex} className="rounded-lg border border-emerald-100 bg-white overflow-hidden">
                 <div className="flex items-center justify-between gap-3 px-3 py-2 border-b border-emerald-100 bg-emerald-50/50">
-                  <div className="text-sm font-medium text-slate-900">{String(table.table_type || 'table')}</div>
+                  <div className="text-sm font-medium text-slate-900">
+                    {String(table.section_label || table.table_type || 'table')}
+                    <span className="ml-2 text-xs font-normal text-slate-500">{String(table.table_id || '')}</span>
+                  </div>
                   <div className="text-xs text-slate-500">{rows.length} righe</div>
                 </div>
                 {headers.length > 0 ? (

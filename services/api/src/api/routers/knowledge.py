@@ -305,6 +305,7 @@ def _serialize_specialist_accounting_summary(result: SpecialistResult, document_
     scan_unit = document_unit.scan_unit
     document = scan_unit.document if scan_unit else None
     tables = payload.get("tables") if isinstance(payload.get("tables"), list) else []
+    sections = payload.get("sections") if isinstance(payload.get("sections"), list) else []
     checks = payload.get("validation_checks") if isinstance(payload.get("validation_checks"), list) else []
     return {
         "result_id": str(result.id),
@@ -318,6 +319,8 @@ def _serialize_specialist_accounting_summary(result: SpecialistResult, document_
         "accounting_period_from": payload.get("accounting_period_from"),
         "accounting_period_to": payload.get("accounting_period_to"),
         "currency": payload.get("currency"),
+        "sections": sections,
+        "section_count": len(sections),
         "table_count": len(tables),
         "validation_checks": checks,
         "has_failed_checks": any(check.get("status") == "fail" for check in checks if isinstance(check, dict)),

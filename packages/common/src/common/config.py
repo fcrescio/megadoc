@@ -115,6 +115,10 @@ class Settings(BaseSettings):
         default=0.75,
         alias="ROTATION_DETECTOR_MIN_CONSENSUS",
     )
+    rotation_reverse_page_order_on_180: bool = Field(
+        default=True,
+        alias="ROTATION_REVERSE_PAGE_ORDER_ON_180",
+    )
     ocr_refinement_enabled: bool = Field(default=False, alias="OCR_REFINEMENT_ENABLED")
     ocr_refinement_endpoint: str = Field(
         default="http://10.89.0.3:8080/v1",

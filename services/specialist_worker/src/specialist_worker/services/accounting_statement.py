@@ -46,6 +46,7 @@ def process_accounting_statement(
         period_to=period_to,
         provider=reconciliation_provider,
     )
+    sections = _build_table_sections(tables)
 
     confidence = 0.45
     if tables:
@@ -67,6 +68,7 @@ def process_accounting_statement(
         "accounting_period_from": period_from,
         "accounting_period_to": period_to,
         "currency": "EUR",
+        "sections": sections,
         "tables": tables,
         "validation_checks": validation_checks,
         "accounts": accounts,
@@ -306,14 +308,18 @@ def _extraction_quality(
 
 def _statement_type(text: str) -> str:
     lowered = text.lower()
-    if "bilancio preventivo" in lowered:
-        return "bilancio_preventivo"
-    if "preventivo ripartizioni" in lowered or "ripartizioni per unità" in lowered:
-        return "riparto_spese"
-    if "riparto" in lowered:
-        return "riparto_spese"
-    if "rendiconto" in lowered:
+    has_rendiconto = "rendiconto" in lowered or "bilancio consuntivo" in lowered or "consuntivo gestione" in lowered
+    has_preventivo = "bilancio preventivo" in lowered or "preventivo" in lowered
+    has_riparto = "riparto" in lowered or "ripartizioni" in lowered or "ripartizione" in lowered
+    has_rate = "rate da versare" in lowered or "scadenze indicate" in lowered
+    if has_rendiconto and (has_preventivo or has_riparto or has_rate):
+        return "rendiconto_composito"
+    if has_rendiconto:
         return "rendiconto"
+    if "bilancio preventivo" in lowered and not has_riparto:
+        return "bilancio_preventivo"
+    if "preventivo ripartizioni" in lowered or "ripartizioni per unità" in lowered or has_riparto:
+        return "riparto_spese"
     if "estratto contabile" in lowered:
         return "estratto_contabile"
     return "unknown"
@@ -381,17 +387,94 @@ def _semantic_table_role(table: dict[str, Any], preceding_text: str) -> str | No
         return "actual_payments"
 
     role_patterns = (
-        ("actual_allocation", r"consuntivo\s+ripartizioni|riparto\s+consuntivo"),
-        ("budget_allocation", r"preventivo\s+ripartizioni|ripartizione\s+preventivo"),
-        ("budget_summary", r"bilancio\s+preventivo"),
-        ("actual_summary", r"consuntivo\s+gestione|bilancio\s+consuntivo"),
+        ("budget_installment_schedule", r"rate\s+da\s+versare|scadenze\s+indicate"),
+        ("actual_allocation", r"consuntivo\s+ripartizioni|riparto\s+(?:spese\s+)?consuntivo|ripartizioni\s+consuntivo"),
+        ("budget_allocation", r"preventivo\s+ripartizioni|ripartizione\s+preventivo|riparto\s+(?:spese\s+)?preventivo|ripartizioni\s+preventivo"),
+        ("budget_summary", r"bilancio\s+preventivo|preventivo\s+(?:di\s+)?gestione|preventivo\s+spese"),
+        ("actual_summary", r"rendiconto|consuntivo\s+gestione|bilancio\s+consuntivo|situazione\s+patrimoniale"),
     )
     selected: tuple[int, str] | None = None
     for role, pattern in role_patterns:
         matches = list(re.finditer(pattern, preceding_text, re.IGNORECASE))
         if matches and (selected is None or matches[-1].start() > selected[0]):
             selected = (matches[-1].start(), role)
-    return selected[1] if selected is not None else None
+    selected_role = selected[1] if selected is not None else None
+    if table.get("table_type") == "expense_allocation":
+        if selected_role == "budget_summary":
+            return "budget_allocation"
+        if selected_role == "actual_summary":
+            return "actual_allocation"
+        return selected_role
+    return selected_role
+
+
+def _build_table_sections(tables: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    sections: list[dict[str, Any]] = []
+    section_index_by_key: dict[str, int] = {}
+    for table in tables:
+        role = _section_role(table)
+        label = _section_label(role, str(table.get("table_type") or "unknown"))
+        key = role or str(table.get("table_type") or "unknown")
+        if key not in section_index_by_key:
+            section_id = f"section_{len(sections) + 1}"
+            section_index_by_key[key] = len(sections)
+            sections.append(
+                {
+                    "section_id": section_id,
+                    "label": label,
+                    "role": role,
+                    "table_types": [],
+                    "table_ids": [],
+                    "table_count": 0,
+                    "row_count": 0,
+                    "validation_status": "unknown",
+                }
+            )
+        section = sections[section_index_by_key[key]]
+        table["section_id"] = section["section_id"]
+        table["section_label"] = section["label"]
+        table["section_role"] = role
+        table_type = str(table.get("table_type") or "unknown")
+        if table_type not in section["table_types"]:
+            section["table_types"].append(table_type)
+        section["table_ids"].append(table.get("table_id"))
+        section["table_count"] += 1
+        rows = table.get("rows")
+        if isinstance(rows, list):
+            section["row_count"] += len(rows)
+    return sections
+
+
+def _section_role(table: dict[str, Any]) -> str:
+    accounting_context = table.get("accounting_context")
+    if isinstance(accounting_context, dict) and accounting_context.get("role"):
+        return str(accounting_context["role"])
+    table_type = str(table.get("table_type") or "unknown")
+    if table_type == "payment_schedule":
+        return "budget_installment_schedule"
+    if table_type == "expense_allocation":
+        return "allocation"
+    if table_type == "payment_ledger":
+        return "actual_payments"
+    return table_type
+
+
+def _section_label(role: str, table_type: str) -> str:
+    labels = {
+        "actual_summary": "Rendiconto / consuntivo",
+        "actual_allocation": "Riparto consuntivo",
+        "actual_payments": "Pagamenti registrati",
+        "actual_personal_charge": "Addebiti personali",
+        "budget_summary": "Preventivo",
+        "budget_allocation": "Riparto preventivo",
+        "budget_installment_schedule": "Rate da versare",
+        "allocation": "Riparti spese",
+        "expense_allocation": "Riparti spese",
+        "payment_schedule": "Rate da versare",
+        "payment_ledger": "Pagamenti registrati",
+        "unknown": "Tabelle da classificare",
+    }
+    return labels.get(role, labels.get(table_type, role.replace("_", " ").title()))
 
 
 def _extract_structured_tables(
@@ -414,6 +497,7 @@ def _extract_structured_tables(
         parsed_table = {
             "table_id": table.get("self_ref", f"table_{index}").split("/")[-1] or f"table_{index}",
             "table_type": _classify_table(headers, rows),
+            "page_number": table.get("page_number") or table.get("page_no"),
             "headers": headers,
             "raw_headers": raw_headers,
             "rows": rows,
@@ -791,6 +875,8 @@ def _classify_table(headers: list[str], rows: list[dict[str, Any]]) -> str:
     ).lower()
     if "rata n." in joined_headers or "totale dovuto" in joined_headers:
         return "payment_schedule"
+    if "nominativo" in joined_headers and "quota mill" in joined_headers and "totale" in joined_headers:
+        return "expense_allocation"
     if (
         "appartamento" in joined_headers
         or "scala" in joined_headers

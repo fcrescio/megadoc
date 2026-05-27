@@ -284,6 +284,7 @@ class TopicRetrievalService:
         """Check if document type is compatible with topic class."""
         compatibility_map = {
             "verbale_assemblea": {"meeting": 1.0, "general_administration": 0.5},
+            "regolamento_condominiale": {"legal_matter": 1.0, "general_administration": 0.6},
             "rendiconto_contabile": {"financial_period": 1.0, "case_file": 0.5},
             "riparto_spese": {"financial_period": 1.0},
             "fattura": {"vendor_relationship": 0.7, "financial_period": 0.5},

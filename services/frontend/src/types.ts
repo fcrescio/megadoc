@@ -317,6 +317,8 @@ export interface SpecialistAccountingStatementSummary {
   accounting_period_from: string | null;
   accounting_period_to: string | null;
   currency: string | null;
+  sections: Record<string, unknown>[];
+  section_count: number;
   table_count: number;
   validation_checks: Record<string, unknown>[];
   has_failed_checks: boolean;

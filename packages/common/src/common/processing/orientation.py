@@ -70,13 +70,15 @@ class OrientationPreprocessService:
                 },
             )
 
-        normalized_path = self._rotate_pdf(source, dominant_rotation)
+        reverse_page_order = self._should_reverse_page_order(dominant_rotation, detections)
+        normalized_path = self._rotate_pdf(source, dominant_rotation, reverse_page_order=reverse_page_order)
         return OrientationPreprocessResult(
             normalized_path=normalized_path,
             metadata={
                 "backend": backend,
                 "applied": True,
                 "rotation_applied": dominant_rotation,
+                "page_order_reversed": reverse_page_order,
                 "detections": detections,
             },
         )
@@ -229,18 +231,37 @@ class OrientationPreprocessService:
             return None
         return dominant_rotation
 
-    def _rotate_pdf(self, source: Path, rotation: int) -> Path:
+    def _should_reverse_page_order(self, rotation: int, detections: list[dict]) -> bool:
+        if not self._settings.rotation_reverse_page_order_on_180:
+            return False
+        if rotation % 360 != 180:
+            return False
+        qualified = [
+            item
+            for item in detections
+            if item["confidence"] >= self._settings.rotation_detector_min_confidence
+        ]
+        if len(qualified) < 2:
+            return False
+        return all(int(item["rotation"]) % 360 == 180 for item in qualified)
+
+    def _rotate_pdf(self, source: Path, rotation: int, *, reverse_page_order: bool = False) -> Path:
         import fitz
         from tempfile import NamedTemporaryFile
 
         with NamedTemporaryFile(prefix=f"{source.stem}.normalized-{rotation}-", suffix=".pdf", delete=False) as handle:
             target = Path(handle.name)
         document = fitz.open(source)
+        target_document = fitz.open()
         try:
-            for page in document:
+            page_indexes = range(document.page_count - 1, -1, -1) if reverse_page_order else range(document.page_count)
+            for page_index in page_indexes:
+                target_document.insert_pdf(document, from_page=page_index, to_page=page_index)
+            for page in target_document:
                 page.set_rotation((page.rotation + rotation) % 360)
-            document.save(str(target))
+            target_document.save(str(target))
         finally:
+            target_document.close()
             document.close()
         return target
 

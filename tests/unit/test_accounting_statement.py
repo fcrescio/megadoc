@@ -133,6 +133,51 @@ Periodo: 01/07/2023 - 30/06/2024
     }
 
 
+def test_accounting_statement_groups_composite_condominium_sections():
+    text = """
+Rendiconto consuntivo gestione
+Periodo: 01/07/2022 - 30/06/2023
+| Voce | Importo |
+| --- | ---: |
+| Entrate ordinarie | 10.000,00 |
+
+Consuntivo ripartizioni per unita
+Periodo: 01/07/2022 - 30/06/2023
+| Unita | Nominativo | Totale gestione | Saldo finale |
+| --- | --- | ---: | ---: |
+| B11 | BONACCI FABIO | -1.419,21 | 636,41 |
+
+Bilancio preventivo gestione
+Periodo: 01/07/2023 - 30/06/2024
+| Voce | Importo |
+| --- | ---: |
+| Spese generali | 10.000,00 |
+
+Preventivo ripartizioni per unita
+Periodo: 01/07/2023 - 30/06/2024
+| Unita | Nominativo | Totale preventivo |
+| --- | --- | ---: |
+| B11 | BONACCI FABIO | -1.897,45 |
+
+RATE DA VERSARE alle scadenze indicate
+Periodo: 01/07/2023 - 30/06/2024
+| Nominativo | Unita | Totale dovuto | Rata n. 1 01/09/2023 |
+| --- | --- | ---: | ---: |
+| BONACCI FABIO | B11 (Pr) | 1.897,45 | 847,45 |
+"""
+
+    result, _ = process_accounting_statement(_document_unit(), text, "fixture:v7")
+
+    assert result["statement_type"] == "rendiconto_composito"
+    labels = [section["label"] for section in result["sections"]]
+    assert "Rendiconto / consuntivo" in labels
+    assert "Riparto consuntivo" in labels
+    assert "Preventivo" in labels
+    assert "Riparto preventivo" in labels
+    assert "Rate da versare" in labels
+    assert all(table.get("section_id") for table in result["tables"])
+
+
 def test_accounting_statement_locates_context_for_structured_table():
     html = (
         "<table><thead><tr><th>Unita</th><th>Nominativo</th><th>Totale gestione</th>"

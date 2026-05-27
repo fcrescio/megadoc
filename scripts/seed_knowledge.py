@@ -25,6 +25,12 @@ def seed_document_types(session):
             "parent_code": None,
         },
         {
+            "code": "regolamento_condominiale",
+            "name": "Regolamento Condominiale",
+            "description": "Condominium regulations, articles, internal rules and common property rules",
+            "parent_code": None,
+        },
+        {
             "code": "rendiconto_contabile",
             "name": "Rendiconto Contabile",
             "description": "Financial statements, accounting reports",
@@ -75,6 +81,26 @@ def seed_document_types(session):
     ]
     
     for type_data in types_data:
+        existing = session.execute(
+            text("SELECT id FROM document_types WHERE code = :code"),
+            {"code": type_data["code"]},
+        ).first()
+        if existing:
+            session.execute(
+                text(
+                    """
+                    UPDATE document_types
+                    SET name = :name,
+                        description = :description,
+                        parent_code = :parent_code,
+                        is_active = true
+                    WHERE code = :code
+                    """
+                ),
+                type_data,
+            )
+            print(f"Updated document type: {type_data['code']}")
+            continue
         doc_type = DocumentType(
             id=uuid.uuid4(),
             code=type_data["code"],
@@ -151,15 +177,8 @@ def main():
     engine = create_engine(database_url)
     
     with Session(engine) as session:
-        # Check if already seeded
-        result = session.execute(text("SELECT COUNT(*) FROM document_types"))
-        count = result.scalar()
-        
-        if count and count > 0:
-            print(f"Document types already exist ({count} records). Skipping seed.")
-        else:
-            seed_document_types(session)
-            session.flush()
+        seed_document_types(session)
+        session.flush()
         
         result = session.execute(text("SELECT COUNT(*) FROM topics"))
         count = result.scalar()

@@ -57,6 +57,7 @@ CLASSIFICATION_PROMPT = """You are a document classification expert. Classify th
 Available document types:
 - bolletta: Utility bills, service charges
 - verbale_assemblea: Meeting minutes, assembly records
+- regolamento_condominiale: Condominium regulations, articles, internal rules
 - rendiconto_contabile: Financial statements, accounting reports
 - riparto_spese: Expense allocation documents
 - fattura: Invoices

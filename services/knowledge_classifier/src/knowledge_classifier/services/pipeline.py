@@ -131,6 +131,8 @@ class KnowledgePipelineService:
             # Step 5: Extract entities
             logger.info("Step 5: Extracting entities")
             entity_results = self._extract_entities(document_units, ocr_result)
+
+            self._consolidate_scan_semantics(scan_unit, document_units, entity_results, ocr_result)
             
             # Update final status
             needs_review = any(
@@ -199,6 +201,7 @@ class KnowledgePipelineService:
             entity_results,
             ocr_result,
         )
+        self._consolidate_scan_semantics(scan_unit, document_units, entity_results, ocr_result)
 
         needs_review = any(
             du.review_status == ReviewStatus.NEEDS_REVIEW.value
@@ -1166,7 +1169,7 @@ class KnowledgePipelineService:
             return False
 
         type_codes = [self._get_document_type_code(doc_unit) for doc_unit in document_units]
-        allowed_types = {"contratto", "verbale_assemblea", "lettera", "altro"}
+        allowed_types = {"regolamento_condominiale", "contratto", "verbale_assemblea", "lettera", "altro"}
         classified = [type_code for type_code in type_codes if type_code]
         if not classified or any(type_code not in allowed_types for type_code in classified):
             return False
@@ -1183,6 +1186,18 @@ class KnowledgePipelineService:
         if canonical_doc_unit is None:
             return
 
+        canonical_doc_unit.ordinal = 1
+        canonical_doc_unit.start_page = min(doc_unit.start_page for doc_unit in document_units)
+        canonical_doc_unit.end_page = max(doc_unit.end_page for doc_unit in document_units)
+        canonical_doc_unit.title = canonical_doc_unit.title or "Regolamento condominiale"
+        canonical_doc_unit.extracted_summary = (
+            "Regolamento condominiale completo: disciplina proprietà comuni, uso delle parti comuni, "
+            "assemblea, amministrazione, ripartizione delle spese e norme di convivenza."
+        )
+        canonical_doc_unit.segmentation_confidence = max(
+            doc_unit.segmentation_confidence or 0.0 for doc_unit in document_units
+        )
+
         canonical_proposal = self.db.execute(
             select(TopicProposal).where(TopicProposal.source_document_unit_id == canonical_doc_unit.id)
         ).scalar_one_or_none()
@@ -1190,7 +1205,7 @@ class KnowledgePipelineService:
 
         for doc_unit in document_units:
             doc_unit.review_status = ReviewStatus.NEEDS_REVIEW.value
-            self._set_document_type(doc_unit, "contratto")
+            self._set_document_type(doc_unit, "regolamento_condominiale")
             if (doc_unit.document_type_confidence or 0.0) < 0.95:
                 doc_unit.document_type_confidence = 0.95
             if not doc_unit.title:
@@ -1235,6 +1250,19 @@ class KnowledgePipelineService:
                         ),
                     )
                     self.db.add(assignment)
+
+        for doc_unit in list(document_units):
+            if doc_unit.id == canonical_doc_unit.id:
+                continue
+            self.db.execute(
+                delete(TopicProposal).where(TopicProposal.source_document_unit_id == doc_unit.id)
+            )
+            self.db.execute(delete(LLMDecision).where(LLMDecision.document_unit_id == doc_unit.id))
+            if doc_unit.id in entity_results:
+                del entity_results[doc_unit.id]
+            self.db.delete(doc_unit)
+
+        document_units[:] = [canonical_doc_unit]
 
     def _pick_regulation_canonical_unit(
         self,
