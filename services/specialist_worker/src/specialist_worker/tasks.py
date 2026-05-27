@@ -6,7 +6,10 @@ import uuid
 from datetime import datetime, timezone
 
 from celery import shared_task
-from common.application.accounting import project_accounting_result
+from common.application.accounting import (
+    project_accounting_result,
+    reapply_manual_accounting_corrections,
+)
 from common.application.graph import project_document_unit
 from common.application.specialists import extract_document_unit_text
 from common.db.models import (
@@ -108,6 +111,11 @@ def process_specialist_job(self, specialist_job_id: str):
                 session.add(specialist_result)
             else:
                 specialist_result = existing_result
+                if specialist_job.specialist_type == "accounting_statement":
+                    result_json = reapply_manual_accounting_corrections(
+                        result_json,
+                        specialist_result.result_json,
+                    )
                 specialist_result.schema_version = schema_version
                 specialist_result.confidence = confidence
                 specialist_result.review_status = "auto_accepted" if confidence >= 0.7 else "needs_review"

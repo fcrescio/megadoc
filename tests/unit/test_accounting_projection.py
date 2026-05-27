@@ -1,7 +1,14 @@
+import copy
 import uuid
 from decimal import Decimal
 
-from common.application.accounting import accounting_stats, project_accounting_result, rebuild_accounting_facts
+from common.application.accounting import (
+    accounting_stats,
+    apply_manual_accounting_correction,
+    project_accounting_result,
+    reapply_manual_accounting_corrections,
+    rebuild_accounting_facts,
+)
 from common.application.graph import project_document_unit
 from common.db.models import (
     AccountingAccount,
@@ -123,3 +130,57 @@ def test_accounting_projection_is_rebuildable_and_idempotent(db_session):
 
     assert first.accounts == rebuilt.accounts == 1
     assert first.facts == rebuilt.facts == 1
+
+
+def test_manual_accounting_correction_is_audited_and_reprojected(db_session):
+    unit, result = _make_statement_unit(db_session)
+    project_document_unit(db_session, unit)
+    project_accounting_result(db_session, unit, result)
+    db_session.flush()
+    source_fact = db_session.query(AccountingFact).one()
+
+    response = apply_manual_accounting_correction(
+        db_session,
+        source_fact.id,
+        corrected_amount=Decimal("400.00"),
+        corrected_category_label="Spese generali corrette",
+        note="Verificato sulla tabella originale.",
+        acted_by="revisore",
+    )
+
+    corrected_fact = db_session.query(AccountingFact).one()
+    assert response["review_status"] == "human_reviewed"
+    assert corrected_fact.amount == Decimal("400.00")
+    assert corrected_fact.raw_amount == Decimal("-362.59")
+    assert corrected_fact.category_key == "spese_generali_corrette"
+    assert corrected_fact.review_status == "human_reviewed"
+    assert result.result_json["manual_corrections"][0]["acted_by"] == "revisore"
+    assert result.result_json["manual_corrections"][0]["before"]["amount"] == 362.59
+
+    rebuild_accounting_facts(db_session)
+    rebuilt_fact = db_session.query(AccountingFact).one()
+    assert rebuilt_fact.amount == Decimal("400.00")
+    assert rebuilt_fact.category_label == "Spese generali corrette"
+
+
+def test_manual_accounting_correction_is_reapplied_after_specialist_reprocessing(db_session):
+    unit, result = _make_statement_unit(db_session)
+    project_document_unit(db_session, unit)
+    project_accounting_result(db_session, unit, result)
+    db_session.flush()
+    source_fact = db_session.query(AccountingFact).one()
+    generated_payload = copy.deepcopy(result.result_json)
+
+    apply_manual_accounting_correction(
+        db_session,
+        source_fact.id,
+        corrected_amount=Decimal("400.00"),
+        acted_by="revisore",
+    )
+
+    reapplied = reapply_manual_accounting_corrections(generated_payload, result.result_json)
+
+    fact = reapplied["accounts"][0]["facts"][0]
+    assert fact["amount"] == 400.0
+    assert fact["review_status"] == "human_reviewed"
+    assert reapplied["manual_corrections"][0]["application_status"] == "reapplied"

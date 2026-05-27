@@ -22,6 +22,7 @@ import {
   useTopicProposals,
 } from '../hooks/useDocuments';
 import type { KnowledgeAssertion } from '../types';
+import AccountingReconciliationModal from './AccountingReconciliationModal';
 import ProposalList from './ProposalList';
 
 interface Props {
@@ -65,6 +66,7 @@ function KnowledgeBase({ onOpenDocument }: Props) {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [showNodeDetail, setShowNodeDetail] = useState(false);
   const [showProposals, setShowProposals] = useState(false);
+  const [showAccountingReview, setShowAccountingReview] = useState(false);
   const [utilityPaymentFilter, setUtilityPaymentFilter] = useState('all');
   const [utilityOverdueOnly, setUtilityOverdueOnly] = useState(false);
   const [accountingTypeFilter, setAccountingTypeFilter] = useState('all');
@@ -235,16 +237,17 @@ function KnowledgeBase({ onOpenDocument }: Props) {
   }, [entityDetail.data]);
 
   useEffect(() => {
-    if (!showNodeDetail && !showProposals) return;
+    if (!showNodeDetail && !showProposals && !showAccountingReview) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         setShowNodeDetail(false);
         setShowProposals(false);
+        setShowAccountingReview(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [showNodeDetail, showProposals]);
+  }, [showNodeDetail, showProposals, showAccountingReview]);
 
   if (topicsQuery.isLoading) {
     return <div className="h-[calc(100vh-9rem)] animate-pulse rounded-3xl border border-white/10 bg-white/5" />;
@@ -411,6 +414,14 @@ function KnowledgeBase({ onOpenDocument }: Props) {
                   {accountingComparison.data.warnings.map((warning) => (
                     <p key={warning} className="rounded-xl border border-amber-300/20 bg-amber-400/10 p-3 text-sm text-amber-100">{warning}</p>
                   ))}
+                  {accountingComparison.data.status === 'needs_review' && (
+                    <button
+                      onClick={() => setShowAccountingReview(true)}
+                      className="rounded-full border border-amber-300/25 bg-amber-400/15 px-4 py-2 text-sm text-amber-100"
+                    >
+                      Riconcilia tabella
+                    </button>
+                  )}
                   {accountingComparison.data.selected_subject && (
                     <p className="text-xs text-slate-400">
                       Periodi disponibili: {accountingComparison.data.selected_subject.available_periods.map((period) => `${period.accounting_role} ${formatDate(period.period_from)}-${formatDate(period.period_to)}`).join(' · ')}
@@ -836,6 +847,13 @@ function KnowledgeBase({ onOpenDocument }: Props) {
             <ProposalList onClose={() => setShowProposals(false)} />
           </div>
         </div>
+      )}
+
+      {showAccountingReview && accountingComparison.data && (
+        <AccountingReconciliationModal
+          comparison={accountingComparison.data}
+          onClose={() => setShowAccountingReview(false)}
+        />
       )}
     </div>
   );

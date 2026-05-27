@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import copy
 import re
 import unicodedata
 import uuid
 from dataclasses import dataclass
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -93,11 +94,120 @@ def project_accounting_result(
         if not isinstance(facts, list):
             continue
         for payload_fact in facts:
+            if isinstance(payload_fact, dict) and payload_fact.get("excluded") is True:
+                continue
             fact = _build_fact(document_unit, specialist_result, account, payload_fact)
             if fact is not None:
                 session.add(fact)
     session.flush()
     _remove_orphan_accounts(session)
+
+
+def apply_manual_accounting_correction(
+    session: Session,
+    fact_id: uuid.UUID | str,
+    *,
+    corrected_amount: float | Decimal | None = None,
+    corrected_category_label: str | None = None,
+    corrected_is_total: bool | None = None,
+    excluded: bool | None = None,
+    note: str | None = None,
+    acted_by: str | None = None,
+) -> dict[str, Any]:
+    fact = session.execute(
+        select(AccountingFact)
+        .where(AccountingFact.id == uuid.UUID(str(fact_id)))
+        .options(
+            selectinload(AccountingFact.account),
+            selectinload(AccountingFact.document_unit),
+            selectinload(AccountingFact.specialist_result),
+        )
+    ).scalar_one_or_none()
+    if fact is None:
+        raise ValueError("Accounting fact not found.")
+    result = fact.specialist_result
+    if result is None or result.specialist_type != "accounting_statement":
+        raise ValueError("Accounting fact is not backed by an editable specialist result.")
+
+    payload = copy.deepcopy(result.result_json or {})
+    payload_fact, anchor = _find_payload_fact(payload, fact)
+    if payload_fact is None or anchor is None:
+        raise ValueError("Accounting fact source could not be located in specialist result.")
+
+    changes: dict[str, Any] = {}
+    if corrected_amount is not None:
+        amount = _decimal_amount(corrected_amount)
+        if amount is None:
+            raise ValueError("Corrected amount is invalid.")
+        changes["amount"] = float(amount)
+    if corrected_category_label is not None:
+        label = _safe_text(corrected_category_label)
+        if label is None:
+            raise ValueError("Corrected category label is invalid.")
+        changes["category_label"] = label
+        changes["category_key"] = _normalize_key(label)
+    if corrected_is_total is not None:
+        changes["is_total"] = corrected_is_total
+    if excluded is not None:
+        changes["excluded"] = excluded
+    if not changes:
+        raise ValueError("At least one correction value is required.")
+
+    before = _correction_snapshot(payload_fact)
+    payload_fact.update(changes)
+    payload_fact["review_status"] = "human_reviewed"
+    correction = {
+        "id": str(uuid.uuid4()),
+        "anchor": anchor,
+        "before": before,
+        "changes": changes,
+        "note": _safe_text(note, limit=2000) if note else None,
+        "acted_by": _safe_text(acted_by, limit=255) if acted_by else None,
+        "created_at": datetime.now(UTC).isoformat(),
+        "application_status": "applied",
+    }
+    corrections = payload.get("manual_corrections")
+    if not isinstance(corrections, list):
+        corrections = []
+    payload["manual_corrections"] = [*corrections, correction]
+
+    result.result_json = payload
+    result.review_status = "human_reviewed"
+    result.updated_at = datetime.now(UTC)
+    project_accounting_result(session, fact.document_unit, result)
+    session.flush()
+    return {
+        "specialist_result_id": str(result.id),
+        "document_unit_id": str(fact.document_unit_id),
+        "review_status": result.review_status,
+        "correction": correction,
+    }
+
+
+def reapply_manual_accounting_corrections(
+    generated_payload: dict[str, Any],
+    existing_payload: dict[str, Any] | None,
+) -> dict[str, Any]:
+    corrections = (existing_payload or {}).get("manual_corrections")
+    if not isinstance(corrections, list) or not corrections:
+        return generated_payload
+    payload = copy.deepcopy(generated_payload)
+    retained: list[dict[str, Any]] = []
+    for existing_correction in corrections:
+        if not isinstance(existing_correction, dict):
+            continue
+        correction = copy.deepcopy(existing_correction)
+        target = _find_payload_fact_by_anchor(payload, correction.get("anchor"))
+        changes = correction.get("changes")
+        if target is None or not isinstance(changes, dict):
+            correction["application_status"] = "unmatched_after_reprocessing"
+        else:
+            target.update(changes)
+            target["review_status"] = "human_reviewed"
+            correction["application_status"] = "reapplied"
+        retained.append(correction)
+    payload["manual_corrections"] = retained
+    return payload
 
 
 def accounting_stats(session: Session) -> AccountingProjectionStats:
@@ -330,16 +440,7 @@ def _period_breakdown(
             },
         )
         item["amount"] += fact.amount
-        document = fact.document_unit.scan_unit.document if fact.document_unit and fact.document_unit.scan_unit else None
-        item["sources"].append(
-            {
-                "document_unit_id": str(fact.document_unit_id),
-                "original_filename": document.original_filename if document else None,
-                "start_page": fact.document_unit.start_page if fact.document_unit else None,
-                "end_page": fact.document_unit.end_page if fact.document_unit else None,
-                "evidence_json": fact.evidence_json,
-            }
-        )
+        item["sources"].append(_serialize_fact_source(fact))
     component_total = sum((item["amount"] for item in categories.values()), Decimal("0.00"))
     reported_total = totals[0].amount if len(totals) == 1 else None
     if not selected:
@@ -360,6 +461,7 @@ def _period_breakdown(
         "total": float(component_total) if components else None,
         "component_total": float(component_total) if components else None,
         "reported_total": float(reported_total) if reported_total is not None else None,
+        "total_sources": [_serialize_fact_source(fact) for fact in totals],
         "fact_count": len(selected),
         "categories": [
             {**item, "amount": float(item["amount"])}
@@ -489,9 +591,133 @@ def _build_fact(
         period_review_status=_safe_text(context.get("review_status"), limit=32),
         is_total=bool(payload.get("is_total", False)),
         confidence=specialist_result.confidence,
-        review_status="auto",
+        review_status=_safe_text(payload.get("review_status"), limit=32) or "auto",
         evidence_json=payload.get("evidence") if isinstance(payload.get("evidence"), dict) else None,
     )
+
+
+def _serialize_fact_source(fact: AccountingFact) -> dict[str, Any]:
+    document = (
+        fact.document_unit.scan_unit.document
+        if fact.document_unit and fact.document_unit.scan_unit
+        else None
+    )
+    return {
+        "fact_id": str(fact.id),
+        "specialist_result_id": (
+            str(fact.specialist_result_id) if fact.specialist_result_id else None
+        ),
+        "document_unit_id": str(fact.document_unit_id),
+        "original_filename": document.original_filename if document else None,
+        "start_page": fact.document_unit.start_page if fact.document_unit else None,
+        "end_page": fact.document_unit.end_page if fact.document_unit else None,
+        "category_key": fact.category_key,
+        "category_label": fact.category_label,
+        "amount": float(fact.amount),
+        "is_total": fact.is_total,
+        "review_status": fact.review_status,
+        "evidence_json": fact.evidence_json,
+    }
+
+
+def _correction_snapshot(payload_fact: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: payload_fact.get(key)
+        for key in (
+            "amount",
+            "category_key",
+            "category_label",
+            "is_total",
+            "excluded",
+            "review_status",
+        )
+    }
+
+
+def _find_payload_fact(
+    payload: dict[str, Any],
+    projected_fact: AccountingFact,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    anchor = {
+        "account_key": projected_fact.account.account_key,
+        "accounting_role": projected_fact.accounting_role,
+        "fact_type": projected_fact.fact_type,
+        "period_from": (
+            projected_fact.period_context_from.isoformat()
+            if projected_fact.period_context_from
+            else None
+        ),
+        "period_to": (
+            projected_fact.period_context_to.isoformat()
+            if projected_fact.period_context_to
+            else None
+        ),
+        "evidence": {
+            key: (projected_fact.evidence_json or {}).get(key)
+            for key in ("table_id", "row_id", "column", "raw_value")
+            if (projected_fact.evidence_json or {}).get(key) is not None
+        },
+        "original_category_key": projected_fact.category_key,
+        "original_amount": float(projected_fact.amount),
+        "original_is_total": projected_fact.is_total,
+    }
+    return _find_payload_fact_by_anchor(payload, anchor), anchor
+
+
+def _find_payload_fact_by_anchor(
+    payload: dict[str, Any],
+    anchor: Any,
+) -> dict[str, Any] | None:
+    if not isinstance(anchor, dict):
+        return None
+    accounts = payload.get("accounts")
+    if not isinstance(accounts, list):
+        return None
+    for account in accounts:
+        if (
+            not isinstance(account, dict)
+            or _safe_key(account.get("account_key")) != _safe_key(anchor.get("account_key"))
+        ):
+            continue
+        facts = account.get("facts")
+        if not isinstance(facts, list):
+            continue
+        for payload_fact in facts:
+            if not isinstance(payload_fact, dict):
+                continue
+            if payload_fact.get("fact_type") != anchor.get("fact_type"):
+                continue
+            if payload_fact.get("accounting_role") != anchor.get("accounting_role"):
+                continue
+            period = (
+                payload_fact.get("period_context")
+                if isinstance(payload_fact.get("period_context"), dict)
+                else {}
+            )
+            if (
+                period.get("from") != anchor.get("period_from")
+                or period.get("to") != anchor.get("period_to")
+            ):
+                continue
+            anchor_evidence = anchor.get("evidence")
+            evidence = (
+                payload_fact.get("evidence")
+                if isinstance(payload_fact.get("evidence"), dict)
+                else {}
+            )
+            if isinstance(anchor_evidence, dict) and anchor_evidence:
+                if all(evidence.get(key) == value for key, value in anchor_evidence.items()):
+                    return payload_fact
+                continue
+            if (
+                payload_fact.get("category_key") == anchor.get("original_category_key")
+                and _decimal_amount(payload_fact.get("amount"))
+                == _decimal_amount(anchor.get("original_amount"))
+                and bool(payload_fact.get("is_total", False))
+                == bool(anchor.get("original_is_total", False))
+            ):
+                return payload_fact
+    return None
 
 
 def _remove_orphan_accounts(session: Session) -> None:

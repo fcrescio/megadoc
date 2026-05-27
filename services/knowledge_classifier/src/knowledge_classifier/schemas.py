@@ -391,10 +391,17 @@ class ContextAccountingSubjectResponse(BaseModel):
 
 
 class ContextAccountingSourceResponse(BaseModel):
+    fact_id: str
+    specialist_result_id: Optional[str] = None
     document_unit_id: str
     original_filename: Optional[str] = None
     start_page: Optional[int] = None
     end_page: Optional[int] = None
+    category_key: Optional[str] = None
+    category_label: Optional[str] = None
+    amount: float
+    is_total: bool
+    review_status: str
     evidence_json: dict[str, Any] | None = None
 
 
@@ -413,6 +420,7 @@ class ContextAccountingPeriodBreakdownResponse(BaseModel):
     total: Optional[float] = None
     component_total: Optional[float] = None
     reported_total: Optional[float] = None
+    total_sources: list[ContextAccountingSourceResponse] = Field(default_factory=list)
     fact_count: int
     categories: list[ContextAccountingCategoryResponse] = Field(default_factory=list)
 
@@ -442,6 +450,22 @@ class ContextAccountingComparisonResponse(BaseModel):
     delta: Optional[float] = None
     percentage_change: Optional[float] = None
     changed_categories: list[ContextAccountingCategoryChangeResponse] = Field(default_factory=list)
+
+
+class AccountingFactCorrectionRequest(BaseModel):
+    corrected_amount: Optional[float] = None
+    corrected_category_label: Optional[str] = None
+    corrected_is_total: Optional[bool] = None
+    excluded: Optional[bool] = None
+    note: Optional[str] = None
+    acted_by: Optional[str] = None
+
+
+class AccountingFactCorrectionResponse(BaseModel):
+    specialist_result_id: str
+    document_unit_id: str
+    review_status: str
+    correction: dict[str, Any]
 
 
 class CanonicalEntityCreate(BaseModel):

@@ -20,6 +20,8 @@ import type {
   KnowledgeContextSummary,
   ContextAccountingSubject,
   ContextAccountingComparison,
+  AccountingFactCorrectionPayload,
+  AccountingFactCorrectionResult,
   KnowledgeGraphStats,
   KnowledgeNodeSummary,
   KnowledgeNodeDetail,
@@ -271,6 +273,18 @@ export async function compareContextAccounting(
   if (options.accountKey) params.set('account_key', options.accountKey);
   const response = await fetch(`${API_BASE}/knowledge/contexts/${contextId}/accounting/compare?${params.toString()}`);
   return handleResponse<ContextAccountingComparison>(response);
+}
+
+export async function correctAccountingFact(
+  factId: string,
+  payload: AccountingFactCorrectionPayload,
+): Promise<AccountingFactCorrectionResult> {
+  const response = await fetch(`${API_BASE}/knowledge/specialists/accounting-facts/${factId}/correction`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return handleResponse<AccountingFactCorrectionResult>(response);
 }
 
 export async function getKnowledgeGraphStats(): Promise<KnowledgeGraphStats> {

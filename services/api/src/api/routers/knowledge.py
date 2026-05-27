@@ -18,7 +18,11 @@ from common.application.knowledge import (
 )
 from common.application.graph import graph_stats, rebuild_knowledge_graph
 from common.application.contexts import rebuild_knowledge_contexts
-from common.application.accounting import compare_context_accounting_periods, find_context_account_subjects
+from common.application.accounting import (
+    apply_manual_accounting_correction,
+    compare_context_accounting_periods,
+    find_context_account_subjects,
+)
 from common.application.specialists import ensure_specialist_jobs_for_scan_unit
 from common.db.models import (
     CanonicalEntity,
@@ -73,6 +77,8 @@ from knowledge_classifier.schemas import (
     KnowledgeContextSummaryResponse,
     ContextAccountingComparisonResponse,
     ContextAccountingSubjectResponse,
+    AccountingFactCorrectionRequest,
+    AccountingFactCorrectionResponse,
     KnowledgeAssertionResponse,
     KnowledgeGraphStatsResponse,
     KnowledgeNodeDetailResponse,
@@ -1798,6 +1804,31 @@ def compare_context_accounting(
         period_b_to=period_b_to,
         accounting_role=accounting_role,
     )
+
+
+@router.patch("/specialists/accounting-facts/{fact_id}/correction", response_model=AccountingFactCorrectionResponse)
+def correct_accounting_fact(
+    fact_id: uuid.UUID,
+    payload: AccountingFactCorrectionRequest,
+    db: Session = Depends(get_db_session),
+):
+    try:
+        corrected = apply_manual_accounting_correction(
+            db,
+            fact_id,
+            corrected_amount=payload.corrected_amount,
+            corrected_category_label=payload.corrected_category_label,
+            corrected_is_total=payload.corrected_is_total,
+            excluded=payload.excluded,
+            note=payload.note,
+            acted_by=payload.acted_by,
+        )
+    except ValueError as exc:
+        message = str(exc)
+        response_status = 404 if message == "Accounting fact not found." else 400
+        raise HTTPException(status_code=response_status, detail=message) from exc
+    db.commit()
+    return corrected
 
 
 def _knowledge_node_options():

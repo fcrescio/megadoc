@@ -20,6 +20,8 @@ import type {
   KnowledgeContextSummary,
   ContextAccountingSubject,
   ContextAccountingComparison,
+  AccountingFactCorrectionPayload,
+  AccountingFactCorrectionResult,
   KnowledgeGraphStats,
   KnowledgeNodeSummary,
   KnowledgeNodeDetail,
@@ -58,6 +60,7 @@ import {
   getKnowledgeContexts,
   getContextAccountingSubjects,
   compareContextAccounting,
+  correctAccountingFact,
   getKnowledgeGraphStats,
   getKnowledgeNodes,
   getKnowledgeNode,
@@ -295,6 +298,23 @@ export function useContextAccountingComparison(
       && !!options.periodATo
       && !!options.periodBFrom
       && !!options.periodBTo,
+  });
+}
+
+export function useCorrectAccountingFact() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    AccountingFactCorrectionResult,
+    Error,
+    { factId: string; payload: AccountingFactCorrectionPayload }
+  >({
+    mutationFn: ({ factId, payload }) => correctAccountingFact(factId, payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['context-accounting-comparison'] });
+      queryClient.invalidateQueries({ queryKey: ['context-accounting-subjects'] });
+      queryClient.invalidateQueries({ queryKey: ['specialist-accounting-statements'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge'] });
+    },
   });
 }
 

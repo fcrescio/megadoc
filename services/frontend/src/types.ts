@@ -425,11 +425,25 @@ export interface ContextAccountingSubject {
 }
 
 export interface ContextAccountingSource {
+  fact_id: string;
+  specialist_result_id: string | null;
   document_unit_id: string;
   original_filename: string | null;
   start_page: number | null;
   end_page: number | null;
+  category_key: string | null;
+  category_label: string | null;
+  amount: number;
+  is_total: boolean;
+  review_status: string;
   evidence_json: Record<string, unknown> | null;
+}
+
+export interface ContextAccountingCategory {
+  category_key: string;
+  category_label: string;
+  amount: number;
+  sources: ContextAccountingSource[];
 }
 
 export interface ContextAccountingPeriodBreakdown {
@@ -440,7 +454,9 @@ export interface ContextAccountingPeriodBreakdown {
   total: number | null;
   component_total: number | null;
   reported_total: number | null;
+  total_sources: ContextAccountingSource[];
   fact_count: number;
+  categories: ContextAccountingCategory[];
 }
 
 export interface ContextAccountingCategoryChange {
@@ -468,6 +484,22 @@ export interface ContextAccountingComparison {
   delta: number | null;
   percentage_change: number | null;
   changed_categories: ContextAccountingCategoryChange[];
+}
+
+export interface AccountingFactCorrectionPayload {
+  corrected_amount?: number;
+  corrected_category_label?: string;
+  corrected_is_total?: boolean;
+  excluded?: boolean;
+  note?: string;
+  acted_by?: string;
+}
+
+export interface AccountingFactCorrectionResult {
+  specialist_result_id: string;
+  document_unit_id: string;
+  review_status: string;
+  correction: Record<string, unknown>;
 }
 
 export interface KnowledgeGraphStats {
