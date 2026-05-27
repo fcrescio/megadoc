@@ -242,6 +242,13 @@ def compare_context_accounting_periods(
         response["warnings"] = [
             "Il confronto richiede lo stesso ruolo contabile in entrambi i periodi; almeno un periodo non e disponibile."
         ]
+        if any(
+            period["validation_status"] not in {"missing", "validated"}
+            for period in (period_a, period_b)
+        ):
+            response["warnings"].append(
+                "Almeno un periodo disponibile contiene voci il cui totale non e ancora riconciliato."
+            )
         return response
 
     changes = _category_changes(period_a["categories"], period_b["categories"])

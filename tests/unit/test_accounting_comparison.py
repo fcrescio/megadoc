@@ -192,3 +192,29 @@ def test_accounting_comparison_api_exposes_subjects_and_insufficient_data(db_ses
     assert subjects[0]["account_key"] == "b11"
     assert result["status"] == "insufficient_data"
     assert result["period_b"]["validation_status"] == "missing"
+
+
+def test_insufficient_data_reports_unreconciled_available_period(db_session):
+    context = _make_context_comparison(db_session)
+    fact = (
+        db_session.query(AccountingFact)
+        .filter(
+            AccountingFact.is_total.is_(True),
+            AccountingFact.period_context_from == date(2022, 7, 1),
+        )
+        .one()
+    )
+    fact.amount = Decimal("999.00")
+
+    result = compare_context_accounting_periods(
+        db_session,
+        context.id,
+        subject="Bonacci",
+        period_a_from=date(2022, 7, 1),
+        period_a_to=date(2023, 6, 30),
+        period_b_from=date(2024, 7, 1),
+        period_b_to=date(2025, 6, 30),
+    )
+
+    assert result["status"] == "insufficient_data"
+    assert len(result["warnings"]) == 2
