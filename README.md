@@ -35,7 +35,7 @@ Funzionalità implementate:
 - `services/knowledge_classifier`: README e modulo logico della fase knowledge.
 - `packages/common`: dominio, DB models, repository, servizi applicativi, storage, adapter OCR, knowledge e specialisti.
 - `docker-compose.yml`: stack completo con `postgres`, `redis`, `minio`, `mc-init`, `migrate`, `api`, `worker`, `worker_llm_vision`, `knowledge_worker`, specialisti e `frontend`.
-- rete interna `megadoc-net` per tutto lo stack applicativo; `ml-infra-net` per i servizi che devono parlare con l'infrastruttura ML esterna.
+- rete interna `megadoc-net` per backend, dati e worker; `frontend-net` per il proxy frontend verso l'API; `ml-infra-net` per i servizi che devono parlare con l'infrastruttura ML esterna.
 
 ## Struttura Repo Per Nuovi Agenti
 
@@ -190,16 +190,16 @@ curl "http://localhost:8080/knowledge/specialists/utility-bills"
 curl "http://localhost:8080/knowledge/specialists/accounting-statements"
 ```
 
-La pagina `http://localhost:3000/knowledge` espone ricerca, topic, proposal, entità, canonical entities, graph consolidation e viste specialistiche.
+La pagina `http://localhost:3030/knowledge` espone ricerca, topic, proposal, entità, canonical entities, graph consolidation e viste specialistiche.
 
 ## Frontend
 
 Percorsi principali:
 
-- `http://localhost:3000/documents`
-- `http://localhost:3000/upload`
-- `http://localhost:3000/knowledge`
-- `http://localhost:3000/manual`
+- `http://localhost:3030/documents`
+- `http://localhost:3030/upload`
+- `http://localhost:3030/knowledge`
+- `http://localhost:3030/manual`
 
 Il frontend mostra anche lo stato del backend LLM/OCR tramite `GET /system/status`.
 

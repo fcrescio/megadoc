@@ -25,7 +25,7 @@ Il dev server gira su `http://localhost:3000` e si aspetta l'API su `http://loca
 docker compose up --build frontend
 ```
 
-Accesso: `http://localhost:3000`.
+Accesso: `http://localhost:3030`.
 
 ## Rotte
 

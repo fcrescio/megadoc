@@ -122,6 +122,7 @@ services:
       retries: 10
     networks:
       megadoc-net:
+      frontend-net:
       ml-infra-net:
         ipv4_address: 10.89.0.51
 
@@ -337,9 +338,9 @@ services:
       api:
         condition: service_healthy
     ports:
-      - "3000:3000"
+      - "3030:3030"
     networks:
-      - megadoc-net
+      - frontend-net
 
 volumes:
   postgres-data:
@@ -350,6 +351,8 @@ networks:
   megadoc-net:
     name: megadoc-net
     internal: true
+  frontend-net:
+    name: megadoc-frontend-net
   ml-infra-net:
-    name: ml-infra-net
+    name: ml-infra_ml-infra-net
     external: true
