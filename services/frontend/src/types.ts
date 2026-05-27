@@ -394,6 +394,82 @@ export interface CanonicalEntityMergePayload {
   create_canonical_entity?: CanonicalEntityCreatePayload;
 }
 
+export interface KnowledgeContextSummary {
+  id: string;
+  context_kind: string;
+  label: string;
+  review_status: string;
+  canonical_entity_id: string;
+  canonical_entity_type: string;
+  canonical_value: string;
+  anchor_count: number;
+  document_count: number;
+  document_unit_count: number;
+  direct_membership_count: number;
+}
+
+export interface ContextAccountingPeriodAvailability {
+  accounting_role: string;
+  period_from: string;
+  period_to: string;
+}
+
+export interface ContextAccountingSubject {
+  account_key: string;
+  subject_label: string;
+  aliases: string[];
+  unit_codes: string[];
+  source_account_ids: string[];
+  fact_count: number;
+  available_periods: ContextAccountingPeriodAvailability[];
+}
+
+export interface ContextAccountingSource {
+  document_unit_id: string;
+  original_filename: string | null;
+  start_page: number | null;
+  end_page: number | null;
+  evidence_json: Record<string, unknown> | null;
+}
+
+export interface ContextAccountingPeriodBreakdown {
+  period_from: string;
+  period_to: string;
+  accounting_role: string;
+  validation_status: string;
+  total: number | null;
+  component_total: number | null;
+  reported_total: number | null;
+  fact_count: number;
+}
+
+export interface ContextAccountingCategoryChange {
+  category_key: string;
+  category_label: string;
+  amount_a: number;
+  amount_b: number;
+  delta: number;
+  percentage_change: number | null;
+  sources_a: ContextAccountingSource[];
+  sources_b: ContextAccountingSource[];
+}
+
+export interface ContextAccountingComparison {
+  context_id: string;
+  requested_subject: string;
+  accounting_role: string;
+  status: 'comparable' | 'insufficient_data' | 'needs_review' | 'ambiguous_subject' | 'subject_not_found';
+  warnings: string[];
+  candidates: ContextAccountingSubject[];
+  selected_subject: ContextAccountingSubject | null;
+  period_a: ContextAccountingPeriodBreakdown | null;
+  period_b: ContextAccountingPeriodBreakdown | null;
+  direction: 'period_b_more' | 'period_b_less' | 'equal' | null;
+  delta: number | null;
+  percentage_change: number | null;
+  changed_categories: ContextAccountingCategoryChange[];
+}
+
 export interface KnowledgeGraphStats {
   document_units: number;
   nodes: number;

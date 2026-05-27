@@ -17,6 +17,9 @@ import type {
   CanonicalEntitySummary,
   CanonicalEntityDetail,
   CanonicalEntityMergePayload,
+  KnowledgeContextSummary,
+  ContextAccountingSubject,
+  ContextAccountingComparison,
   KnowledgeGraphStats,
   KnowledgeNodeSummary,
   KnowledgeNodeDetail,
@@ -222,6 +225,52 @@ export async function mergeCanonicalEntity(payload: CanonicalEntityMergePayload)
     body: JSON.stringify(payload),
   });
   return handleResponse<CanonicalEntityDetail>(response);
+}
+
+export async function getKnowledgeContexts(options?: { query?: string; entityType?: string; limit?: number }): Promise<KnowledgeContextSummary[]> {
+  const params = new URLSearchParams();
+  if (options?.query) params.set('q', options.query);
+  if (options?.entityType && options.entityType !== 'all') params.set('entity_type', options.entityType);
+  if (options?.limit) params.set('limit', String(options.limit));
+  const response = await fetch(`${API_BASE}/knowledge/contexts?${params.toString()}`);
+  return handleResponse<KnowledgeContextSummary[]>(response);
+}
+
+export async function getContextAccountingSubjects(
+  contextId: string,
+  options?: { query?: string; accountKey?: string; limit?: number },
+): Promise<ContextAccountingSubject[]> {
+  const params = new URLSearchParams();
+  if (options?.query) params.set('q', options.query);
+  if (options?.accountKey) params.set('account_key', options.accountKey);
+  if (options?.limit) params.set('limit', String(options.limit));
+  const response = await fetch(`${API_BASE}/knowledge/contexts/${contextId}/accounting/subjects?${params.toString()}`);
+  return handleResponse<ContextAccountingSubject[]>(response);
+}
+
+export async function compareContextAccounting(
+  contextId: string,
+  options: {
+    subject: string;
+    accountingRole: string;
+    periodAFrom: string;
+    periodATo: string;
+    periodBFrom: string;
+    periodBTo: string;
+    accountKey?: string;
+  },
+): Promise<ContextAccountingComparison> {
+  const params = new URLSearchParams({
+    subject: options.subject,
+    accounting_role: options.accountingRole,
+    period_a_from: options.periodAFrom,
+    period_a_to: options.periodATo,
+    period_b_from: options.periodBFrom,
+    period_b_to: options.periodBTo,
+  });
+  if (options.accountKey) params.set('account_key', options.accountKey);
+  const response = await fetch(`${API_BASE}/knowledge/contexts/${contextId}/accounting/compare?${params.toString()}`);
+  return handleResponse<ContextAccountingComparison>(response);
 }
 
 export async function getKnowledgeGraphStats(): Promise<KnowledgeGraphStats> {

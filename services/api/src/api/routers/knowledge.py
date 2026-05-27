@@ -3,7 +3,7 @@
 import csv
 import io
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -18,6 +18,7 @@ from common.application.knowledge import (
 )
 from common.application.graph import graph_stats, rebuild_knowledge_graph
 from common.application.contexts import rebuild_knowledge_contexts
+from common.application.accounting import compare_context_accounting_periods, find_context_account_subjects
 from common.application.specialists import ensure_specialist_jobs_for_scan_unit
 from common.db.models import (
     CanonicalEntity,
@@ -70,6 +71,8 @@ from knowledge_classifier.schemas import (
     KnowledgeContextMembershipResponse,
     KnowledgeContextStatsResponse,
     KnowledgeContextSummaryResponse,
+    ContextAccountingComparisonResponse,
+    ContextAccountingSubjectResponse,
     KnowledgeAssertionResponse,
     KnowledgeGraphStatsResponse,
     KnowledgeNodeDetailResponse,
@@ -1755,6 +1758,46 @@ def rebuild_context_projection(db: Session = Depends(get_db_session)):
     stats = rebuild_knowledge_contexts(db)
     db.commit()
     return KnowledgeContextStatsResponse(**stats.__dict__)
+
+
+@router.get("/contexts/{context_id}/accounting/subjects", response_model=list[ContextAccountingSubjectResponse])
+def list_context_accounting_subjects(
+    context_id: uuid.UUID,
+    q: str | None = None,
+    account_key: str | None = None,
+    limit: int = Query(default=20, ge=1, le=100),
+    db: Session = Depends(get_db_session),
+):
+    if db.get(KnowledgeContext, context_id) is None:
+        raise HTTPException(status_code=404, detail="Knowledge context not found")
+    return find_context_account_subjects(db, context_id, query=q, account_key=account_key, limit=limit)
+
+
+@router.get("/contexts/{context_id}/accounting/compare", response_model=ContextAccountingComparisonResponse)
+def compare_context_accounting(
+    context_id: uuid.UUID,
+    subject: str = Query(min_length=1),
+    period_a_from: date = Query(),
+    period_a_to: date = Query(),
+    period_b_from: date = Query(),
+    period_b_to: date = Query(),
+    accounting_role: str = Query(default="actual_allocation"),
+    account_key: str | None = None,
+    db: Session = Depends(get_db_session),
+):
+    if db.get(KnowledgeContext, context_id) is None:
+        raise HTTPException(status_code=404, detail="Knowledge context not found")
+    return compare_context_accounting_periods(
+        db,
+        context_id,
+        subject=subject,
+        account_key=account_key,
+        period_a_from=period_a_from,
+        period_a_to=period_a_to,
+        period_b_from=period_b_from,
+        period_b_to=period_b_to,
+        accounting_role=accounting_role,
+    )
 
 
 def _knowledge_node_options():

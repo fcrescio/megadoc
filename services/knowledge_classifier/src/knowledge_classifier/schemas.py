@@ -1,6 +1,6 @@
 """Pydantic schemas for knowledge classifier."""
 
-from datetime import datetime
+from datetime import date, datetime
 from enum import Enum
 from typing import Any, Literal, Optional
 
@@ -372,6 +372,76 @@ class KnowledgeContextDetailResponse(BaseModel):
 class KnowledgeContextStatsResponse(BaseModel):
     contexts: int
     memberships: int
+
+
+class ContextAccountingPeriodAvailabilityResponse(BaseModel):
+    accounting_role: str
+    period_from: date
+    period_to: date
+
+
+class ContextAccountingSubjectResponse(BaseModel):
+    account_key: str
+    subject_label: str
+    aliases: list[str] = Field(default_factory=list)
+    unit_codes: list[str] = Field(default_factory=list)
+    source_account_ids: list[str] = Field(default_factory=list)
+    fact_count: int
+    available_periods: list[ContextAccountingPeriodAvailabilityResponse] = Field(default_factory=list)
+
+
+class ContextAccountingSourceResponse(BaseModel):
+    document_unit_id: str
+    original_filename: Optional[str] = None
+    start_page: Optional[int] = None
+    end_page: Optional[int] = None
+    evidence_json: dict[str, Any] | None = None
+
+
+class ContextAccountingCategoryResponse(BaseModel):
+    category_key: str
+    category_label: str
+    amount: float
+    sources: list[ContextAccountingSourceResponse] = Field(default_factory=list)
+
+
+class ContextAccountingPeriodBreakdownResponse(BaseModel):
+    period_from: date
+    period_to: date
+    accounting_role: str
+    validation_status: str
+    total: Optional[float] = None
+    component_total: Optional[float] = None
+    reported_total: Optional[float] = None
+    fact_count: int
+    categories: list[ContextAccountingCategoryResponse] = Field(default_factory=list)
+
+
+class ContextAccountingCategoryChangeResponse(BaseModel):
+    category_key: str
+    category_label: str
+    amount_a: float
+    amount_b: float
+    delta: float
+    percentage_change: Optional[float] = None
+    sources_a: list[ContextAccountingSourceResponse] = Field(default_factory=list)
+    sources_b: list[ContextAccountingSourceResponse] = Field(default_factory=list)
+
+
+class ContextAccountingComparisonResponse(BaseModel):
+    context_id: str
+    requested_subject: str
+    accounting_role: str
+    status: str
+    warnings: list[str] = Field(default_factory=list)
+    candidates: list[ContextAccountingSubjectResponse] = Field(default_factory=list)
+    selected_subject: ContextAccountingSubjectResponse | None = None
+    period_a: ContextAccountingPeriodBreakdownResponse | None = None
+    period_b: ContextAccountingPeriodBreakdownResponse | None = None
+    direction: Optional[str] = None
+    delta: Optional[float] = None
+    percentage_change: Optional[float] = None
+    changed_categories: list[ContextAccountingCategoryChangeResponse] = Field(default_factory=list)
 
 
 class CanonicalEntityCreate(BaseModel):

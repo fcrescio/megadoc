@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+import uuid
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal, InvalidOperation
@@ -16,7 +17,9 @@ from common.db.models import (
     AccountingFact,
     DocumentUnit,
     KnowledgeAssertion,
+    KnowledgeContextMembership,
     KnowledgeNode,
+    ScanUnit,
     SpecialistResult,
 )
 
@@ -25,6 +28,9 @@ from common.db.models import (
 class AccountingProjectionStats:
     accounts: int
     facts: int
+
+
+TOTAL_RECONCILIATION_TOLERANCE = Decimal("0.02")
 
 
 def rebuild_accounting_facts(session: Session) -> AccountingProjectionStats:
@@ -99,6 +105,287 @@ def accounting_stats(session: Session) -> AccountingProjectionStats:
         accounts=int(session.execute(select(func.count()).select_from(AccountingAccount)).scalar_one()),
         facts=int(session.execute(select(func.count()).select_from(AccountingFact)).scalar_one()),
     )
+
+
+def find_context_account_subjects(
+    session: Session,
+    context_id: uuid.UUID | str,
+    *,
+    query: str | None = None,
+    account_key: str | None = None,
+    limit: int = 20,
+) -> list[dict[str, Any]]:
+    context_uuid = uuid.UUID(str(context_id))
+    accounts = session.execute(
+        select(AccountingAccount)
+        .join(AccountingFact, AccountingFact.account_id == AccountingAccount.id)
+        .join(
+            KnowledgeContextMembership,
+            KnowledgeContextMembership.document_unit_id == AccountingFact.document_unit_id,
+        )
+        .where(KnowledgeContextMembership.context_id == context_uuid)
+        .options(selectinload(AccountingAccount.aliases))
+    ).scalars().unique().all()
+    grouped: dict[str, list[AccountingAccount]] = {}
+    for account in accounts:
+        grouped.setdefault(account.account_key, []).append(account)
+
+    normalized_query = _normalize_key(query) if query and query.strip() else None
+    normalized_account_key = _normalize_key(account_key) if account_key and account_key.strip() else None
+    candidates: list[dict[str, Any]] = []
+    for candidate_key, candidate_accounts in grouped.items():
+        if normalized_account_key and candidate_key != normalized_account_key:
+            continue
+        aliases = sorted(
+            {
+                alias.alias
+                for account in candidate_accounts
+                for alias in account.aliases
+            }
+            | {account.subject_label for account in candidate_accounts}
+        )
+        searchable = {_normalize_key(value) for value in aliases}
+        searchable.add(candidate_key)
+        if normalized_query and not any(normalized_query in value for value in searchable):
+            continue
+        facts = _context_facts_for_accounts(
+            session,
+            context_uuid,
+            [account.id for account in candidate_accounts],
+        )
+        periods = sorted(
+            {
+                (fact.accounting_role, fact.period_context_from, fact.period_context_to)
+                for fact in facts
+                if fact.accounting_role and fact.period_context_from and fact.period_context_to
+            },
+            key=lambda item: (item[1], item[2], item[0]),
+        )
+        candidates.append(
+            {
+                "account_key": candidate_key,
+                "subject_label": candidate_accounts[0].subject_label,
+                "aliases": aliases,
+                "unit_codes": sorted({account.unit_code for account in candidate_accounts if account.unit_code}),
+                "source_account_ids": [str(account.id) for account in candidate_accounts],
+                "fact_count": len(facts),
+                "available_periods": [
+                    {
+                        "accounting_role": role,
+                        "period_from": period_from,
+                        "period_to": period_to,
+                    }
+                    for role, period_from, period_to in periods
+                ],
+            }
+        )
+    return sorted(candidates, key=lambda item: (item["subject_label"].lower(), item["account_key"]))[:limit]
+
+
+def compare_context_accounting_periods(
+    session: Session,
+    context_id: uuid.UUID | str,
+    *,
+    subject: str,
+    period_a_from: date,
+    period_a_to: date,
+    period_b_from: date,
+    period_b_to: date,
+    accounting_role: str = "actual_allocation",
+    account_key: str | None = None,
+) -> dict[str, Any]:
+    context_uuid = uuid.UUID(str(context_id))
+    candidates = find_context_account_subjects(
+        session,
+        context_uuid,
+        query=subject,
+        account_key=account_key,
+        limit=20,
+    )
+    response: dict[str, Any] = {
+        "context_id": str(context_uuid),
+        "requested_subject": subject,
+        "accounting_role": accounting_role,
+        "status": "subject_not_found",
+        "warnings": [],
+        "candidates": candidates,
+        "selected_subject": None,
+        "period_a": None,
+        "period_b": None,
+        "direction": None,
+        "delta": None,
+        "percentage_change": None,
+        "changed_categories": [],
+    }
+    if not candidates:
+        response["warnings"] = ["Nessun soggetto contabile corrispondente nel contesto selezionato."]
+        return response
+    if len(candidates) > 1:
+        response["status"] = "ambiguous_subject"
+        response["warnings"] = ["La ricerca identifica piu soggetti; specificare account_key prima del confronto."]
+        return response
+
+    candidate = candidates[0]
+    facts = _context_facts_for_accounts(
+        session,
+        context_uuid,
+        [uuid.UUID(account_id) for account_id in candidate["source_account_ids"]],
+    )
+    period_a = _period_breakdown(facts, accounting_role, period_a_from, period_a_to)
+    period_b = _period_breakdown(facts, accounting_role, period_b_from, period_b_to)
+    response["selected_subject"] = candidate
+    response["period_a"] = period_a
+    response["period_b"] = period_b
+
+    if period_a["validation_status"] == "missing" or period_b["validation_status"] == "missing":
+        response["status"] = "insufficient_data"
+        response["warnings"] = [
+            "Il confronto richiede lo stesso ruolo contabile in entrambi i periodi; almeno un periodo non e disponibile."
+        ]
+        return response
+
+    changes = _category_changes(period_a["categories"], period_b["categories"])
+    response["changed_categories"] = changes
+    invalid_periods = [
+        item["validation_status"]
+        for item in (period_a, period_b)
+        if item["validation_status"] != "validated"
+    ]
+    if invalid_periods:
+        response["status"] = "needs_review"
+        response["warnings"] = [
+            "Le voci sono disponibili ma almeno un totale non si riconcilia con le componenti estratte."
+        ]
+        return response
+
+    total_a = Decimal(str(period_a["total"]))
+    total_b = Decimal(str(period_b["total"]))
+    delta = total_b - total_a
+    response["status"] = "comparable"
+    response["delta"] = float(delta)
+    response["direction"] = "period_b_more" if delta > 0 else "period_b_less" if delta < 0 else "equal"
+    response["percentage_change"] = (
+        round(float((delta / total_a) * Decimal("100")), 2) if total_a != 0 else None
+    )
+    return response
+
+
+def _context_facts_for_accounts(
+    session: Session,
+    context_id: uuid.UUID,
+    account_ids: list[uuid.UUID],
+) -> list[AccountingFact]:
+    if not account_ids:
+        return []
+    return session.execute(
+        select(AccountingFact)
+        .join(
+            KnowledgeContextMembership,
+            KnowledgeContextMembership.document_unit_id == AccountingFact.document_unit_id,
+        )
+        .where(
+            KnowledgeContextMembership.context_id == context_id,
+            AccountingFact.account_id.in_(account_ids),
+        )
+        .options(
+            selectinload(AccountingFact.document_unit)
+            .selectinload(DocumentUnit.scan_unit)
+            .selectinload(ScanUnit.document)
+        )
+    ).scalars().unique().all()
+
+
+def _period_breakdown(
+    facts: list[AccountingFact],
+    accounting_role: str,
+    period_from: date,
+    period_to: date,
+) -> dict[str, Any]:
+    selected = [
+        fact
+        for fact in facts
+        if fact.accounting_role == accounting_role
+        and fact.period_context_from == period_from
+        and fact.period_context_to == period_to
+        and fact.fact_type == "allocated_expense"
+    ]
+    components = [fact for fact in selected if not fact.is_total and fact.category_key]
+    totals = [fact for fact in selected if fact.is_total]
+    categories: dict[str, dict[str, Any]] = {}
+    for fact in components:
+        item = categories.setdefault(
+            fact.category_key or "unknown",
+            {
+                "category_key": fact.category_key or "unknown",
+                "category_label": fact.category_label or fact.category_key or "Voce non identificata",
+                "amount": Decimal("0.00"),
+                "sources": [],
+            },
+        )
+        item["amount"] += fact.amount
+        document = fact.document_unit.scan_unit.document if fact.document_unit and fact.document_unit.scan_unit else None
+        item["sources"].append(
+            {
+                "document_unit_id": str(fact.document_unit_id),
+                "original_filename": document.original_filename if document else None,
+                "start_page": fact.document_unit.start_page if fact.document_unit else None,
+                "end_page": fact.document_unit.end_page if fact.document_unit else None,
+                "evidence_json": fact.evidence_json,
+            }
+        )
+    component_total = sum((item["amount"] for item in categories.values()), Decimal("0.00"))
+    reported_total = totals[0].amount if len(totals) == 1 else None
+    if not selected:
+        validation_status = "missing"
+    elif not components:
+        validation_status = "missing_components"
+    elif len(totals) != 1:
+        validation_status = "ambiguous_total"
+    elif abs(component_total - reported_total) <= TOTAL_RECONCILIATION_TOLERANCE:
+        validation_status = "validated"
+    else:
+        validation_status = "inconsistent_total"
+    return {
+        "period_from": period_from,
+        "period_to": period_to,
+        "accounting_role": accounting_role,
+        "validation_status": validation_status,
+        "total": float(component_total) if components else None,
+        "component_total": float(component_total) if components else None,
+        "reported_total": float(reported_total) if reported_total is not None else None,
+        "fact_count": len(selected),
+        "categories": [
+            {**item, "amount": float(item["amount"])}
+            for item in sorted(categories.values(), key=lambda item: item["category_label"].lower())
+        ],
+    }
+
+
+def _category_changes(period_a: list[dict[str, Any]], period_b: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    first = {item["category_key"]: item for item in period_a}
+    second = {item["category_key"]: item for item in period_b}
+    changes = []
+    for key in set(first) | set(second):
+        amount_a = Decimal(str(first.get(key, {}).get("amount", 0)))
+        amount_b = Decimal(str(second.get(key, {}).get("amount", 0)))
+        delta = amount_b - amount_a
+        if delta == 0:
+            continue
+        changes.append(
+            {
+                "category_key": key,
+                "category_label": (second.get(key) or first.get(key))["category_label"],
+                "amount_a": float(amount_a),
+                "amount_b": float(amount_b),
+                "delta": float(delta),
+                "percentage_change": (
+                    round(float((delta / amount_a) * Decimal("100")), 2) if amount_a != 0 else None
+                ),
+                "sources_a": first.get(key, {}).get("sources", []),
+                "sources_b": second.get(key, {}).get("sources", []),
+            }
+        )
+    return sorted(changes, key=lambda item: abs(item["delta"]), reverse=True)
 
 
 def _scope_for_document_unit(

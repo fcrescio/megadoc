@@ -17,6 +17,9 @@ import type {
   CanonicalEntitySummary,
   CanonicalEntityDetail,
   CanonicalEntityMergePayload,
+  KnowledgeContextSummary,
+  ContextAccountingSubject,
+  ContextAccountingComparison,
   KnowledgeGraphStats,
   KnowledgeNodeSummary,
   KnowledgeNodeDetail,
@@ -52,6 +55,9 @@ import {
   getKnowledgeEntityDetail,
   getCanonicalEntities,
   mergeCanonicalEntity,
+  getKnowledgeContexts,
+  getContextAccountingSubjects,
+  compareContextAccounting,
   getKnowledgeGraphStats,
   getKnowledgeNodes,
   getKnowledgeNode,
@@ -247,6 +253,48 @@ export function useMergeCanonicalEntity() {
       queryClient.invalidateQueries({ queryKey: ['knowledge-node'] });
       queryClient.invalidateQueries({ queryKey: ['knowledge-assertions'] });
     },
+  });
+}
+
+export function useKnowledgeContexts(options?: { query?: string; entityType?: string; limit?: number }) {
+  return useQuery<KnowledgeContextSummary[]>({
+    queryKey: ['knowledge-contexts', options?.query, options?.entityType, options?.limit],
+    queryFn: () => getKnowledgeContexts(options),
+  });
+}
+
+export function useContextAccountingSubjects(
+  contextId: string | null,
+  options?: { query?: string; accountKey?: string; limit?: number },
+) {
+  return useQuery<ContextAccountingSubject[]>({
+    queryKey: ['context-accounting-subjects', contextId, options?.query, options?.accountKey, options?.limit],
+    queryFn: () => getContextAccountingSubjects(contextId!, options),
+    enabled: !!contextId,
+  });
+}
+
+export function useContextAccountingComparison(
+  contextId: string | null,
+  options: {
+    subject: string;
+    accountingRole: string;
+    periodAFrom: string;
+    periodATo: string;
+    periodBFrom: string;
+    periodBTo: string;
+    accountKey?: string;
+  },
+) {
+  return useQuery<ContextAccountingComparison>({
+    queryKey: ['context-accounting-comparison', contextId, options],
+    queryFn: () => compareContextAccounting(contextId!, options),
+    enabled: !!contextId
+      && options.subject.trim().length >= 2
+      && !!options.periodAFrom
+      && !!options.periodATo
+      && !!options.periodBFrom
+      && !!options.periodBTo,
   });
 }
 

@@ -1,11 +1,14 @@
 import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import {
   useCanonicalEntities,
+  useContextAccountingComparison,
+  useContextAccountingSubjects,
   useGraphConsolidationSuggestions,
   useKnowledgeAssertions,
   useKnowledgeEntities,
   useKnowledgeEntityDetail,
   useKnowledgeGraphStats,
+  useKnowledgeContexts,
   useKnowledgeNode,
   useKnowledgeNodes,
   useKnowledgeSearch,
@@ -25,7 +28,7 @@ interface Props {
   onOpenDocument: (documentId: string) => void;
 }
 
-type Panel = 'facts' | 'specialists' | 'topics' | 'entities' | 'reviews';
+type Panel = 'comparisons' | 'facts' | 'specialists' | 'topics' | 'entities' | 'reviews';
 type SpecialistPanel = 'accounting' | 'utility';
 
 function formatDate(value: string | null | undefined) {
@@ -45,7 +48,7 @@ function formatAssertionValue(assertion: KnowledgeAssertion) {
 }
 
 function KnowledgeBase({ onOpenDocument }: Props) {
-  const [panel, setPanel] = useState<Panel>('facts');
+  const [panel, setPanel] = useState<Panel>('comparisons');
   const [specialistPanel, setSpecialistPanel] = useState<SpecialistPanel>('accounting');
   const [searchInput, setSearchInput] = useState('');
   const [includeInactive, setIncludeInactive] = useState(false);
@@ -66,9 +69,18 @@ function KnowledgeBase({ onOpenDocument }: Props) {
   const [utilityOverdueOnly, setUtilityOverdueOnly] = useState(false);
   const [accountingTypeFilter, setAccountingTypeFilter] = useState('all');
   const [accountingCheckFilter, setAccountingCheckFilter] = useState('all');
+  const [selectedContextId, setSelectedContextId] = useState<string | null>(null);
+  const [comparisonSubject, setComparisonSubject] = useState('Bonacci');
+  const [selectedAccountKey, setSelectedAccountKey] = useState('');
+  const [comparisonRole, setComparisonRole] = useState('actual_allocation');
+  const [periodAFrom, setPeriodAFrom] = useState('2022-07-01');
+  const [periodATo, setPeriodATo] = useState('2023-06-30');
+  const [periodBFrom, setPeriodBFrom] = useState('2023-07-01');
+  const [periodBTo, setPeriodBTo] = useState('2024-06-30');
   const [graphReviewAuthor, setGraphReviewAuthor] = useState('');
   const [graphReviewNotes, setGraphReviewNotes] = useState<Record<string, string>>({});
   const deferredSearch = useDeferredValue(searchInput.trim());
+  const deferredComparisonSubject = useDeferredValue(comparisonSubject.trim());
 
   const topicsQuery = useKnowledgeTopics(includeInactive);
   const topics = topicsQuery.data ?? [];
@@ -116,6 +128,21 @@ function KnowledgeBase({ onOpenDocument }: Props) {
     checkStatus: accountingCheckFilter,
     limit: 40,
   });
+  const contextsQuery = useKnowledgeContexts({ limit: 40 });
+  const contexts = contextsQuery.data ?? [];
+  const accountingSubjects = useContextAccountingSubjects(selectedContextId, {
+    query: deferredComparisonSubject || undefined,
+    limit: 20,
+  });
+  const accountingComparison = useContextAccountingComparison(selectedContextId, {
+    subject: deferredComparisonSubject,
+    accountKey: selectedAccountKey || undefined,
+    accountingRole: comparisonRole,
+    periodAFrom,
+    periodATo,
+    periodBFrom,
+    periodBTo,
+  });
   const proposals = useTopicProposals();
   const graphSuggestions = useGraphConsolidationSuggestions();
   const mergeCanonicalEntity = useMergeCanonicalEntity();
@@ -147,6 +174,22 @@ function KnowledgeBase({ onOpenDocument }: Props) {
     (graphSuggestions.data?.subject.length ?? 0) +
     (graphSuggestions.data?.document_family.length ?? 0) +
     (graphSuggestions.data?.case_or_issue.length ?? 0);
+
+  useEffect(() => {
+    if (!contexts.length) {
+      setSelectedContextId(null);
+      return;
+    }
+    if (!selectedContextId || !contexts.some((context) => context.id === selectedContextId)) {
+      setSelectedContextId(contexts[0].id);
+    }
+  }, [contexts, selectedContextId]);
+
+  useEffect(() => {
+    if (selectedAccountKey && !(accountingSubjects.data ?? []).some((subject) => subject.account_key === selectedAccountKey)) {
+      setSelectedAccountKey('');
+    }
+  }, [accountingSubjects.data, selectedAccountKey]);
 
   useEffect(() => {
     if (!nodes.length) {
@@ -257,6 +300,7 @@ function KnowledgeBase({ onOpenDocument }: Props) {
         </div>
         <nav className="mt-3 flex flex-wrap gap-2">
           {[
+            { id: 'comparisons' as Panel, label: 'Confronti' },
             { id: 'facts' as Panel, label: 'Fatti' },
             { id: 'specialists' as Panel, label: 'Specialisti' },
             { id: 'topics' as Panel, label: 'Topic' },
@@ -271,6 +315,130 @@ function KnowledgeBase({ onOpenDocument }: Props) {
       </section>
 
       <section className="min-h-0 flex-1 overflow-hidden rounded-3xl border border-white/10 bg-white/5 p-4 backdrop-blur-md">
+        {panel === 'comparisons' && (
+          <div className="flex h-full flex-col gap-3">
+            <div className="grid shrink-0 gap-2 rounded-2xl border border-white/10 bg-slate-950/35 p-3 lg:grid-cols-[minmax(14rem,2fr)_minmax(10rem,1fr)_minmax(10rem,1fr)_minmax(10rem,1fr)]">
+              <select
+                value={selectedContextId ?? ''}
+                onChange={(event) => setSelectedContextId(event.target.value || null)}
+                className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm"
+              >
+                {contexts.length === 0 && <option value="">Nessun contesto disponibile</option>}
+                {contexts.map((context) => (
+                  <option key={context.id} value={context.id}>{context.label}</option>
+                ))}
+              </select>
+              <input
+                value={comparisonSubject}
+                onChange={(event) => { setComparisonSubject(event.target.value); setSelectedAccountKey(''); }}
+                placeholder="Soggetto, es. Bonacci"
+                className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm"
+              />
+              <select
+                value={selectedAccountKey}
+                onChange={(event) => setSelectedAccountKey(event.target.value)}
+                className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm"
+              >
+                <option value="">Risoluzione automatica</option>
+                {(accountingSubjects.data ?? []).map((subject) => (
+                  <option key={subject.account_key} value={subject.account_key}>
+                    {subject.subject_label} {subject.unit_codes.join(' / ')}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={comparisonRole}
+                onChange={(event) => setComparisonRole(event.target.value)}
+                className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm"
+              >
+                <option value="actual_allocation">Consuntivo spese</option>
+                <option value="budget_allocation">Preventivo spese</option>
+              </select>
+            </div>
+            <div className="grid shrink-0 gap-2 rounded-2xl border border-white/10 bg-slate-950/35 p-3 md:grid-cols-2">
+              <div className="flex items-center gap-2">
+                <span className="text-xs uppercase tracking-wide text-slate-400">Periodo A</span>
+                <input type="date" value={periodAFrom} onChange={(event) => setPeriodAFrom(event.target.value)} className="min-w-0 flex-1 rounded-lg border border-white/10 bg-slate-950 px-2 py-2 text-sm" />
+                <input type="date" value={periodATo} onChange={(event) => setPeriodATo(event.target.value)} className="min-w-0 flex-1 rounded-lg border border-white/10 bg-slate-950 px-2 py-2 text-sm" />
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs uppercase tracking-wide text-slate-400">Periodo B</span>
+                <input type="date" value={periodBFrom} onChange={(event) => setPeriodBFrom(event.target.value)} className="min-w-0 flex-1 rounded-lg border border-white/10 bg-slate-950 px-2 py-2 text-sm" />
+                <input type="date" value={periodBTo} onChange={(event) => setPeriodBTo(event.target.value)} className="min-w-0 flex-1 rounded-lg border border-white/10 bg-slate-950 px-2 py-2 text-sm" />
+              </div>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto rounded-2xl border border-white/10 bg-slate-950/35 p-4">
+              {accountingComparison.isLoading ? (
+                <p className="text-sm text-slate-400">Elaborazione confronto...</p>
+              ) : accountingComparison.data ? (
+                <div className="space-y-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-lg font-semibold text-white">
+                        {accountingComparison.data.selected_subject?.subject_label ?? comparisonSubject}
+                      </p>
+                      <p className="mt-1 text-sm text-slate-400">
+                        {contexts.find((context) => context.id === selectedContextId)?.label ?? 'Contesto'} · {comparisonRole}
+                      </p>
+                    </div>
+                    <span className={`rounded-full border px-3 py-2 text-xs ${
+                      accountingComparison.data.status === 'comparable'
+                        ? 'border-emerald-300/25 bg-emerald-400/15 text-emerald-100'
+                        : accountingComparison.data.status === 'needs_review'
+                          ? 'border-amber-300/25 bg-amber-400/15 text-amber-100'
+                          : 'border-slate-300/20 bg-white/5 text-slate-200'
+                    }`}>
+                      {accountingComparison.data.status}
+                    </span>
+                  </div>
+                  {accountingComparison.data.status === 'comparable' && (
+                    <div className="grid gap-3 md:grid-cols-3">
+                      <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+                        <p className="text-xs text-slate-400">Periodo A</p>
+                        <p className="mt-1 text-lg text-white">{formatCurrency(accountingComparison.data.period_a?.total)}</p>
+                      </div>
+                      <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+                        <p className="text-xs text-slate-400">Periodo B</p>
+                        <p className="mt-1 text-lg text-white">{formatCurrency(accountingComparison.data.period_b?.total)}</p>
+                      </div>
+                      <div className="rounded-xl border border-cyan-300/20 bg-cyan-400/10 p-3">
+                        <p className="text-xs text-cyan-100">Differenza B - A</p>
+                        <p className="mt-1 text-lg text-white">{formatCurrency(accountingComparison.data.delta)}</p>
+                        <p className="text-xs text-slate-300">{accountingComparison.data.percentage_change}%</p>
+                      </div>
+                    </div>
+                  )}
+                  {accountingComparison.data.warnings.map((warning) => (
+                    <p key={warning} className="rounded-xl border border-amber-300/20 bg-amber-400/10 p-3 text-sm text-amber-100">{warning}</p>
+                  ))}
+                  {accountingComparison.data.selected_subject && (
+                    <p className="text-xs text-slate-400">
+                      Periodi disponibili: {accountingComparison.data.selected_subject.available_periods.map((period) => `${period.accounting_role} ${formatDate(period.period_from)}-${formatDate(period.period_to)}`).join(' · ')}
+                    </p>
+                  )}
+                  {accountingComparison.data.changed_categories.length > 0 && (
+                    <div className="overflow-hidden rounded-xl border border-white/10">
+                      <div className="grid grid-cols-[minmax(12rem,1fr)_8rem_8rem_8rem] bg-white/5 px-3 py-2 text-xs uppercase tracking-wide text-slate-400">
+                        <span>Voce</span><span className="text-right">A</span><span className="text-right">B</span><span className="text-right">Delta</span>
+                      </div>
+                      {accountingComparison.data.changed_categories.map((category) => (
+                        <div key={category.category_key} className="grid grid-cols-[minmax(12rem,1fr)_8rem_8rem_8rem] border-t border-white/10 px-3 py-2 text-sm">
+                          <span className="truncate text-white">{category.category_label}</span>
+                          <span className="text-right text-slate-300">{formatCurrency(category.amount_a)}</span>
+                          <span className="text-right text-slate-300">{formatCurrency(category.amount_b)}</span>
+                          <span className="text-right text-cyan-100">{formatCurrency(category.delta)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <p className="text-sm text-slate-400">Seleziona un contesto e indica un soggetto da confrontare.</p>
+              )}
+            </div>
+          </div>
+        )}
+
         {panel === 'facts' && (
           <div className="flex h-full flex-col gap-3">
             <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
