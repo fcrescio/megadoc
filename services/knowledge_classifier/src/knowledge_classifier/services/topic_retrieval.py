@@ -120,7 +120,7 @@ class TopicRetrievalService:
             terms["entity_values"].add(entity.entity_value.lower())
             if entity.normalized_value:
                 terms["entity_normalized"].add(entity.normalized_value.lower())
-            if entity.entity_type in {"indirizzo", "organizzazione", "luogo", "condominio"}:
+            if entity.entity_type in {"indirizzo", "condominio"}:
                 anchor = self._anchor_tokens(entity.normalized_value or entity.entity_value)
                 if anchor:
                     terms["anchors"].append(anchor)

@@ -1,4 +1,5 @@
 from common.db.models import Topic
+from knowledge_classifier.schemas import ExtractedEntity
 from knowledge_classifier.services.topic_retrieval import TopicRetrievalService
 
 
@@ -46,3 +47,27 @@ def test_score_topic_keeps_generic_topic_without_address_anchor():
     score, _ = service._score_topic(topic, "verbale_assemblea", terms)
 
     assert score > 0
+
+
+def test_build_search_terms_does_not_use_unrelated_organization_as_building_anchor():
+    service = _service()
+    terms = service._build_search_terms(
+        title=None,
+        summary=None,
+        entities=[
+            ExtractedEntity(
+                entity_type="indirizzo",
+                entity_value="Via Cesare Studiati 6-10/A, Pisa",
+                normalized_value="via_cesare_studiati_6_10a_pisa",
+                confidence=0.95,
+            ),
+            ExtractedEntity(
+                entity_type="organizzazione",
+                entity_value="Banco BPM",
+                normalized_value="banco_bpm",
+                confidence=0.95,
+            ),
+        ],
+    )
+
+    assert terms["anchors"] == [{"cesare", "studiati", "pisa"}]
