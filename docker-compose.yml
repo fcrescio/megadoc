@@ -184,6 +184,7 @@ services:
       DATABASE_URL: postgresql+psycopg://megadoc:megadoc@postgres:5432/megadoc
       S3_ENDPOINT_URL: http://minio:9000
       OCR_BACKEND: llm_vision
+      OCR_DOTS_NATIVE_ENDPOINT: ${OCR_WORKER_DOTS_NATIVE_ENDPOINT:-http://10.89.0.3:8080/v1}
       OCR_LLM_VISION_MODEL: ${OCR_LLM_VISION_MODEL:-devstral2}
     depends_on:
       redis:
