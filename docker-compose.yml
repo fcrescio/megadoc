@@ -309,6 +309,7 @@ services:
       ]
     networks:
       - megadoc-net
+      - ml-infra-net
 
   cli:
     build:

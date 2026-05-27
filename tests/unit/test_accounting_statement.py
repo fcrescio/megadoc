@@ -1,9 +1,26 @@
 from common.db.models import DocumentUnit
+from specialist_worker.services.accounting_reconciliation import (
+    AccountingCellCorrection,
+    AccountingHeaderCorrection,
+    AccountingReconciliationProposal,
+    AccountingTableInterpretation,
+)
 from specialist_worker.services.accounting_statement import process_accounting_statement
 
 
 def _document_unit() -> DocumentUnit:
     return DocumentUnit(start_page=1, end_page=3, ordinal=1, review_status="auto_accepted")
+
+
+class _ReconciliationProvider:
+    model_name = "fixture-accounting-model"
+    provider_name = "fixture"
+
+    def __init__(self, proposal: AccountingReconciliationProposal) -> None:
+        self.proposal = proposal
+
+    def chat_with_json(self, messages, schema, temperature=0.1, max_retries=3):
+        return self.proposal, self.proposal.model_dump_json()
 
 
 def test_accounting_statement_extracts_account_facts_with_evidence():
@@ -156,3 +173,179 @@ Periodo: 01/07/2022 - 30/06/2023
     fact = result["accounts"][0]["facts"][0]
     assert fact["fact_type"] == "personal_charge"
     assert fact["accounting_role"] == "actual_personal_charge"
+
+
+def test_accounting_statement_uses_llm_header_reconciliation_only_when_it_improves_extraction():
+    text = """
+Consuntivo Ripartizioni per unita
+Periodo: 01/07/2022 - 30/06/2023
+| Unita | Nominativo | Sp. gen. | Tot. gest. |
+| --- | --- | ---: | ---: |
+| B11 | BONACCI FABIO | -60,00 | -60,00 |
+"""
+    provider = _ReconciliationProvider(
+        AccountingReconciliationProposal(
+            applicable=True,
+            summary="Intestazioni OCR non riconosciute.",
+            header_corrections=[
+                AccountingHeaderCorrection(
+                    table_id="table_1",
+                    original_header="Sp. gen.",
+                    corrected_header="Spese generali",
+                    reason="Voce di riparto leggibile nel prospetto.",
+                ),
+                AccountingHeaderCorrection(
+                    table_id="table_1",
+                    original_header="Tot. gest.",
+                    corrected_header="Totale gestione",
+                    reason="Colonna totale del prospetto.",
+                ),
+            ],
+        )
+    )
+
+    result, _ = process_accounting_statement(
+        _document_unit(),
+        text,
+        "fixture:v6",
+        reconciliation_provider=provider,
+    )
+
+    facts = result["accounts"][0]["facts"]
+    assert {fact["category_key"] for fact in facts} == {"spese_generali", "totale_gestione"}
+    assert result["reconciliation"]["status"] == "applied_structural"
+    assert result["reconciliation"]["model"] == "fixture-accounting-model"
+
+
+def test_accounting_statement_keeps_suspected_numeric_corrections_pending_review():
+    text = """
+Consuntivo Ripartizioni per unita
+Periodo: 01/07/2022 - 30/06/2023
+| Unita | Nominativo | Sp. gen. | Tot. gest. |
+| --- | --- | ---: | ---: |
+| B11 | BONACCI FABIO | -60,00 | -60,00 |
+| B12 | ROSSI MARIO | -40,00 | -4O,00 |
+"""
+    provider = _ReconciliationProvider(
+        AccountingReconciliationProposal(
+            applicable=True,
+            summary="Riconosciuta una voce; totale contiene un carattere ambiguo.",
+            header_corrections=[
+                AccountingHeaderCorrection(
+                    table_id="table_1",
+                    original_header="Sp. gen.",
+                    corrected_header="Spese generali",
+                    reason="Voce contabile leggibile.",
+                ),
+                AccountingHeaderCorrection(
+                    table_id="table_1",
+                    original_header="Tot. gest.",
+                    corrected_header="Totale gestione",
+                    reason="Colonna totale leggibile.",
+                ),
+            ],
+            suspected_cell_corrections=[
+                AccountingCellCorrection(
+                    table_id="table_1",
+                    row_id="row_2",
+                    column="Tot. gest.",
+                    original_value="-4O,00",
+                    corrected_value="-40,00",
+                    reason="Possibile O al posto di zero.",
+                )
+            ],
+        )
+    )
+
+    result, _ = process_accounting_statement(
+        _document_unit(),
+        text,
+        "fixture:v6",
+        reconciliation_provider=provider,
+    )
+
+    row = result["tables"][0]["rows"][1]
+    assert row["cells"]["Totale gestione"] == "-4O,00"
+    assert result["reconciliation"]["status"] == "applied_with_pending_review"
+    assert result["reconciliation"]["suspected_cell_corrections"][0]["corrected_value"] == "-40,00"
+
+
+def test_accounting_statement_rejects_semantics_invented_for_unnamed_columns():
+    text = """
+Consuntivo Ripartizioni per unita
+Periodo: 01/07/2022 - 30/06/2023
+| Unita | Nominativo | column_3 |
+| --- | --- | ---: |
+| B11 | BONACCI FABIO | -60,00 |
+"""
+    provider = _ReconciliationProvider(
+        AccountingReconciliationProposal(
+            applicable=True,
+            summary="Colonna senza etichetta.",
+            header_corrections=[
+                AccountingHeaderCorrection(
+                    table_id="table_1",
+                    original_header="column_3",
+                    corrected_header="Spese generali",
+                    reason="Interpretazione non verificabile.",
+                )
+            ],
+        )
+    )
+
+    result, _ = process_accounting_statement(
+        _document_unit(),
+        text,
+        "fixture:v6",
+        reconciliation_provider=provider,
+    )
+
+    assert result["accounts"] == []
+    assert result["reconciliation"]["status"] == "rejected"
+
+
+def test_accounting_statement_rejects_unsupported_table_interpretation():
+    text = """
+Periodo: 01/07/2022 - 30/06/2023
+| Descrizione | Importo |
+| --- | ---: |
+| Costi non attribuiti | -60,00 |
+"""
+    provider = _ReconciliationProvider(
+        AccountingReconciliationProposal(
+            applicable=True,
+            summary="Interpretazione non sostenuta da righe soggetto.",
+            table_interpretations=[
+                AccountingTableInterpretation(
+                    table_id="table_1",
+                    table_type="expense_allocation",
+                    reason="Proposta priva di unita o nominativo.",
+                )
+            ],
+        )
+    )
+
+    result, _ = process_accounting_statement(
+        _document_unit(),
+        text,
+        "fixture:v6",
+        reconciliation_provider=provider,
+    )
+
+    assert result["tables"][0]["table_type"] == "unknown"
+    assert result["reconciliation"]["status"] == "rejected"
+
+
+def test_accounting_statement_does_not_request_reconciliation_without_provider():
+    text = """
+Periodo: 01/07/2022 - 30/06/2023
+| Unita | Nominativo | column_3 |
+| --- | --- | ---: |
+| B11 | BONACCI FABIO | -60,00 |
+"""
+
+    result, _ = process_accounting_statement(_document_unit(), text, "fixture:v6")
+
+    assert result["accounts"] == []
+    assert result["reconciliation"]["status"] == "not_requested"
+    assert "unnamed_columns_present" in result["reconciliation"]["trigger_reasons"]

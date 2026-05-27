@@ -1,11 +1,21 @@
 from __future__ import annotations
 
+import copy
+import logging
 import re
 import unicodedata
 from html.parser import HTMLParser
 from typing import Any
 
 from common.db.models import DocumentUnit
+from knowledge_classifier.llm.base import LLMProvider
+
+from specialist_worker.services.accounting_reconciliation import (
+    AccountingReconciliationProposal,
+    propose_accounting_reconciliation,
+)
+
+logger = logging.getLogger(__name__)
 
 
 def process_accounting_statement(
@@ -13,6 +23,7 @@ def process_accounting_statement(
     segment_text: str,
     input_version: str,
     structured_json: dict[str, Any] | None = None,
+    reconciliation_provider: LLMProvider | None = None,
 ) -> tuple[dict[str, Any], float]:
     text = segment_text or ""
     statement_type = _statement_type(text)
@@ -26,6 +37,15 @@ def process_accounting_statement(
     ) or _extract_markdown_tables(text, period_from=period_from, period_to=period_to)
     validation_checks = _build_validation_checks(tables)
     accounts = _extract_accounts(tables, period_from, period_to)
+    tables, validation_checks, accounts, reconciliation = _reconcile_with_llm(
+        tables,
+        validation_checks,
+        accounts,
+        text,
+        period_from=period_from,
+        period_to=period_to,
+        provider=reconciliation_provider,
+    )
 
     confidence = 0.45
     if tables:
@@ -50,8 +70,238 @@ def process_accounting_statement(
         "tables": tables,
         "validation_checks": validation_checks,
         "accounts": accounts,
+        "reconciliation": reconciliation,
     }
     return result, confidence
+
+
+def _reconcile_with_llm(
+    tables: list[dict[str, Any]],
+    validation_checks: list[dict[str, Any]],
+    accounts: list[dict[str, Any]],
+    text: str,
+    *,
+    period_from: str | None,
+    period_to: str | None,
+    provider: LLMProvider | None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
+    trigger_reasons = _reconciliation_trigger_reasons(tables, validation_checks, accounts)
+    audit: dict[str, Any] = {
+        "status": "not_requested" if provider is None else "not_needed",
+        "trigger_reasons": trigger_reasons,
+    }
+    if provider is None or not trigger_reasons:
+        return tables, validation_checks, accounts, audit
+    if not tables:
+        audit["status"] = "not_applicable"
+        return tables, validation_checks, accounts, audit
+
+    audit["model"] = provider.model_name
+    audit["provider"] = provider.provider_name
+    try:
+        proposal = propose_accounting_reconciliation(
+            provider,
+            tables=tables,
+            validation_checks=validation_checks,
+            trigger_reasons=trigger_reasons,
+            segment_text=text,
+        )
+    except Exception as exc:
+        logger.warning("Accounting LLM reconciliation unavailable: %s", exc)
+        audit["status"] = "failed"
+        audit["error"] = type(exc).__name__
+        return tables, validation_checks, accounts, audit
+
+    audit["proposal"] = proposal.model_dump(mode="json")
+    if not proposal.applicable:
+        audit["status"] = "no_proposal"
+        return tables, validation_checks, accounts, audit
+
+    candidate_tables, applied_corrections = _apply_structural_proposal(tables, proposal)
+    candidate_checks = _build_validation_checks(candidate_tables)
+    candidate_accounts = _extract_accounts(candidate_tables, period_from, period_to)
+    audit["applied_structural_corrections"] = applied_corrections
+    audit["suspected_cell_corrections"] = [
+        correction.model_dump(mode="json") for correction in proposal.suspected_cell_corrections
+    ]
+    if not applied_corrections:
+        audit["status"] = "review_suggested" if proposal.suspected_cell_corrections else "rejected"
+        return tables, validation_checks, accounts, audit
+    candidate_quality = _extraction_quality(candidate_tables, candidate_checks, candidate_accounts)
+    initial_quality = _extraction_quality(tables, validation_checks, accounts)
+    if candidate_quality <= initial_quality:
+        audit["status"] = "rejected"
+        return tables, validation_checks, accounts, audit
+
+    audit["status"] = (
+        "applied_with_pending_review"
+        if proposal.suspected_cell_corrections
+        else "applied_structural"
+    )
+    return candidate_tables, candidate_checks, candidate_accounts, audit
+
+
+def _reconciliation_trigger_reasons(
+    tables: list[dict[str, Any]],
+    validation_checks: list[dict[str, Any]],
+    accounts: list[dict[str, Any]],
+) -> list[str]:
+    reasons: list[str] = []
+    statuses = {str(check.get("status")) for check in validation_checks}
+    if "fail" in statuses:
+        reasons.append("numeric_validation_failed")
+    if statuses == {"unknown"}:
+        reasons.append("no_numeric_validation_available")
+    if any(table.get("table_type") == "unknown" for table in tables):
+        reasons.append("unknown_table_type")
+    if tables and not accounts:
+        reasons.append("no_account_facts_extracted")
+    if any(
+        re.fullmatch(r"column_\d+", str(header).lower())
+        for table in tables
+        for header in table.get("headers", [])
+    ):
+        reasons.append("unnamed_columns_present")
+    return reasons
+
+
+def _apply_structural_proposal(
+    tables: list[dict[str, Any]],
+    proposal: AccountingReconciliationProposal,
+) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    candidate = copy.deepcopy(tables)
+    indexed = {str(table.get("table_id")): table for table in candidate}
+    applied: list[dict[str, str]] = []
+    for correction in proposal.header_corrections:
+        table = indexed.get(correction.table_id)
+        if table is None:
+            continue
+        headers = table.get("headers")
+        if (
+            not isinstance(headers, list)
+            or correction.original_header not in headers
+            or correction.corrected_header in headers
+            or not correction.corrected_header.strip()
+            or not _header_correction_supported(
+                correction.original_header,
+                correction.corrected_header,
+            )
+        ):
+            continue
+        table["headers"] = [
+            correction.corrected_header if header == correction.original_header else header
+            for header in headers
+        ]
+        for row in table.get("rows", []):
+            for map_key in ("cells", "normalized_amounts"):
+                values = row.get(map_key)
+                if isinstance(values, dict) and correction.original_header in values:
+                    values[correction.corrected_header] = values.pop(correction.original_header)
+        applied.append(
+            {
+                "kind": "header",
+                "table_id": correction.table_id,
+                "original": correction.original_header,
+                "corrected": correction.corrected_header,
+            }
+        )
+    for interpretation in proposal.table_interpretations:
+        table = indexed.get(interpretation.table_id)
+        if (
+            table is None
+            or table.get("table_type") == interpretation.table_type
+            or not _table_interpretation_supported(table, interpretation.table_type)
+        ):
+            continue
+        original_type = str(table.get("table_type") or "unknown")
+        table["table_type"] = interpretation.table_type
+        applied.append(
+            {
+                "kind": "table_type",
+                "table_id": interpretation.table_id,
+                "original": original_type,
+                "corrected": interpretation.table_type,
+            }
+        )
+    for table in candidate:
+        rows = table.get("rows")
+        headers = table.get("headers")
+        if isinstance(rows, list) and isinstance(headers, list):
+            table["totals"] = _extract_table_totals(headers, rows)
+    return candidate, applied
+
+
+def _header_correction_supported(original: str, corrected: str) -> bool:
+    if re.fullmatch(r"column_\d+", original.strip().lower()):
+        return False
+    original_tokens = _lexical_tokens(original)
+    corrected_tokens = _lexical_tokens(corrected)
+    return any(
+        len(source) >= 3
+        and len(target) >= 3
+        and (source.startswith(target) or target.startswith(source))
+        for source in original_tokens
+        for target in corrected_tokens
+    )
+
+
+def _table_interpretation_supported(table: dict[str, Any], table_type: str) -> bool:
+    rows = table.get("rows")
+    if not isinstance(rows, list):
+        return False
+    searchable = " ".join(
+        [
+            *(str(header).lower() for header in table.get("headers", [])),
+            *(
+                str(value).lower()
+                for row in rows[:8]
+                if isinstance(row, dict)
+                for value in (row.get("cells") or {}).values()
+            ),
+        ]
+    )
+    if table_type == "expense_allocation":
+        return any(_extract_account_identity(row) is not None for row in rows) and any(
+            row.get("normalized_amounts") for row in rows if isinstance(row, dict)
+        )
+    if table_type == "payment_schedule":
+        return "rata" in searchable or "dovut" in searchable
+    if table_type == "summary":
+        return "total" in searchable or "gest" in searchable
+    if table_type == "balance":
+        return "saldo" in searchable
+    return False
+
+
+def _lexical_tokens(value: str) -> list[str]:
+    normalized = (
+        unicodedata.normalize("NFKD", value.lower())
+        .encode("ascii", "ignore")
+        .decode("ascii")
+    )
+    return re.findall(r"[a-z0-9]+", normalized)
+
+
+def _extraction_quality(
+    tables: list[dict[str, Any]],
+    validation_checks: list[dict[str, Any]],
+    accounts: list[dict[str, Any]],
+) -> int:
+    checks = {str(check.get("status")) for check in validation_checks}
+    fact_count = sum(len(account.get("facts", [])) for account in accounts)
+    identified_totals = sum(
+        bool(fact.get("is_total"))
+        for account in accounts
+        for fact in account.get("facts", [])
+    )
+    recognized_tables = sum(table.get("table_type") != "unknown" for table in tables)
+    return (
+        (20 if "pass" in checks else 0)
+        - (25 if "fail" in checks else 0)
+        + fact_count
+        + (identified_totals * 3)
+        + recognized_tables
+    )
 
 
 def _statement_type(text: str) -> str:

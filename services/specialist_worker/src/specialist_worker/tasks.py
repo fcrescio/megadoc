@@ -6,14 +6,22 @@ import uuid
 from datetime import datetime, timezone
 
 from celery import shared_task
-from sqlalchemy import create_engine, delete, select
-from sqlalchemy.orm import Session, selectinload
-
 from common.application.accounting import project_accounting_result
 from common.application.graph import project_document_unit
 from common.application.specialists import extract_document_unit_text
-from common.db.models import DocumentUnit, DocumentUnitLink, ScanUnit, SpecialistJob, SpecialistResult
+from common.db.models import (
+    DocumentUnit,
+    DocumentUnitLink,
+    ScanUnit,
+    SpecialistJob,
+    SpecialistResult,
+)
 from common.db.schema import ensure_knowledge_schema
+from knowledge_classifier.config import get_settings as get_knowledge_settings
+from knowledge_classifier.llm.openai_compat import OpenAICompatibleProvider
+from sqlalchemy import create_engine, delete, select
+from sqlalchemy.orm import Session, selectinload
+
 from specialist_worker.services.accounting_statement import process_accounting_statement
 from specialist_worker.services.utility_bill import process_utility_bill
 
@@ -64,13 +72,19 @@ def process_specialist_job(self, specialist_job_id: str):
                 _replace_links(session, document_unit.id, "utility_bill_detail", links)
                 schema_version = "utility_bill_v1"
             elif specialist_job.specialist_type == "accounting_statement":
-                result_json, confidence = process_accounting_statement(
-                    document_unit,
-                    segment_text,
-                    specialist_job.input_version or "",
-                    structured_json=ocr_result.structured_json,
-                )
-                schema_version = "accounting_statement_v5"
+                reconciliation_provider = _accounting_reconciliation_provider()
+                try:
+                    result_json, confidence = process_accounting_statement(
+                        document_unit,
+                        segment_text,
+                        specialist_job.input_version or "",
+                        structured_json=ocr_result.structured_json,
+                        reconciliation_provider=reconciliation_provider,
+                    )
+                finally:
+                    if reconciliation_provider is not None:
+                        reconciliation_provider.close()
+                schema_version = "accounting_statement_v6"
             else:
                 raise ValueError(f"Unsupported specialist type: {specialist_job.specialist_type}")
 
@@ -123,6 +137,27 @@ def process_specialist_job(self, specialist_job_id: str):
             raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))
         finally:
             session.close()
+
+
+def _accounting_reconciliation_provider() -> OpenAICompatibleProvider | None:
+    enabled = (
+        os.getenv("SPECIALIST_ACCOUNTING_LLM_RECONCILIATION_ENABLED", "true").strip().lower()
+    )
+    if enabled not in {"1", "true", "yes", "on"}:
+        return None
+    settings = get_knowledge_settings()
+    endpoint = os.getenv("KN_WORKER_LLM_ENDPOINT", settings.llm_endpoint)
+    if endpoint.startswith("mock://"):
+        return None
+    timeout = int(os.getenv("SPECIALIST_ACCOUNTING_LLM_RECONCILIATION_TIMEOUT", "45"))
+    max_tokens = int(os.getenv("SPECIALIST_ACCOUNTING_LLM_RECONCILIATION_MAX_TOKENS", "1024"))
+    return OpenAICompatibleProvider(
+        base_url=endpoint,
+        model=settings.llm_model,
+        api_key=settings.llm_api_key,
+        timeout=min(timeout, settings.llm_timeout),
+        max_tokens=min(max_tokens, settings.llm_max_tokens),
+    )
 
 
 def _replace_links(
