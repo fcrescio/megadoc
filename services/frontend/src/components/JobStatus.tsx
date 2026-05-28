@@ -48,9 +48,9 @@ function JobStatus() {
 
   return (
     <div>
-      <h2 className="text-xl font-semibold text-white mb-4">Recent Jobs</h2>
+      <h2 className="text-xl font-semibold text-white mb-4">Lavori Recenti</h2>
       {jobs && jobs.length === 0 ? (
-        <p className="text-slate-400">No jobs found.</p>
+        <p className="text-slate-400">Nessun lavoro trovato.</p>
       ) : (
         <div className="bg-white/5 border border-white/10 rounded-[24px] shadow-[0_18px_60px_rgba(2,6,23,0.35)] divide-y divide-white/10 overflow-hidden backdrop-blur-md">
           {jobs?.map((job: Job) => (
@@ -58,9 +58,9 @@ function JobStatus() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="font-mono text-sm text-slate-100">{job.id}</p>
-                  <p className="text-xs text-slate-400">Document: {job.document_id}</p>
+                  <p className="text-xs text-slate-400">Documento: {job.document_id}</p>
                   <p className="text-xs text-slate-500 mt-1">
-                    {job.started_at ? 'Started' : 'Created'}: {formatActivityTime(job)}
+                    {job.started_at ? 'Iniziato' : 'Creato'}: {formatActivityTime(job)}
                   </p>
                 </div>
                 <div className="text-right">

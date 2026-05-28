@@ -23,11 +23,11 @@ interface Props {
 }
 
 const ASSIGNMENT_ROLES = [
-  { value: 'subject', label: 'Subject' },
-  { value: 'document_family', label: 'Document family' },
-  { value: 'case_or_issue', label: 'Case / issue' },
-  { value: 'person_or_org_context', label: 'Person / org context' },
-  { value: 'secondary', label: 'Secondary' },
+  { value: 'subject', label: 'Soggetto' },
+  { value: 'document_family', label: 'Famiglia documento' },
+  { value: 'case_or_issue', label: 'Pratica / problema' },
+  { value: 'person_or_org_context', label: 'Persona / contesto organizzativa' },
+  { value: 'secondary', label: 'Secondario' },
 ];
 
 const TOPIC_KINDS = ['entity', 'family', 'issue', 'project', 'context'];
@@ -70,7 +70,7 @@ function UtilityBillSpecialistCard({
           </h4>
         </div>
         <div className="rounded-full bg-white/90 px-3 py-1 text-sm font-medium text-sky-700 border border-sky-100">
-          {typeof result.service_type === 'string' && result.service_type ? result.service_type : 'unknown'}
+          {typeof result.service_type === 'string' && result.service_type ? result.service_type : 'sconosciuto'}
         </div>
       </div>
 
@@ -118,7 +118,7 @@ function UtilityBillSpecialistCard({
         </div>
         <div className="rounded-lg bg-white p-3 border border-sky-100">
           <p className="text-xs uppercase tracking-wide text-slate-500">Stato pagamento</p>
-          <p className="mt-1 text-sm font-medium text-slate-900">{String(result.payment_status || 'unknown')}</p>
+          <p className="mt-1 text-sm font-medium text-slate-900">{String(result.payment_status || 'sconosciuto')}</p>
         </div>
       </div>
 
@@ -186,7 +186,7 @@ function AccountingSpecialistCard({ result }: { result: Record<string, unknown> 
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-700">Accounting Statement</p>
           <h4 className="text-base font-semibold text-slate-900">
-            {typeof result.statement_type === 'string' && result.statement_type ? result.statement_type : 'statement'}
+            {typeof result.statement_type === 'string' && result.statement_type ? result.statement_type : 'dichiarazione'}
           </h4>
         </div>
         <div className="rounded-full bg-white/90 px-3 py-1 text-sm font-medium text-emerald-700 border border-emerald-100">
@@ -383,7 +383,7 @@ function TopicAssignmentManager({
         payload: {
           topic_id: selectedTopicId,
           assignment_role: assignmentRole,
-          rationale: 'Human review assignment',
+          rationale: 'Assegnazione tramite revisione umana',
         },
       });
       return;
@@ -537,7 +537,7 @@ function TopicAssignmentManager({
               key={assignment.id}
               onClick={() => deleteAssignment.mutate({ documentUnitId: unit.id, assignmentId: assignment.id })}
               className="px-2 py-1 rounded-full bg-indigo-50 text-indigo-700 text-xs border border-indigo-100"
-              title="Remove assignment"
+              title="Rimuovi assegnazione"
             >
               {assignment.assignment_role}: {assignment.topic_title ?? assignment.topic_slug} ×
             </button>
@@ -588,7 +588,7 @@ function DocumentDetail({ documentId, onBack, initialTab = 'info' }: Props) {
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {
-      alert('Download failed');
+      alert('Download non riuscito');
     }
   };
 
@@ -648,7 +648,7 @@ function DocumentDetail({ documentId, onBack, initialTab = 'info' }: Props) {
                 </div>
                 <div>
                   <span className="text-gray-500">Viewer:</span>
-                  <p>{selectedVersion ? `Version ${selectedVersion.version_number}` : 'Latest version'}</p>
+                  <p>{selectedVersion ? `Versione ${selectedVersion.version_number}` : 'Ultima versione'}</p>
                 </div>
               </div>
               <button
@@ -668,7 +668,7 @@ function DocumentDetail({ documentId, onBack, initialTab = 'info' }: Props) {
                     {docData?.original_filename ?? 'PDF viewer'}
                   </h2>
                   <p className="text-sm text-gray-500">
-                    {selectedVersion ? `Viewing version ${selectedVersion.version_number}` : 'Viewing latest version'}
+                    {selectedVersion ? `Visualizzazione della versione ${selectedVersion.version_number}` : "Visualizzazione dell'ultima versione"}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -717,7 +717,7 @@ function DocumentDetail({ documentId, onBack, initialTab = 'info' }: Props) {
                   </div>
                   <div className="border rounded-lg p-4 markdown-body bg-gray-50 max-h-96 overflow-y-auto">
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                      {ocrResult.markdown_text || 'No markdown content'}
+                      {ocrResult.markdown_text || 'Nessun contenuto markdown'}
                     </ReactMarkdown>
                   </div>
                 </div>
@@ -742,7 +742,7 @@ function DocumentDetail({ documentId, onBack, initialTab = 'info' }: Props) {
                       disabled={ensureSpecialists.isPending}
                       className="px-3 py-2 rounded-md border border-slate-300 text-slate-700 text-sm hover:bg-slate-50 disabled:opacity-60"
                     >
-                      {ensureSpecialists.isPending ? 'Queueing specialists...' : 'Run specialist extraction'}
+                      {ensureSpecialists.isPending ? 'Specialisti in coda...' : 'Estrazione specialistica'}
                     </button>
                   </div>
                   {knowledge.scan_units.map((scanUnit) => (
@@ -775,7 +775,7 @@ function DocumentDetail({ documentId, onBack, initialTab = 'info' }: Props) {
                             <div className="flex flex-wrap items-start justify-between gap-3">
                               <div>
                                 <h3 className="font-semibold text-gray-900">
-                                  Unit {unit.ordinal}: {unit.document_type_code ?? 'unknown'}
+                                  Unit {unit.ordinal}: {unit.document_type_code ?? 'sconosciuto'}
                                 </h3>
                                 <p className="text-sm text-gray-500">
                                   Pages {unit.start_page}-{unit.end_page} · {unit.review_status}
@@ -925,7 +925,7 @@ function DocumentDetail({ documentId, onBack, initialTab = 'info' }: Props) {
                         disabled={ensureKnowledge.isPending}
                         className="mt-3 px-4 py-2 rounded-md bg-amber-600 text-white text-sm hover:bg-amber-700 disabled:opacity-60"
                       >
-                        {ensureKnowledge.isPending ? 'Queueing knowledge...' : 'Process knowledge now'}
+                        {ensureKnowledge.isPending ? 'Conoscenza in coda...' : 'Elabora conoscenza ora'}
                       </button>
                     </div>
                   ) : (

@@ -12,11 +12,11 @@ interface Props {
 }
 
 const ASSIGNMENT_ROLES = [
-  { value: 'subject', label: 'Subject' },
-  { value: 'document_family', label: 'Document family' },
-  { value: 'case_or_issue', label: 'Case / issue' },
-  { value: 'person_or_org_context', label: 'Person / org context' },
-  { value: 'secondary', label: 'Secondary' },
+  { value: 'subject', label: 'Soggetto' },
+  { value: 'document_family', label: 'Famiglia documento' },
+  { value: 'case_or_issue', label: 'Pratica / problema' },
+  { value: 'person_or_org_context', label: 'Persona / contesto organizzativa' },
+  { value: 'secondary', label: 'Secondario' },
 ];
 
 const TOPIC_KINDS = ['entity', 'family', 'issue', 'project', 'context'];
@@ -144,9 +144,9 @@ function ProposalCard({
           <div className="space-y-3">
             <div className="flex flex-wrap gap-2">
               {[
-                ['merge_into_existing', 'Merge into existing'],
-                ['approve_new_topic', 'Create canonical topic'],
-                ['add_secondary_topic', 'Add as secondary'],
+                ['merge_into_existing', 'Unisci con esistente'],
+                ['approve_new_topic', 'Crea topic canonico'],
+                ['add_secondary_topic', 'Aggiungi come secondario'],
               ].map(([value, label]) => (
                 <button
                   key={value}
@@ -333,7 +333,7 @@ function ProposalList({ onClose }: Props) {
         <div>
           <h3 className="text-lg font-semibold text-white">Topic Proposals</h3>
           <p className="text-sm text-slate-400">
-            Review proposals as multi-topic assignments, not as a single forced classification.
+            Rivedi le proposte come assegnazioni multi-topic, non come una singola classificazione forzata.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -358,7 +358,7 @@ function ProposalList({ onClose }: Props) {
       {proposals?.length === 0 ? (
         <div className="p-8 text-center bg-white/5 border border-white/10 rounded-2xl">
           <p className="text-slate-400">
-            {includeConsolidated ? 'No proposals in this view.' : 'No pending proposals.'}
+            {includeConsolidated ? 'Nessuna proposta in questa vista.' : 'Nessuna proposta pendente.'}
           </p>
         </div>
       ) : (

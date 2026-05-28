@@ -21,7 +21,7 @@ function UploadForm() {
       });
       setMessage({
         type: 'success',
-        text: 'Uploaded successfully!',
+        text: 'Caricato con successo!',
       });
       setFile(null);
       setExternalId('');
@@ -35,7 +35,7 @@ function UploadForm() {
 
   return (
     <div className="bg-white rounded-lg shadow p-6">
-      <h2 className="text-xl font-semibold mb-4">Upload Document</h2>
+      <h2 className="text-xl font-semibold mb-4">Caricamento Documento</h2>
 
       {message && (
         <div
@@ -49,7 +49,7 @@ function UploadForm() {
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">PDF File</label>
+          <label className="block text-sm font-medium text-gray-700 mb-1">File PDF</label>
           <input
             type="file"
             accept="application/pdf"
@@ -61,17 +61,17 @@ function UploadForm() {
 
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
-            External ID (optional)
+            ID esterno (opzionale)
           </label>
           <input
             type="text"
             value={externalId}
             onChange={(e) => setExternalId(e.target.value)}
-            placeholder="e.g., contract-001"
+            placeholder="es. contratto-001"
             className="block w-full text-sm border-gray-300 rounded-md border p-2"
           />
           <p className="text-xs text-gray-500 mt-1">
-            Use external_id to version the same logical document
+            Usa external_id per versionare lo stesso documento logico
           </p>
         </div>
 
@@ -84,7 +84,7 @@ function UploadForm() {
             className="mr-2"
           />
           <label htmlFor="autoSubmit" className="text-sm text-gray-700">
-            Auto-submit OCR job after upload
+            Invio automatico del lavoro OCR dopo il caricamento
           </label>
         </div>
 
@@ -93,7 +93,7 @@ function UploadForm() {
           disabled={uploadMutation.isPending || !file}
           className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
         >
-          {uploadMutation.isPending ? 'Uploading...' : 'Upload'}
+          {uploadMutation.isPending ? 'Caricamento...' : 'Carica'}
         </button>
       </form>
     </div>

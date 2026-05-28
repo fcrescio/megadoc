@@ -24,16 +24,16 @@ function DocumentList({ onSelectDocument }: Props) {
   if (error) {
     return (
       <div className="mb-8 p-4 bg-red-50 text-red-700 rounded-lg">
-        Error loading documents: {(error as Error).message}
+        Errore nel caricamento dei documenti: {(error as Error).message}
       </div>
     );
   }
 
   return (
     <div className="mb-8">
-      <h2 className="text-xl font-semibold text-white mb-4">Documents</h2>
+      <h2 className="text-xl font-semibold text-white mb-4">Documenti</h2>
       {documents && documents.length === 0 ? (
-        <p className="text-slate-400">No documents found.</p>
+        <p className="text-slate-400">Nessun documento trovato.</p>
       ) : (
         <div className="bg-white/5 border border-white/10 rounded-[24px] shadow-[0_18px_60px_rgba(2,6,23,0.35)] divide-y divide-white/10 overflow-hidden backdrop-blur-md">
           {documents?.map((doc: Document) => (

@@ -101,10 +101,10 @@ function App() {
           <div className="flex flex-wrap items-center gap-3 justify-end">
             <nav className="flex flex-wrap items-center gap-2">
               {[
-                { id: 'documents', label: 'Documents' },
-                { id: 'knowledge', label: 'Knowledge' },
-                { id: 'manual', label: 'Manual' },
-                { id: 'upload', label: 'Upload' },
+                { id: 'documents', label: 'Documenti' },
+                { id: 'knowledge', label: 'Conoscenza' },
+                { id: 'manual', label: 'Manuale' },
+                { id: 'upload', label: 'Caricamento' },
               ].map((item) => (
                 <button
                   key={item.id}
@@ -130,7 +130,7 @@ function App() {
             <div className="grid gap-6 lg:grid-cols-[1.4fr_0.9fr] p-6 lg:p-8">
               <div>
                 <p className="text-sm text-cyan-200/80 mb-3">OCR, classificazione e consultazione.</p>
-                <h2 className="text-3xl lg:text-4xl leading-tight font-semibold text-white">Archivio documentale</h2>
+                <h2 className="text-3xl lg:text-4xl leading-tight font-semibold text-white">Archivio dei documenti</h2>
               </div>
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div className="rounded-2xl border border-cyan-300/15 bg-slate-900/45 p-4">
@@ -142,7 +142,7 @@ function App() {
                   <p className="mt-2 text-lg font-semibold text-white">{window.location.pathname}</p>
                 </div>
                 <div className="rounded-2xl border border-white/10 bg-slate-900/45 p-4 col-span-2">
-                  <p className="text-cyan-200/70">Use directly</p>
+                  <p className="text-cyan-200/70">Usa direttamente</p>
                   <p className="mt-2 text-slate-200">
                     `/knowledge` now opens the human interface. API calls live under `/api/*`.
                   </p>
