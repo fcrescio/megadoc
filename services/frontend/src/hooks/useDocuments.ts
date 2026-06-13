@@ -88,11 +88,12 @@ export function useDocuments(limit = 100) {
   });
 }
 
-export function useSystemStatus() {
+export function useSystemStatus(enabled = true) {
   return useQuery<SystemStatus>({
     queryKey: ['system-status'],
     queryFn: () => getSystemStatus(),
-    refetchInterval: 15000,
+    enabled,
+    refetchInterval: enabled ? 15000 : false,
     staleTime: 5000,
   });
 }

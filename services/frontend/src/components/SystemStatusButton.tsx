@@ -18,8 +18,8 @@ function statusLabel(status: 'ok' | 'degraded' | 'error') {
 }
 
 export default function SystemStatusButton() {
-  const { data, isLoading, error } = useSystemStatus();
   const [open, setOpen] = useState(false);
+  const { data, isLoading, error } = useSystemStatus(open);
 
   const effectiveStatus = error ? 'error' : (data?.status ?? 'degraded');
   const badgeClasses = statusClasses(effectiveStatus);
@@ -34,7 +34,7 @@ export default function SystemStatusButton() {
       >
         <span className="flex items-center gap-2">
           <span className={`h-2.5 w-2.5 rounded-full ${effectiveStatus === 'ok' ? 'bg-emerald-300' : effectiveStatus === 'degraded' ? 'bg-amber-300' : 'bg-rose-300'}`} />
-          {isLoading ? 'Verifica dei backend…' : error ? 'Stato backend non disponibile' : statusLabel(effectiveStatus)}
+          {!open && !data ? 'Stato backend' : isLoading ? 'Verifica dei backend…' : error ? 'Stato backend non disponibile' : statusLabel(effectiveStatus)}
         </span>
       </button>
 

@@ -87,6 +87,7 @@ function KnowledgeBase({ onOpenDocument }: Props) {
   const specialistsPanelActive = panel === 'specialists';
   const accountingPanelActive = specialistsPanelActive && specialistPanel === 'accounting';
   const utilityPanelActive = specialistsPanelActive && specialistPanel === 'utility';
+  const topicsPanelActive = panel === 'topics';
   const entitiesPanelActive = panel === 'entities';
   const factsPanelActive = panel === 'facts';
   const reviewsPanelActive = panel === 'reviews';
@@ -100,7 +101,7 @@ function KnowledgeBase({ onOpenDocument }: Props) {
     topicKind: topicKindFilter,
     limit: 60,
   });
-  const topicDetail = useKnowledgeTopic(selectedTopicId);
+  const topicDetail = useKnowledgeTopic(topicsPanelActive ? selectedTopicId : null);
   const entityQuery = useKnowledgeEntities({
     query: deferredSearch || undefined,
     entityType: entityTypeFilter,
@@ -212,6 +213,7 @@ function KnowledgeBase({ onOpenDocument }: Props) {
   }, [nodes, selectedNodeId]);
 
   useEffect(() => {
+    if (!topicsPanelActive) return;
     if (!visibleTopics.length) {
       setSelectedTopicId(null);
       return;
@@ -219,7 +221,7 @@ function KnowledgeBase({ onOpenDocument }: Props) {
     if (!selectedTopicId || !visibleTopics.some((topic) => topic.id === selectedTopicId)) {
       setSelectedTopicId(visibleTopics[0].id);
     }
-  }, [selectedTopicId, visibleTopics]);
+  }, [selectedTopicId, topicsPanelActive, visibleTopics]);
 
   useEffect(() => {
     if (!entities.length) {
