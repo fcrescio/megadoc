@@ -780,7 +780,7 @@ def ensure_document_knowledge(
         select(OCRResult)
         .where(OCRResult.document_id == parsed_document_id)
         .order_by(OCRResult.created_at.desc())
-    ).scalar_one_or_none()
+    ).scalars().first()
     if ocr_result is None:
         raise HTTPException(status_code=409, detail="OCR result not available yet")
 
@@ -821,7 +821,7 @@ def ensure_document_specialists(
         select(ScanUnit)
         .where(ScanUnit.source_document_id == parsed_document_id)
         .order_by(ScanUnit.created_at.desc())
-    ).scalar_one_or_none()
+    ).scalars().first()
     if scan_unit is None:
         raise HTTPException(status_code=404, detail="Knowledge scan not found")
 
