@@ -1,11 +1,12 @@
-import { useEffect, useState } from 'react';
+import { Suspense, lazy, useEffect, useState } from 'react';
 import DocumentList from './components/DocumentList';
-import DocumentDetail from './components/DocumentDetail';
-import UploadForm from './components/UploadForm';
 import JobStatus from './components/JobStatus';
-import KnowledgeBase from './components/KnowledgeBase';
-import ManualView from './components/ManualView';
 import SystemStatusButton from './components/SystemStatusButton';
+
+const DocumentDetail = lazy(() => import('./components/DocumentDetail'));
+const UploadForm = lazy(() => import('./components/UploadForm'));
+const KnowledgeBase = lazy(() => import('./components/KnowledgeBase'));
+const ManualView = lazy(() => import('./components/ManualView'));
 
 type View = 'documents' | 'knowledge' | 'upload' | 'manual';
 type DocumentTab = 'info' | 'pdf' | 'ocr' | 'knowledge' | 'versions' | 'assets';
@@ -39,6 +40,14 @@ function parseRoute(): RouteState {
     };
   }
   return { view: 'documents', selectedDoc: null, initialTab: 'info' };
+}
+
+function RouteFallback() {
+  return (
+    <div className="rounded-3xl border border-white/10 bg-slate-950/40 p-6 text-sm text-slate-300">
+      Caricamento...
+    </div>
+  );
 }
 
 function App() {
@@ -152,24 +161,26 @@ function App() {
           </section>
         )}
 
-        {route.selectedDoc ? (
-          <DocumentDetail
-            documentId={route.selectedDoc}
-            initialTab={route.initialTab}
-            onBack={() => openView(route.initialTab === 'knowledge' ? 'knowledge' : 'documents')}
-          />
-        ) : route.view === 'upload' ? (
-          <UploadForm />
-        ) : route.view === 'knowledge' ? (
-          <KnowledgeBase onOpenDocument={(documentId) => openDocument(documentId, 'knowledge')} />
-        ) : route.view === 'manual' ? (
-          <ManualView />
-        ) : (
-          <div className="grid gap-6 xl:grid-cols-[1.35fr_0.85fr]">
-            <DocumentList onSelectDocument={(documentId) => openDocument(documentId)} />
-            <JobStatus />
-          </div>
-        )}
+        <Suspense fallback={<RouteFallback />}>
+          {route.selectedDoc ? (
+            <DocumentDetail
+              documentId={route.selectedDoc}
+              initialTab={route.initialTab}
+              onBack={() => openView(route.initialTab === 'knowledge' ? 'knowledge' : 'documents')}
+            />
+          ) : route.view === 'upload' ? (
+            <UploadForm />
+          ) : route.view === 'knowledge' ? (
+            <KnowledgeBase onOpenDocument={(documentId) => openDocument(documentId, 'knowledge')} />
+          ) : route.view === 'manual' ? (
+            <ManualView />
+          ) : (
+            <div className="grid gap-6 xl:grid-cols-[1.35fr_0.85fr]">
+              <DocumentList onSelectDocument={(documentId) => openDocument(documentId)} />
+              <JobStatus />
+            </div>
+          )}
+        </Suspense>
       </main>
 
       <footer className="fixed bottom-2 right-3 z-50 text-[10px] text-white/20 select-none">

@@ -64,6 +64,7 @@ function simplifyTiming(timing) {
       nav,
       paint,
       resources,
+      react_profile: window.__MEGADOC_REACT_PROFILE__ ?? [],
       body_text_sample: document.body.innerText.slice(0, 500),
     };
   });
