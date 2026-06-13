@@ -51,6 +51,7 @@ Use a verification ladder. Do not jump directly from code changes to manual UI i
    - Rebuild only the services affected by the change.
    - Confirm required containers are running and healthy.
    - Check queue infrastructure before starting ingestion.
+   - For frontend changes, confirm the running container is serving the expected bundle, not only that the source tree contains the patch.
 
 3. Data-level verification
    - Query Postgres directly for document counts, job statuses, scan units, document units, specialist jobs, and specialist results.
@@ -86,6 +87,14 @@ Check service status:
 ```bash
 docker compose ps
 ```
+
+Rebuild the frontend with an explicit git hash when validating UI changes:
+
+```bash
+VITE_GIT_HASH=$(git rev-parse --short HEAD) docker compose up -d --build frontend
+```
+
+The frontend Docker build context is `services/frontend`, so it may not contain the repository `.git` directory. Do not rely on `git rev-parse` inside the container build unless the build context is changed deliberately.
 
 Check recent logs for a specific container:
 
@@ -165,6 +174,19 @@ Dense data should use:
 
 UI labels should describe the archive concept directly. Avoid generated titles that merely restate similarity or weak clustering unless the user is reviewing proposals.
 
+For review workflows, distinguish clearly between free-text filters and authoritative selections. If an action requires an existing database object, the UI must force selection of an existing id and disable submission until that id is valid. Do not treat typed labels as identifiers.
+
+When a screen can render many proposals, topics, tables, or facts, avoid repeated sorting/filtering inside each row or card. Compute shared ordered lists once in the parent, cap large option lists, and provide local filtering.
+
+## Runtime Verification Notes
+
+After a rebuild or restart, verify the deployed process, not just the build output:
+
+- `docker compose ps <service>` to confirm the service was recreated and is running.
+- For frontend changes, inspect the served bundle or visible footer hash and make sure it matches the current commit.
+- If the UI still shows an old hash, suspect browser cache, stale container image, or a build arg fallback before debugging the application logic.
+- Compose may rebuild dependent images even when targeting one service. Watch the command until it exits and check dependent healthchecks before declaring the UI ready.
+
 ## Git Discipline
 
 Use commits as rollback points.
@@ -186,4 +208,3 @@ A change is done when:
 - Runtime services affected by the change have been rebuilt or the reason for not rebuilding is stated.
 - Representative database/API output has been inspected for pipeline changes.
 - Remaining risks are known and documented in the final handoff.
-
