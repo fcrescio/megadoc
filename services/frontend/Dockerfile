@@ -3,6 +3,8 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 
 RUN apk add --no-cache git
+ARG VITE_GIT_HASH=unknown
+ENV VITE_GIT_HASH=$VITE_GIT_HASH
 
 COPY package*.json ./
 RUN npm install
