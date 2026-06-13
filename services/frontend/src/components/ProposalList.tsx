@@ -62,16 +62,32 @@ function ProposalCard({
 
   const filteredTopics = useMemo(() => {
     const query = topicSearch.trim().toLowerCase();
-    const source = topics.filter((topic) => topic.is_active);
-    if (!query) {
-      return source.slice(0, 8);
-    }
-    return source
-      .filter((topic) =>
+    const sortedTopics = [...topics].sort((left, right) => {
+      const leftRank = (left.is_active ? 2 : 0) + (left.canonical ? 1 : 0);
+      const rightRank = (right.is_active ? 2 : 0) + (right.canonical ? 1 : 0);
+      if (leftRank !== rightRank) {
+        return rightRank - leftRank;
+      }
+      return left.title.localeCompare(right.title, 'it');
+    });
+    const matchingTopics = query
+      ? sortedTopics.filter((topic) =>
         [topic.title, topic.slug, topic.topic_class, topic.topic_kind].join(' ').toLowerCase().includes(query),
       )
-      .slice(0, 8);
+      : sortedTopics;
+    return matchingTopics.slice(0, 8);
   }, [topicSearch, topics]);
+
+  const selectedTopic = useMemo(
+    () => topics.find((topic) => topic.id === selectedTopicId) ?? null,
+    [selectedTopicId, topics],
+  );
+  const targetTopicSelectionIsValid =
+    mode === 'approve_new_topic'
+    || (
+      selectedTopic !== null
+      && topicSearch.trim() === selectedTopic.title
+    );
 
   const handleApprove = () => {
     if (mode === 'merge_into_existing' || mode === 'add_secondary_topic') {
@@ -226,33 +242,59 @@ function ProposalCard({
                 <label className="text-xs uppercase tracking-wide text-slate-400">Target topic</label>
                 <input
                   value={topicSearch}
-                  onChange={(event) => setTopicSearch(event.target.value)}
-                  placeholder="Search existing topics"
+                  onChange={(event) => {
+                    setTopicSearch(event.target.value);
+                    setSelectedTopicId('');
+                  }}
+                  placeholder="Cerca topic esistenti"
                   className="w-full rounded-xl border border-white/10 bg-slate-900/70 px-3 py-2 text-sm text-slate-100"
                 />
                 <div className="grid gap-2 max-h-44 overflow-y-auto">
-                  {filteredTopics.map((topic) => (
-                    <button
-                      key={topic.id}
-                      onClick={() => {
-                        setSelectedTopicId(topic.id);
-                        setTopicSearch(topic.title);
-                      }}
-                      className={`text-left rounded-xl border px-3 py-2 ${
-                        selectedTopicId === topic.id
-                          ? 'border-cyan-300/40 bg-cyan-400/10 text-cyan-100'
-                          : 'border-white/10 bg-white/5 text-slate-200'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="font-medium">{topic.title}</span>
-                        <span className="text-xs text-slate-400">
-                          {topic.topic_kind} · {topic.topic_class}
-                        </span>
-                      </div>
-                    </button>
-                  ))}
+                  {filteredTopics.length > 0 ? (
+                    filteredTopics.map((topic) => (
+                      <button
+                        key={topic.id}
+                        onClick={() => {
+                          setSelectedTopicId(topic.id);
+                          setTopicSearch(topic.title);
+                        }}
+                        className={`text-left rounded-xl border px-3 py-2 ${
+                          selectedTopicId === topic.id
+                            ? 'border-cyan-300/40 bg-cyan-400/10 text-cyan-100'
+                            : 'border-white/10 bg-white/5 text-slate-200'
+                        }`}
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <span className="font-medium">{topic.title}</span>
+                          <span className="flex flex-wrap items-center gap-1 text-xs text-slate-400">
+                            <span>{topic.topic_kind} · {topic.topic_class}</span>
+                            {!topic.is_active && (
+                              <span className="rounded-full border border-amber-300/20 bg-amber-400/10 px-2 py-0.5 text-amber-100">
+                                inattivo
+                              </span>
+                            )}
+                            {!topic.canonical && (
+                              <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-slate-300">
+                                provvisorio
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                      </button>
+                    ))
+                  ) : (
+                    <p className="px-1 text-xs italic text-slate-500">
+                      {topicSearch.trim()
+                        ? 'Nessun topic trovato. Seleziona un topic dalla lista o crea un nuovo topic canonico.'
+                        : 'Nessun topic disponibile.'}
+                    </p>
+                  )}
                 </div>
+                {!targetTopicSelectionIsValid && (
+                  <p className="text-xs text-amber-200">
+                    Seleziona un topic esistente dalla lista: il testo libero non viene usato come target.
+                  </p>
+                )}
               </div>
             )}
           </div>
@@ -260,7 +302,7 @@ function ProposalCard({
           <div className="flex flex-col gap-2">
             <button
               onClick={handleApprove}
-              disabled={busy}
+              disabled={busy || !targetTopicSelectionIsValid}
               className="px-3 py-2 rounded-full bg-emerald-400/15 text-emerald-200 text-sm font-medium border border-emerald-300/25 hover:bg-emerald-400/25 disabled:opacity-50"
             >
               Apply review
