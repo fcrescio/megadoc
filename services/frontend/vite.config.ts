@@ -4,10 +4,14 @@ import react from '@vitejs/plugin-react'
 import { execSync } from 'child_process';
 
 function resolveGitHash() {
+  if (process.env.VITE_GIT_HASH) {
+    return process.env.VITE_GIT_HASH;
+  }
+
   try {
     return execSync('git rev-parse --short HEAD').toString().trim();
   } catch {
-    return process.env.VITE_GIT_HASH ?? 'unknown';
+    return 'unknown';
   }
 }
 
