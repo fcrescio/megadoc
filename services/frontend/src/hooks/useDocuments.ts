@@ -202,10 +202,11 @@ export function useSpecialistUtilityBills(options?: {
   paymentStatus?: string;
   overdueOnly?: boolean;
   limit?: number;
-}) {
+}, enabled = true) {
   return useQuery<{ total: number; items: SpecialistUtilityBillSummary[] }>({
     queryKey: ['specialist-utility-bills', options?.query, options?.issuer, options?.paymentStatus, options?.overdueOnly, options?.limit],
     queryFn: () => getSpecialistUtilityBills(options),
+    enabled,
   });
 }
 
@@ -214,17 +215,19 @@ export function useSpecialistAccountingStatements(options?: {
   statementType?: string;
   checkStatus?: string;
   limit?: number;
-}) {
+}, enabled = true) {
   return useQuery<{ total: number; items: SpecialistAccountingStatementSummary[] }>({
     queryKey: ['specialist-accounting-statements', options?.query, options?.statementType, options?.checkStatus, options?.limit],
     queryFn: () => getSpecialistAccountingStatements(options),
+    enabled,
   });
 }
 
-export function useKnowledgeEntities(options?: { query?: string; entityType?: string; limit?: number }) {
+export function useKnowledgeEntities(options?: { query?: string; entityType?: string; limit?: number }, enabled = true) {
   return useQuery<KnowledgeEntitySummary[]>({
     queryKey: ['knowledge-entities', options?.query, options?.entityType, options?.limit],
     queryFn: () => getKnowledgeEntities(options),
+    enabled,
   });
 }
 
@@ -236,10 +239,11 @@ export function useKnowledgeEntityDetail(entityType: string | null, entityKey: s
   });
 }
 
-export function useCanonicalEntities(options?: { query?: string; entityType?: string; limit?: number }) {
+export function useCanonicalEntities(options?: { query?: string; entityType?: string; limit?: number }, enabled = true) {
   return useQuery<CanonicalEntitySummary[]>({
     queryKey: ['canonical-entities', options?.query, options?.entityType, options?.limit],
     queryFn: () => getCanonicalEntities(options),
+    enabled,
   });
 }
 
@@ -260,21 +264,23 @@ export function useMergeCanonicalEntity() {
   });
 }
 
-export function useKnowledgeContexts(options?: { query?: string; entityType?: string; limit?: number }) {
+export function useKnowledgeContexts(options?: { query?: string; entityType?: string; limit?: number }, enabled = true) {
   return useQuery<KnowledgeContextSummary[]>({
     queryKey: ['knowledge-contexts', options?.query, options?.entityType, options?.limit],
     queryFn: () => getKnowledgeContexts(options),
+    enabled,
   });
 }
 
 export function useContextAccountingSubjects(
   contextId: string | null,
   options?: { query?: string; accountKey?: string; limit?: number },
+  enabled = true,
 ) {
   return useQuery<ContextAccountingSubject[]>({
     queryKey: ['context-accounting-subjects', contextId, options?.query, options?.accountKey, options?.limit],
     queryFn: () => getContextAccountingSubjects(contextId!, options),
-    enabled: !!contextId,
+    enabled: enabled && !!contextId,
   });
 }
 
@@ -289,11 +295,13 @@ export function useContextAccountingComparison(
     periodBTo: string;
     accountKey?: string;
   },
+  enabled = true,
 ) {
   return useQuery<ContextAccountingComparison>({
     queryKey: ['context-accounting-comparison', contextId, options],
     queryFn: () => compareContextAccounting(contextId!, options),
-    enabled: !!contextId
+    enabled: enabled
+      && !!contextId
       && options.subject.trim().length >= 2
       && !!options.periodAFrom
       && !!options.periodATo
@@ -319,17 +327,19 @@ export function useCorrectAccountingFact() {
   });
 }
 
-export function useKnowledgeGraphStats() {
+export function useKnowledgeGraphStats(enabled = true) {
   return useQuery<KnowledgeGraphStats>({
     queryKey: ['knowledge-graph'],
     queryFn: () => getKnowledgeGraphStats(),
+    enabled,
   });
 }
 
-export function useKnowledgeNodes(options?: { query?: string; nodeKind?: string; limit?: number }) {
+export function useKnowledgeNodes(options?: { query?: string; nodeKind?: string; limit?: number }, enabled = true) {
   return useQuery<KnowledgeNodeSummary[]>({
     queryKey: ['knowledge-nodes', options?.query, options?.nodeKind, options?.limit],
     queryFn: () => getKnowledgeNodes(options),
+    enabled,
   });
 }
 
@@ -341,10 +351,11 @@ export function useKnowledgeNode(nodeId: string | null) {
   });
 }
 
-export function useKnowledgeAssertions(options?: { query?: string; predicate?: string; nodeId?: string; limit?: number }) {
+export function useKnowledgeAssertions(options?: { query?: string; predicate?: string; nodeId?: string; limit?: number }, enabled = true) {
   return useQuery<KnowledgeAssertion[]>({
     queryKey: ['knowledge-assertions', options?.query, options?.predicate, options?.nodeId, options?.limit],
     queryFn: () => getKnowledgeAssertions(options),
+    enabled,
   });
 }
 
@@ -392,10 +403,11 @@ export function useRunKnowledgeConsolidation() {
   });
 }
 
-export function useGraphConsolidationSuggestions(limitPerAxis = 12) {
+export function useGraphConsolidationSuggestions(limitPerAxis = 12, enabled = true) {
   return useQuery<GraphConsolidationSuggestions>({
     queryKey: ['graph-consolidation-suggestions', limitPerAxis],
     queryFn: () => getGraphConsolidationSuggestions(limitPerAxis),
+    enabled,
   });
 }
 

@@ -83,6 +83,14 @@ function KnowledgeBase({ onOpenDocument }: Props) {
   const [graphReviewNotes, setGraphReviewNotes] = useState<Record<string, string>>({});
   const deferredSearch = useDeferredValue(searchInput.trim());
   const deferredComparisonSubject = useDeferredValue(comparisonSubject.trim());
+  const comparisonsPanelActive = panel === 'comparisons';
+  const specialistsPanelActive = panel === 'specialists';
+  const accountingPanelActive = specialistsPanelActive && specialistPanel === 'accounting';
+  const utilityPanelActive = specialistsPanelActive && specialistPanel === 'utility';
+  const entitiesPanelActive = panel === 'entities';
+  const factsPanelActive = panel === 'facts';
+  const reviewsPanelActive = panel === 'reviews';
+  const nodesNeeded = factsPanelActive || reviewsPanelActive || showNodeDetail;
 
   const topicsQuery = useKnowledgeTopics(includeInactive);
   const topics = topicsQuery.data ?? [];
@@ -97,45 +105,45 @@ function KnowledgeBase({ onOpenDocument }: Props) {
     query: deferredSearch || undefined,
     entityType: entityTypeFilter,
     limit: 40,
-  });
+  }, entitiesPanelActive);
   const entities = entityQuery.data ?? [];
   const canonicalQuery = useCanonicalEntities({
     query: deferredSearch || undefined,
     entityType: entityTypeFilter,
     limit: 40,
-  });
+  }, entitiesPanelActive);
   const entityDetail = useKnowledgeEntityDetail(selectedEntityType, selectedEntityKey);
   const graphStats = useKnowledgeGraphStats();
   const nodesQuery = useKnowledgeNodes({
     query: deferredSearch || undefined,
     nodeKind: nodeKindFilter,
     limit: 60,
-  });
+  }, nodesNeeded);
   const nodes = nodesQuery.data ?? [];
   const nodeDetail = useKnowledgeNode(selectedNodeId);
   const assertionsQuery = useKnowledgeAssertions({
     query: deferredSearch || undefined,
     nodeId: selectedNodeId || undefined,
     limit: 80,
-  });
+  }, factsPanelActive);
   const utilityLens = useSpecialistUtilityBills({
     query: deferredSearch || undefined,
     paymentStatus: utilityPaymentFilter,
     overdueOnly: utilityOverdueOnly,
     limit: 40,
-  });
+  }, utilityPanelActive);
   const accountingLens = useSpecialistAccountingStatements({
     query: deferredSearch || undefined,
     statementType: accountingTypeFilter,
     checkStatus: accountingCheckFilter,
     limit: 40,
-  });
-  const contextsQuery = useKnowledgeContexts({ limit: 40 });
+  }, accountingPanelActive);
+  const contextsQuery = useKnowledgeContexts({ limit: 40 }, comparisonsPanelActive);
   const contexts = contextsQuery.data ?? [];
   const accountingSubjects = useContextAccountingSubjects(selectedContextId, {
     query: deferredComparisonSubject || undefined,
     limit: 20,
-  });
+  }, comparisonsPanelActive);
   const accountingComparison = useContextAccountingComparison(selectedContextId, {
     subject: deferredComparisonSubject,
     accountKey: selectedAccountKey || undefined,
@@ -144,9 +152,9 @@ function KnowledgeBase({ onOpenDocument }: Props) {
     periodATo,
     periodBFrom,
     periodBTo,
-  });
+  }, comparisonsPanelActive);
   const proposals = useTopicProposals();
-  const graphSuggestions = useGraphConsolidationSuggestions();
+  const graphSuggestions = useGraphConsolidationSuggestions(12, reviewsPanelActive);
   const mergeCanonicalEntity = useMergeCanonicalEntity();
   const consolidate = useRunKnowledgeConsolidation();
   const reviewGraphSuggestion = useReviewGraphConsolidationSuggestion();
