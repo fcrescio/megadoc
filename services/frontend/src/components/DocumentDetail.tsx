@@ -362,7 +362,9 @@ function TopicAssignmentManager({
 
   const filteredTopics = useMemo(() => {
     const query = topicSearch.trim().toLowerCase();
+    console.log('[TopicAssignmentManager] topics count:', topics.length, 'query:', query);
     const source = topics.filter((topic) => topic.is_active !== false);
+    console.log('[TopicAssignmentManager] active source count:', source.length, 'topics:', source.map(t => ({ id: t.id, title: t.title, active: t.is_active })));
     if (!query) {
       return source.slice(0, 6);
     }
