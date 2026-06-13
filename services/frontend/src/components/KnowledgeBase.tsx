@@ -859,7 +859,10 @@ function KnowledgeBase({ onOpenDocument }: Props) {
       {showProposals && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm" onClick={() => setShowProposals(false)}>
           <div className="max-h-[88vh] w-full max-w-5xl overflow-y-auto rounded-3xl border border-amber-300/20 bg-slate-900 p-5 shadow-2xl" onClick={(event) => event.stopPropagation()}>
-            <ProposalList onClose={() => setShowProposals(false)} />
+            <ProposalList
+              initialProposals={proposals.data}
+              onClose={() => setShowProposals(false)}
+            />
           </div>
         </div>
       )}

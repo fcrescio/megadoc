@@ -425,10 +425,11 @@ export function useUploadDocument() {
   });
 }
 
-export function useTopicProposals(includeConsolidated = false) {
+export function useTopicProposals(includeConsolidated = false, enabled = true) {
   return useQuery<KnowledgeTopicProposal[]>({
     queryKey: ['topic-proposals', includeConsolidated],
     queryFn: () => getTopicProposals(includeConsolidated),
+    enabled,
   });
 }
 
