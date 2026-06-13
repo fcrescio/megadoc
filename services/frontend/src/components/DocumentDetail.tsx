@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { DocumentVersion, DocumentAsset, KnowledgeDocumentUnit, KnowledgeTopicSummary, TopicCreatePayload } from '../types';
@@ -362,7 +362,7 @@ function TopicAssignmentManager({
 
   const filteredTopics = useMemo(() => {
     const query = topicSearch.trim().toLowerCase();
-    const source = topics.filter((topic) => topic.is_active);
+    const source = topics.filter((topic) => topic.is_active !== false);
     if (!query) {
       return source.slice(0, 6);
     }
@@ -555,6 +555,8 @@ function TopicAssignmentManager({
     </div>
   );
 }
+
+const TopicAssignmentManagerMemo = memo(TopicAssignmentManager);
 
 function DocumentDetail({ documentId, onBack, initialTab = 'info' }: Props) {
   const [activeTab, setActiveTab] = useState<'info' | 'pdf' | 'ocr' | 'knowledge' | 'versions' | 'assets'>(initialTab);
@@ -887,7 +889,7 @@ function DocumentDetail({ documentId, onBack, initialTab = 'info' }: Props) {
                               <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
                                 Review actions
                               </p>
-                              <TopicAssignmentManager unit={unit} topics={knowledgeTopics} />
+                              <TopicAssignmentManagerMemo unit={unit} topics={knowledgeTopics} />
                             </div>
 
                             <div>
