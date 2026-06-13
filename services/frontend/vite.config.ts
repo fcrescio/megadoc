@@ -3,7 +3,15 @@ import react from '@vitejs/plugin-react'
 
 import { execSync } from 'child_process';
 
-const gitHash = execSync('git rev-parse --short HEAD').toString().trim();
+function resolveGitHash() {
+  try {
+    return execSync('git rev-parse --short HEAD').toString().trim();
+  } catch {
+    return process.env.VITE_GIT_HASH ?? 'unknown';
+  }
+}
+
+const gitHash = resolveGitHash();
 
 export default defineConfig({
   plugins: [react()],
