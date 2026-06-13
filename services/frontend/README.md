@@ -77,6 +77,22 @@ La navigazione documento usa lo stato URL per aprire il dettaglio e tab specific
 npm run build
 ```
 
+## Performance Probes
+
+From the repository root, measure API latency:
+
+```bash
+scripts/api_perf_probe.sh http://localhost:8080
+```
+
+Measure browser navigation and resource timings through the running frontend:
+
+```bash
+scripts/ui_perf_probe.sh http://127.0.0.1:3030/knowledge
+```
+
+The UI probe runs Playwright inside Docker, so agents can collect repeatable browser-side timing data without manual interaction.
+
 ## Note Operative
 
 - Le chiamate frontend passano da `/api/*`, proxate da nginx verso `api:8080`.

@@ -96,6 +96,20 @@ VITE_GIT_HASH=$(git rev-parse --short HEAD) docker compose up -d --build fronten
 
 The frontend Docker build context is `services/frontend`, so it may not contain the repository `.git` directory. Do not rely on `git rev-parse` inside the container build unless the build context is changed deliberately.
 
+Probe API endpoint latency:
+
+```bash
+scripts/api_perf_probe.sh http://localhost:8080
+```
+
+Probe UI navigation and browser-side resource timings with Playwright in Docker:
+
+```bash
+scripts/ui_perf_probe.sh http://127.0.0.1:3030/knowledge
+```
+
+Use the API probe first. If API timings are low but the UI feels slow, use the UI probe to inspect initial request count, navigation timing, paint timing, and resource timings. The browser probe uses the official Playwright Docker image and does not require a local desktop browser.
+
 Check recent logs for a specific container:
 
 ```bash
