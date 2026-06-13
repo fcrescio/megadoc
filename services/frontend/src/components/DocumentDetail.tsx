@@ -362,17 +362,20 @@ function TopicAssignmentManager({
 
   const filteredTopics = useMemo(() => {
     const query = topicSearch.trim().toLowerCase();
-    console.log('[TopicAssignmentManager] topics count:', topics.length, 'query:', query);
-    const source = topics.filter((topic) => topic.is_active !== false);
-    console.log('[TopicAssignmentManager] active source count:', source.length, 'topics:', source.map(t => ({ id: t.id, title: t.title, active: t.is_active })));
-    if (!query) {
-      return source.slice(0, 6);
-    }
-    return source
-      .filter((topic: KnowledgeTopicSummary) =>
+    const sortedTopics = [...topics].sort((left, right) => {
+      const leftRank = (left.is_active ? 2 : 0) + (left.canonical ? 1 : 0);
+      const rightRank = (right.is_active ? 2 : 0) + (right.canonical ? 1 : 0);
+      if (leftRank !== rightRank) {
+        return rightRank - leftRank;
+      }
+      return left.title.localeCompare(right.title, 'it');
+    });
+    const matchingTopics = query
+      ? sortedTopics.filter((topic: KnowledgeTopicSummary) =>
         [topic.title, topic.slug, topic.topic_class, topic.topic_kind].join(' ').toLowerCase().includes(query),
       )
-      .slice(0, 6);
+      : sortedTopics;
+    return matchingTopics.slice(0, 8);
   }, [topicSearch, topics]);
 
   const handleAdd = () => {
@@ -446,8 +449,11 @@ function TopicAssignmentManager({
         <div className="space-y-2">
           <input
             value={topicSearch}
-            onChange={(event) => setTopicSearch(event.target.value)}
-            placeholder="Search existing topics"
+            onChange={(event) => {
+              setTopicSearch(event.target.value);
+              setSelectedTopicId('');
+            }}
+            placeholder="Cerca topic esistenti"
             className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
           />
           <div className="grid gap-2 max-h-40 overflow-y-auto">
@@ -464,8 +470,18 @@ function TopicAssignmentManager({
                   }`}
                 >
                   <div className="font-medium">{topic.title}</div>
-                  <div className="text-xs text-gray-500">
-                    {topic.topic_kind} · {topic.topic_class}
+                  <div className="mt-1 flex flex-wrap items-center gap-1 text-xs text-gray-500">
+                    <span>{topic.topic_kind} · {topic.topic_class}</span>
+                    {!topic.is_active && (
+                      <span className="rounded-full bg-amber-50 px-2 py-0.5 text-amber-700 border border-amber-100">
+                        inattivo
+                      </span>
+                    )}
+                    {!topic.canonical && (
+                      <span className="rounded-full bg-slate-50 px-2 py-0.5 text-slate-600 border border-slate-100">
+                        provvisorio
+                      </span>
+                    )}
                   </div>
                 </button>
               ))
@@ -473,7 +489,7 @@ function TopicAssignmentManager({
               <p className="text-xs text-gray-400 italic px-1">
                 {topicSearch.trim()
                   ? 'Nessun topic trovato. Prova a cambiare ricerca o passa a "Create manual topic".'
-                  : 'Nessun topic attivo disponibile.'}
+                  : 'Nessun topic disponibile.'}
               </p>
             )}
           </div>
@@ -534,7 +550,11 @@ function TopicAssignmentManager({
 
       <button
         onClick={handleAdd}
-        disabled={addAssignment.isPending || deleteAssignment.isPending}
+        disabled={
+          addAssignment.isPending
+          || deleteAssignment.isPending
+          || (mode === 'existing' && !selectedTopicId)
+        }
         className="px-3 py-2 rounded-md bg-blue-600 text-white text-sm hover:bg-blue-700 disabled:opacity-50"
       >
         Add assignment
