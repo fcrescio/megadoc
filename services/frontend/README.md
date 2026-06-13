@@ -91,7 +91,13 @@ Measure browser navigation and resource timings through the running frontend:
 scripts/ui_perf_probe.sh http://127.0.0.1:3030/knowledge
 ```
 
-The UI probe runs Playwright inside Docker, so agents can collect repeatable browser-side timing data without manual interaction.
+Capture a real Chrome render trace:
+
+```bash
+scripts/ui_render_profile.sh http://127.0.0.1:3030/knowledge tmp/ui-profiles
+```
+
+The UI probes run Playwright inside Docker, so agents can collect repeatable browser-side timing data without manual interaction. Render traces are written under `tmp/ui-profiles` and can be opened in Perfetto or Chrome tracing.
 
 ## Note Operative
 

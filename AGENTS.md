@@ -108,7 +108,13 @@ Probe UI navigation and browser-side resource timings with Playwright in Docker:
 scripts/ui_perf_probe.sh http://127.0.0.1:3030/knowledge
 ```
 
-Use the API probe first. If API timings are low but the UI feels slow, use the UI probe to inspect initial request count, navigation timing, paint timing, and resource timings. The browser probe uses the official Playwright Docker image and does not require a local desktop browser.
+Profile browser rendering with Chrome tracing:
+
+```bash
+scripts/ui_render_profile.sh http://127.0.0.1:3030/knowledge tmp/ui-profiles
+```
+
+Use the API probe first. If API timings are low but the UI feels slow, use the UI probe to inspect initial request count, navigation timing, paint timing, and resource timings. If rendering is suspect, use the render profile to inspect `Layout`, `Paint`, `RasterTask`, long main-thread tasks, and the full `.trace.json` in Perfetto or Chrome tracing. The browser probes use the official Playwright Docker image and do not require a local desktop browser.
 
 Check recent logs for a specific container:
 
