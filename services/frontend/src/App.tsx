@@ -171,6 +171,10 @@ function App() {
           </div>
         )}
       </main>
+
+      <footer className="fixed bottom-2 right-3 z-50 text-[10px] text-white/20 select-none">
+        {__GIT_HASH__}
+      </footer>
     </div>
   );
 }

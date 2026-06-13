@@ -168,6 +168,7 @@ export function useKnowledgeTopics(includeInactive = false, topicKind?: string) 
   return useQuery<KnowledgeTopicSummary[]>({
     queryKey: ['knowledge-topics', includeInactive, topicKind],
     queryFn: () => getKnowledgeTopics(includeInactive, topicKind),
+    placeholderData: (previousData) => previousData,
   });
 }
 

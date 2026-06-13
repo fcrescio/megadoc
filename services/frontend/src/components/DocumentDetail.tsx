@@ -449,23 +449,31 @@ function TopicAssignmentManager({
             className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
           />
           <div className="grid gap-2 max-h-40 overflow-y-auto">
-            {filteredTopics.map((topic) => (
-              <button
-                key={topic.id}
-                onClick={() => {
-                  setSelectedTopicId(topic.id);
-                  setTopicSearch(topic.title);
-                }}
-                className={`text-left rounded-md border px-3 py-2 text-sm ${
-                  selectedTopicId === topic.id ? 'border-blue-500 bg-blue-50' : 'border-gray-200 bg-white'
-                }`}
-              >
-                <div className="font-medium">{topic.title}</div>
-                <div className="text-xs text-gray-500">
-                  {topic.topic_kind} · {topic.topic_class}
-                </div>
-              </button>
-            ))}
+            {filteredTopics.length > 0 ? (
+              filteredTopics.map((topic) => (
+                <button
+                  key={topic.id}
+                  onClick={() => {
+                    setSelectedTopicId(topic.id);
+                    setTopicSearch(topic.title);
+                  }}
+                  className={`text-left rounded-md border px-3 py-2 text-sm ${
+                    selectedTopicId === topic.id ? 'border-blue-500 bg-blue-50' : 'border-gray-200 bg-white'
+                  }`}
+                >
+                  <div className="font-medium">{topic.title}</div>
+                  <div className="text-xs text-gray-500">
+                    {topic.topic_kind} · {topic.topic_class}
+                  </div>
+                </button>
+              ))
+            ) : (
+              <p className="text-xs text-gray-400 italic px-1">
+                {topicSearch.trim()
+                  ? 'Nessun topic trovato. Prova a cambiare ricerca o passa a "Create manual topic".'
+                  : 'Nessun topic attivo disponibile.'}
+              </p>
+            )}
           </div>
         </div>
       ) : (
