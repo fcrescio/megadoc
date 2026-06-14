@@ -634,6 +634,15 @@ class KnowledgePipelineService:
                 if proposal_action == "attach_to_context":
                     # Routine/repetitive document: no topic needed, findable via entities/context.
                     # Create a proposal so the decision is visible and actionable in the UI.
+                    #
+                    # NOTE: This creates a provisional topic and assignment via _create_topic_proposal(),
+                    # which is not ideal — the ideal model would be a dedicated context-review action
+                    # (e.g. a context_membership proposal) that doesn't create a topic at all.
+                    # The current approach is a pragmatic middle ground: the proposal appears in the
+                    # review list, the user can see the recommended_action=attach_to_context, and
+                    # on approval the document can be attached to a context without creating a
+                    # canonical topic. A future refactor should introduce a dedicated review table
+                    # for context attachments.
                     if not decision.proposed_topic:
                         # Build a minimal proposed_topic so _create_topic_proposal can proceed.
                         doc_title = doc_unit.title or f"Document unit {doc_unit.id}"
