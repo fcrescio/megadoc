@@ -1,58 +1,25 @@
 import { memo, useState } from 'react';
-import { useKnowledgeTopics, useMergeTopic } from '../hooks/useDocuments';
-import type { KnowledgeTopicSummary } from '../types';
-
-interface CleanupCandidate {
-  category: string;
-  note: string;
-  topic_id?: string;
-  title?: string;
-  slug?: string;
-  topic_kind?: string;
-  topic_class?: string;
-  assignment_count?: number;
-  candidates?: Array<{
-    topic_id: string;
-    title: string;
-    slug: string;
-    topic_kind: string;
-  }>;
-  typo_candidate?: {
-    topic_id: string;
-    title: string;
-    slug: string;
-    assignment_count: number;
-  };
-  canonical_candidate?: {
-    topic_id: string;
-    title: string;
-    slug: string;
-    assignment_count: number;
-  };
-  current_kind?: string;
-  dominant_family?: string;
-  expected_kind?: string;
-  axis?: string;
-}
+import { useKnowledgeTopics, useMergeTopic, useCleanupReport } from '../hooks/useDocuments';
+import type { KnowledgeTopicSummary, CleanupReportItem } from '../types';
 
 interface Props {
   deferredSearch: string;
 }
 
 const CATEGORY_LABELS: Record<string, string> = {
-  near_orphan: 'Quasi orfani',
-  duplicate_title: 'Titoli duplicati',
+  near_orphans: 'Quasi orfani',
+  duplicate_titles: 'Titoli duplicati',
   shared_identity_axis: 'Assi identità condivisi',
-  probable_typo: 'Possibili typo',
-  kind_mismatch: 'Kind incompatibile',
+  probable_typos: 'Possibili typo',
+  kind_mismatches: 'Kind incompatibile',
 };
 
 const CATEGORY_COLORS: Record<string, string> = {
-  near_orphan: 'border-slate-500/30 bg-slate-500/10',
-  duplicate_title: 'border-amber-500/30 bg-amber-500/10',
+  near_orphans: 'border-slate-500/30 bg-slate-500/10',
+  duplicate_titles: 'border-amber-500/30 bg-amber-500/10',
   shared_identity_axis: 'border-cyan-500/30 bg-cyan-500/10',
-  probable_typo: 'border-rose-500/30 bg-rose-500/10',
-  kind_mismatch: 'border-fuchsia-500/30 bg-fuchsia-500/10',
+  probable_typos: 'border-rose-500/30 bg-rose-500/10',
+  kind_mismatches: 'border-fuchsia-500/30 bg-fuchsia-500/10',
 };
 
 export const TopicCleanupPanel = memo(function TopicCleanupPanel({ deferredSearch: _deferredSearch }: Props) {
@@ -63,15 +30,16 @@ export const TopicCleanupPanel = memo(function TopicCleanupPanel({ deferredSearc
   const [mergeResults, setMergeResults] = useState<Record<string, string>>({});
 
   const topicsQuery = useKnowledgeTopics(true);
+  const reportQuery = useCleanupReport(0.9, true);
   const mergeMutation = useMergeTopic();
 
   const topics = topicsQuery.data ?? [];
+  const report = reportQuery.data;
+  const categories = report?.categories ?? {};
+  const summary = report?.summary;
 
-  // Build cleanup candidates from topics data
-  const candidates = buildCandidates(topics);
-
-  const categories = Object.keys(CATEGORY_LABELS).filter(
-    (cat) => candidates[cat] && candidates[cat].length > 0
+  const activeCategories = Object.keys(CATEGORY_LABELS).filter(
+    (cat) => categories[cat] && categories[cat].length > 0
   );
 
   const handleMerge = async (sourceId: string, targetId: string, note: string) => {
@@ -91,6 +59,14 @@ export const TopicCleanupPanel = memo(function TopicCleanupPanel({ deferredSearc
     }
   };
 
+  if (reportQuery.isLoading) {
+    return <div className="flex h-full items-center justify-center text-sm text-slate-400">Caricamento report...</div>;
+  }
+
+  if (reportQuery.error) {
+    return <div className="rounded-xl border border-rose-300/25 bg-rose-400/10 p-4 text-sm text-rose-100">Errore: {(reportQuery.error as Error).message}</div>;
+  }
+
   return (
     <div className="flex h-full flex-col gap-3">
       {/* Author input */}
@@ -101,14 +77,16 @@ export const TopicCleanupPanel = memo(function TopicCleanupPanel({ deferredSearc
           placeholder="Operatore (facoltativo)"
           className="rounded-xl border border-white/10 bg-slate-950/50 px-3 py-2 text-sm"
         />
-        <span className="text-xs text-slate-400">
-          {topics.length} topic attivi · {categories.length} categorie
-        </span>
+        {summary && (
+          <span className="text-xs text-slate-400">
+            {summary.total_active_topics} topic · {summary.near_orphans_count} orfani · {summary.duplicate_title_groups} duplicati · {summary.shared_axis_groups} assi · {summary.probable_typo_pairs} typo · {summary.kind_mismatches_count} mismatch
+          </span>
+        )}
       </div>
 
       {/* Category tabs */}
       <nav className="flex shrink-0 flex-wrap gap-2">
-        {categories.map((cat) => (
+        {activeCategories.map((cat) => (
           <button
             key={cat}
             onClick={() => setActiveCategory(activeCategory === cat ? null : cat)}
@@ -118,17 +96,17 @@ export const TopicCleanupPanel = memo(function TopicCleanupPanel({ deferredSearc
                 : CATEGORY_COLORS[cat] + ' text-slate-200'
             }`}
           >
-            {CATEGORY_LABELS[cat]} ({candidates[cat].length})
+            {CATEGORY_LABELS[cat]} ({categories[cat].length})
           </button>
         ))}
-        {categories.length === 0 && (
-          <p className="text-sm text-slate-400">Nessun candidato trovato. Esegui il report script per dati aggiornati.</p>
+        {activeCategories.length === 0 && (
+          <p className="text-sm text-slate-400">Nessun candidato trovato.</p>
         )}
       </nav>
 
       {/* Candidates list */}
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto">
-        {categories
+        {activeCategories
           .filter((cat) => !activeCategory || cat === activeCategory)
           .map((cat) => (
             <div key={cat}>
@@ -136,7 +114,7 @@ export const TopicCleanupPanel = memo(function TopicCleanupPanel({ deferredSearc
                 <h3 className="mb-2 text-sm font-semibold text-white">{CATEGORY_LABELS[cat]}</h3>
               )}
               <div className="space-y-2">
-                {candidates[cat].map((item: CleanupCandidate, idx: number) => (
+                {categories[cat].map((item: CleanupReportItem, idx: number) => (
                   <CandidateCard
                     key={`${cat}-${idx}`}
                     item={item}
@@ -166,7 +144,7 @@ export const TopicCleanupPanel = memo(function TopicCleanupPanel({ deferredSearc
 /* ── Candidate Card ── */
 
 interface CandidateCardProps {
-  item: CleanupCandidate;
+  item: CleanupReportItem;
   category: string;
   topics: KnowledgeTopicSummary[];
   mergeTargets: Record<string, string>;
@@ -190,7 +168,7 @@ const CandidateCard = memo(function CandidateCard({
   onMerge,
   isMerging,
 }: CandidateCardProps) {
-  if (category === 'near_orphan') {
+  if (category === 'near_orphans') {
     return (
       <div className="rounded-xl border border-white/10 bg-white/5 p-3">
         <div className="flex items-start justify-between gap-3">
@@ -215,7 +193,7 @@ const CandidateCard = memo(function CandidateCard({
     );
   }
 
-  if (category === 'duplicate_title' && item.candidates) {
+  if (category === 'duplicate_titles' && item.candidates) {
     return (
       <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3">
         <p className="mb-2 text-xs text-amber-200">{item.note}</p>
@@ -274,7 +252,7 @@ const CandidateCard = memo(function CandidateCard({
     );
   }
 
-  if (category === 'probable_typo') {
+  if (category === 'probable_typos') {
     return (
       <div className="rounded-xl border border-rose-500/20 bg-rose-500/5 p-3">
         <p className="mb-2 text-xs text-rose-200">{item.note}</p>
@@ -302,7 +280,7 @@ const CandidateCard = memo(function CandidateCard({
     );
   }
 
-  if (category === 'kind_mismatch') {
+  if (category === 'kind_mismatches') {
     return (
       <div className="rounded-xl border border-fuchsia-500/20 bg-fuchsia-500/5 p-3">
         <div className="flex items-start justify-between gap-3">
@@ -393,40 +371,3 @@ const MergeForm = memo(function MergeForm({
     </div>
   );
 });
-
-/* ── Candidate builder ── */
-
-function buildCandidates(topics: KnowledgeTopicSummary[]): Record<string, CleanupCandidate[]> {
-  const result: Record<string, CleanupCandidate[]> = {
-    near_orphan: [],
-    duplicate_title: [],
-    shared_identity_axis: [],
-    probable_typo: [],
-    kind_mismatch: [],
-  };
-
-  // Near orphans: topics with 0 or 1 assignments
-  for (const t of topics) {
-    const count = t.assignment_count ?? 0;
-    if (count <= 1) {
-      result.near_orphan.push({
-        category: 'near_orphan',
-        topic_id: t.id,
-        title: t.title,
-        slug: t.slug,
-        topic_kind: t.topic_kind,
-        topic_class: t.topic_class,
-        assignment_count: count,
-        note: count === 0 ? 'Nessuna assegnazione' : 'Solo 1 assegnazione',
-      });
-    }
-  }
-
-  // Note: duplicate_title, shared_identity_axis, probable_typo, kind_mismatch
-  // require DB-level analysis (archive_identity, document_family) that the
-  // frontend doesn't have. These are best computed server-side via the report script.
-  // The frontend panel focuses on the merge action UI for near-orphans.
-  // For a full experience, the report JSON can be loaded via an API endpoint.
-
-  return result;
-}

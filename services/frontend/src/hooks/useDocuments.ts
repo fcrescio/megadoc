@@ -36,6 +36,7 @@ import type {
   GraphConsolidationReviewResult,
   TopicMergePayload,
   TopicMergeResult,
+  CleanupReport,
   KnowledgeTopicProposal,
   TopicAssignmentUpsertPayload,
   TopicCreatePayload,
@@ -75,6 +76,7 @@ import {
   getGraphConsolidationSuggestions,
   reviewGraphConsolidationSuggestion,
   mergeTopic,
+  getCleanupReport,
   uploadDocument,
   getTopicProposals,
   rejectTopicProposal,
@@ -445,6 +447,15 @@ export function useMergeTopic() {
       queryClient.invalidateQueries({ queryKey: ['knowledge'] });
       queryClient.invalidateQueries({ queryKey: ['graph-consolidation-suggestions'] });
     },
+  });
+}
+
+export function useCleanupReport(minSimilarity = 0.9, enabled = true) {
+  return useQuery<CleanupReport>({
+    queryKey: ['cleanup-report', minSimilarity],
+    queryFn: () => getCleanupReport(minSimilarity),
+    enabled,
+    staleTime: 30_000,
   });
 }
 

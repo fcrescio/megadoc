@@ -720,3 +720,27 @@ class TopicMergeResponse(BaseModel):
     target_topic_title: str
     affected_assignments: int = 0
     aliases_created: int = 0
+
+
+class CleanupReportItem(BaseModel):
+    category: str
+    note: str
+    topic_id: Optional[str] = None
+    title: Optional[str] = None
+    slug: Optional[str] = None
+    topic_kind: Optional[str] = None
+    topic_class: Optional[str] = None
+    assignment_count: Optional[int] = None
+    candidates: Optional[list[dict[str, Any]]] = None
+    typo_candidate: Optional[dict[str, Any]] = None
+    canonical_candidate: Optional[dict[str, Any]] = None
+    current_kind: Optional[str] = None
+    dominant_family: Optional[str] = None
+    expected_kind: Optional[str] = None
+    axis: Optional[str] = None
+    similarity: Optional[float] = None
+
+
+class CleanupReportResponse(BaseModel):
+    categories: dict[str, list[CleanupReportItem]]
+    summary: dict[str, Any]

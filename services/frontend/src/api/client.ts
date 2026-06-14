@@ -36,6 +36,7 @@ import type {
   GraphConsolidationReviewResult,
   TopicMergePayload,
   TopicMergeResult,
+  CleanupReport,
   KnowledgeDocumentUnit,
   KnowledgeTopicProposal,
   TopicAssignmentUpsertPayload,
@@ -385,6 +386,11 @@ export async function mergeTopic(
     body: JSON.stringify(payload),
   });
   return handleResponse<TopicMergeResult>(response);
+}
+
+export async function getCleanupReport(minSimilarity = 0.9): Promise<CleanupReport> {
+  const response = await fetch(`${API_BASE}/knowledge/cleanup/report?min_similarity=${minSimilarity}`);
+  return handleResponse<CleanupReport>(response);
 }
 
 export function getDocumentDownloadUrl(

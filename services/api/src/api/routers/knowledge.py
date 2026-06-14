@@ -94,6 +94,7 @@ from knowledge_classifier.schemas import (
     GraphSuggestionTopicSummaryResponse,
     TopicMergeRequest,
     TopicMergeResponse,
+    CleanupReportResponse,
     KnowledgeJobResponse,
     ReviewUpdate,
     ReviewStatus,
@@ -2397,4 +2398,24 @@ def merge_topic(
         target_topic_title=target_topic.title,
         affected_assignments=stats.assignments_retargeted,
         aliases_created=stats.aliases_created,
+    )
+
+
+@router.get("/cleanup/report", response_model=CleanupReportResponse)
+def get_cleanup_report(
+    min_similarity: float = Query(0.90, description="Minimum title similarity for duplicate detection"),
+    db: Session = Depends(get_db_session),
+):
+    """Generate a read-only cleanup report for topic backlog.
+
+    Returns candidate groups for merge/review, same categories as the
+    scripts/topic_cleanup_report.py script.
+    """
+    from knowledge_classifier.services.consolidation import KnowledgeBaseConsolidationService
+
+    service = KnowledgeBaseConsolidationService(db)
+    report = service.generate_cleanup_report(min_similarity=min_similarity)
+    return CleanupReportResponse(
+        categories=report.get("categories", {}),
+        summary=report.get("summary", {}),
     )
