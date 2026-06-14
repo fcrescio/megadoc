@@ -1228,10 +1228,62 @@ class KnowledgeBaseConsolidationService:
         topics = self.db.execute(
             select(Topic).where(Topic.is_active.is_(True)).order_by(Topic.title.asc())
         ).scalars().all()
+        topic_ids = [t.id for t in topics]
+        topic_map = {str(t.id): t for t in topics}
 
         total_assignments = self.db.execute(
             select(func.count(DocumentUnitTopicAssignment.id))
         ).scalar() or 0
+
+        # ── Pre-load: assignment counts per topic (single query) ─────
+        count_rows = self.db.execute(
+            select(
+                DocumentUnitTopicAssignment.topic_id,
+                func.count(DocumentUnitTopicAssignment.id).label("cnt"),
+            )
+            .where(DocumentUnitTopicAssignment.topic_id.in_(topic_ids))
+            .group_by(DocumentUnitTopicAssignment.topic_id)
+        ).all()
+        assignment_counts: dict[str, int] = {
+            str(row.topic_id): row.cnt for row in count_rows
+        }
+
+        # ── Pre-load: archive identities per topic (single query) ────
+        identity_rows = self.db.execute(
+            select(
+                DocumentUnitTopicAssignment.topic_id,
+                DocumentUnit.archive_identity_json,
+            )
+            .join(DocumentUnit, DocumentUnitTopicAssignment.document_unit_id == DocumentUnit.id)
+            .where(DocumentUnitTopicAssignment.topic_id.in_(topic_ids))
+            .where(DocumentUnit.archive_identity_json.isnot(None))
+        ).all()
+        topic_identity_jsons: dict[str, list[dict]] = defaultdict(list)
+        for row in identity_rows:
+            if row.archive_identity_json and isinstance(row.archive_identity_json, dict):
+                topic_identity_jsons[str(row.topic_id)].append(row.archive_identity_json)
+
+        # Derive dominant axes and families per topic (in memory)
+        topic_dominant_axes: dict[str, dict[str, str | None]] = {}
+        topic_dominant_family: dict[str, str | None] = {}
+        for tid in topic_ids:
+            sid = str(tid)
+            identities = topic_identity_jsons.get(sid, [])
+            axes: dict[str, list[str | None]] = defaultdict(list)
+            families: list[str] = []
+            for ident in identities:
+                f = ident.get("document_family")
+                if f:
+                    families.append(f)
+                for key in ("context_key", "primary_party_key", "subject_key", "matter_key"):
+                    val = ident.get(key)
+                    if val:
+                        axes[key].append(val)
+            dominant = {}
+            for key, vals in axes.items():
+                dominant[key] = Counter(vals).most_common(1)[0][0] if vals else None
+            topic_dominant_axes[sid] = dominant
+            topic_dominant_family[sid] = Counter(families).most_common(1)[0][0] if families else None
 
         categories: dict[str, list[dict[str, Any]]] = {
             "near_orphans": [],
@@ -1243,12 +1295,7 @@ class KnowledgeBaseConsolidationService:
 
         # --- Near orphans ---
         for topic in topics:
-            count = (
-                self.db.execute(
-                    select(func.count(DocumentUnitTopicAssignment.id))
-                    .where(DocumentUnitTopicAssignment.topic_id == topic.id)
-                ).scalar() or 0
-            )
+            count = assignment_counts.get(str(topic.id), 0)
             if count <= 1:
                 categories["near_orphans"].append({
                     "category": "near_orphan",
@@ -1295,38 +1342,13 @@ class KnowledgeBaseConsolidationService:
             })
 
         # --- Shared identity axis ---
-        topic_axes: dict[str, dict[str, str | None]] = {}
-        for topic in topics:
-            rows = (
-                self.db.execute(
-                    select(DocumentUnit.archive_identity_json)
-                    .join(DocumentUnitTopicAssignment, DocumentUnitTopicAssignment.document_unit_id == DocumentUnit.id)
-                    .where(DocumentUnitTopicAssignment.topic_id == topic.id)
-                    .where(DocumentUnit.archive_identity_json.isnot(None))
-                )
-                .scalars()
-                .all()
-            )
-            axes: dict[str, list[str | None]] = defaultdict(list)
-            for row in rows:
-                if row and isinstance(row, dict):
-                    for key in ("context_key", "primary_party_key", "subject_key", "matter_key"):
-                        val = row.get(key)
-                        if val:
-                            axes[key].append(val)
-            dominant = {}
-            for key, vals in axes.items():
-                dominant[key] = Counter(vals).most_common(1)[0][0] if vals else None
-            topic_axes[str(topic.id)] = dominant
-
         axis_groups: dict[str, list[tuple[str, str]]] = defaultdict(list)
-        for tid, axes in topic_axes.items():
+        for tid, axes in topic_dominant_axes.items():
             for key in ("context_key", "primary_party_key"):
                 val = axes.get(key)
                 if val:
                     axis_groups[f"{key}:{val}"].append((tid, val))
 
-        topic_map = {str(t.id): t for t in topics}
         for axis_key, members in axis_groups.items():
             if len(members) < 2:
                 continue
@@ -1349,15 +1371,6 @@ class KnowledgeBaseConsolidationService:
                 })
 
         # --- Probable typos ---
-        counts: dict[str, int] = {}
-        for t in topics:
-            counts[str(t.id)] = (
-                self.db.execute(
-                    select(func.count(DocumentUnitTopicAssignment.id))
-                    .where(DocumentUnitTopicAssignment.topic_id == t.id)
-                ).scalar() or 0
-            )
-
         typo_used: set[str] = set()
         for a in topics:
             if str(a.id) in typo_used:
@@ -1369,10 +1382,12 @@ class KnowledgeBaseConsolidationService:
                     continue
                 score = SequenceMatcher(None, _normalize(a.title), _normalize(b.title)).ratio()
                 if 0.70 <= score < 0.95 and score > best_score:
-                    if counts.get(str(a.id), 0) < counts.get(str(b.id), 0):
+                    a_cnt = assignment_counts.get(str(a.id), 0)
+                    b_cnt = assignment_counts.get(str(b.id), 0)
+                    if a_cnt < b_cnt:
                         best_match = b
                         best_score = score
-                    elif counts.get(str(b.id), 0) < counts.get(str(a.id), 0):
+                    elif b_cnt < a_cnt:
                         best_match = a
                         best_score = score
                         a, b = b, a
@@ -1387,13 +1402,13 @@ class KnowledgeBaseConsolidationService:
                         "topic_id": str(a.id),
                         "title": a.title,
                         "slug": a.slug,
-                        "assignment_count": counts.get(str(a.id), 0),
+                        "assignment_count": assignment_counts.get(str(a.id), 0),
                     },
                     "canonical_candidate": {
                         "topic_id": str(best_match.id),
                         "title": best_match.title,
                         "slug": best_match.slug,
-                        "assignment_count": counts.get(str(best_match.id), 0),
+                        "assignment_count": assignment_counts.get(str(best_match.id), 0),
                     },
                     "note": f"'{a.title}' potrebbe essere un typo di '{best_match.title}' (sim={best_score:.2f})",
                 })
@@ -1411,23 +1426,7 @@ class KnowledgeBaseConsolidationService:
         }
 
         for topic in topics:
-            rows = (
-                self.db.execute(
-                    select(DocumentUnit.archive_identity_json)
-                    .join(DocumentUnitTopicAssignment, DocumentUnitTopicAssignment.document_unit_id == DocumentUnit.id)
-                    .where(DocumentUnitTopicAssignment.topic_id == topic.id)
-                    .where(DocumentUnit.archive_identity_json.isnot(None))
-                )
-                .scalars()
-                .all()
-            )
-            families = []
-            for row in rows:
-                if row and isinstance(row, dict):
-                    f = row.get("document_family")
-                    if f:
-                        families.append(f)
-            dominant_family = Counter(families).most_common(1)[0][0] if families else None
+            dominant_family = topic_dominant_family.get(str(topic.id))
             if not dominant_family:
                 continue
             expected_kind = FAMILY_KIND_MAP.get(dominant_family)
