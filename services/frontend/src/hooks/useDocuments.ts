@@ -446,6 +446,7 @@ export function useMergeTopic() {
       queryClient.invalidateQueries({ queryKey: ['knowledge-search'] });
       queryClient.invalidateQueries({ queryKey: ['knowledge'] });
       queryClient.invalidateQueries({ queryKey: ['graph-consolidation-suggestions'] });
+      queryClient.invalidateQueries({ queryKey: ['cleanup-report'] });
     },
   });
 }
