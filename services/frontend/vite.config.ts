@@ -21,9 +21,6 @@ export default defineConfig({
   plugins: [react()],
   define: {
     __GIT_HASH__: JSON.stringify(gitHash),
-    ...(process.env.REACT_PROFILING === 'true'
-      ? { __PROFILE__: 'true' }
-      : {}),
   },
   server: {
     port: 3000,

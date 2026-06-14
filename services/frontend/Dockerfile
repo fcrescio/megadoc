@@ -11,6 +11,13 @@ ENV REACT_PROFILING=$REACT_PROFILING
 COPY package*.json ./
 RUN npm install
 
+# Swap in React profiling builds when enabled (for Chrome DevTools Profiler)
+# Only react-dom has a profiling build in React 18; react and scheduler don't.
+RUN if [ "$REACT_PROFILING" = "true" ]; then \
+      cp node_modules/react-dom/cjs/react-dom.profiling.min.js node_modules/react-dom/cjs/react-dom.production.min.js && \
+      cp node_modules/react-dom/cjs/react-dom.profiling.min.js node_modules/react-dom/cjs/react-dom.development.js; \
+    fi
+
 COPY . .
 RUN npm run build
 
