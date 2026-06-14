@@ -36,7 +36,7 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: true,
-    minify: 'esbuild',
+    minify: process.env.REACT_PROFILING === 'true' ? false : 'esbuild',
     esbuild: {
       keepNames: true,
     },
