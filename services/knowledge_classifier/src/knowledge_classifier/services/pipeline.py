@@ -606,19 +606,28 @@ class KnowledgePipelineService:
             elif decision.action == "assign_multiple":
                 self._create_topic_assignments(doc_unit, decision, candidates_result.candidates)
             elif decision.action == "propose_new":
-                reused_proposal = self._find_reusable_topic_proposal(scan_unit, decision, entities)
-                if reused_proposal and reused_proposal.matched_existing_topic_id:
+                proposal_action = (decision.proposal_action or "create_topic").lower()
+                if proposal_action == "attach_to_context":
+                    # Routine/repetitive document: no topic needed, findable via entities/context
                     doc_unit.review_status = ReviewStatus.NEEDS_REVIEW.value
-                    decision.action = "assign_existing"
-                    decision.topic_ids = [str(reused_proposal.matched_existing_topic_id)]
-                    decision.assignment_roles = ["primary"]
-                    decision.rationale = (
-                        f"{decision.rationale} Reused provisional topic from the same scan "
-                        f"to avoid duplicate topic proposals."
+                    logger.info(
+                        "Document unit %s marked as attach_to_context (no topic created)",
+                        doc_unit.id,
                     )
-                    self._create_topic_assignments(doc_unit, decision)
                 else:
-                    self._create_topic_proposal(scan_unit, doc_unit, decision, entities)
+                    reused_proposal = self._find_reusable_topic_proposal(scan_unit, decision, entities)
+                    if reused_proposal and reused_proposal.matched_existing_topic_id:
+                        doc_unit.review_status = ReviewStatus.NEEDS_REVIEW.value
+                        decision.action = "assign_existing"
+                        decision.topic_ids = [str(reused_proposal.matched_existing_topic_id)]
+                        decision.assignment_roles = ["primary"]
+                        decision.rationale = (
+                            f"{decision.rationale} Reused provisional topic from the same scan "
+                            f"to avoid duplicate topic proposals."
+                        )
+                        self._create_topic_assignments(doc_unit, decision)
+                    else:
+                        self._create_topic_proposal(scan_unit, doc_unit, decision, entities)
             elif decision.action == "needs_review":
                 doc_unit.review_status = ReviewStatus.NEEDS_REVIEW.value
                 # Still create tentative assignment

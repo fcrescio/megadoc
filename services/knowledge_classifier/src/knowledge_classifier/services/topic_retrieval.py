@@ -4,10 +4,10 @@ import logging
 import re
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from common.db.models import Topic, TopicAlias
+from common.db.models import DocumentUnitTopicAssignment, Topic, TopicAlias
 from knowledge_classifier.config import get_settings
 from knowledge_classifier.schemas import ExtractedEntity, TopicCandidate, TopicRetrievalResult
 
@@ -20,6 +20,17 @@ class TopicRetrievalService:
     def __init__(self, db_session: Session):
         self.db = db_session
         self.settings = get_settings()
+
+    def _load_assignment_counts(self) -> dict[str, int]:
+        """Load assignment counts for all active topics."""
+        rows = self.db.execute(
+            select(
+                DocumentUnitTopicAssignment.topic_id,
+                func.count(DocumentUnitTopicAssignment.id).label("cnt"),
+            )
+            .group_by(DocumentUnitTopicAssignment.topic_id)
+        ).all()
+        return {str(row.topic_id): row.cnt for row in rows}
 
     def retrieve_candidates(
         self,
@@ -58,6 +69,9 @@ class TopicRetrievalService:
         if not topics:
             return TopicRetrievalResult(candidates=[], has_strong_match=False)
         
+        # Load assignment counts
+        assignment_counts = self._load_assignment_counts()
+        
         # Build search terms from document
         search_terms = self._build_search_terms(
             document_title, document_summary, entities
@@ -70,6 +84,11 @@ class TopicRetrievalService:
             score, reasons = self._score_topic(
                 topic, document_type_code, search_terms
             )
+            # Apply penalty for single-assignment topics with specific/date-like titles
+            count = assignment_counts.get(str(topic.id), 0)
+            if count <= 1 and self._looks_like_specific_topic(topic):
+                score *= 0.5
+                reasons.append("Penalty: single-assignment specific topic")
             if score > 0:
                 scored_topics.append((topic, score, reasons))
         
@@ -83,6 +102,8 @@ class TopicRetrievalService:
                 topic_id=str(topic.id),
                 slug=topic.slug,
                 title=topic.title,
+                topic_kind=topic.topic_kind,
+                assignment_count=assignment_counts.get(str(topic.id), 0),
                 score=min(score, 1.0),
                 reasons=reasons
             ))
@@ -296,3 +317,29 @@ class TopicRetrievalService:
         
         compatible = compatibility_map.get(document_type, {})
         return compatible.get(topic_class, 0.0)
+
+    def _looks_like_specific_topic(self, topic: Topic) -> bool:
+        """Check if a topic looks like a very specific/pointless topic (single bill, date, etc.).
+
+        Returns True if the topic has a title that looks like a specific document
+        rather than a stable matter — these should be penalized in retrieval.
+        """
+        title_lower = topic.title.lower()
+
+        # Date-like patterns: contains a year or date
+        if re.search(r"\b(19|20)\d{2}\b", title_lower):
+            return True
+
+        # Contains specific document identifiers
+        if re.search(r"\b(fattura|bolletta|n\.|nr\.|num\.|numero)\s*\d", title_lower):
+            return True
+
+        # Very short titles that are just a name/entity (no context)
+        if len(title_lower.split()) <= 3 and topic.topic_kind == "entity":
+            return True
+
+        # Contains "pagamento" or "versamento" (single payment)
+        if re.search(r"\b(pagamento|versamento|rata)\b", title_lower):
+            return True
+
+        return False

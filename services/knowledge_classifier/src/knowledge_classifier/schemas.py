@@ -152,6 +152,8 @@ class TopicCandidate(BaseModel):
     topic_id: str
     slug: str
     title: str
+    topic_kind: Optional[str] = None
+    assignment_count: int = 0
     score: float = Field(..., ge=0, le=1)
     reasons: list[str] = Field(default_factory=list)
 
@@ -169,6 +171,17 @@ class TopicAssignmentDecision(BaseModel):
     topic_ids: list[str] = Field(default_factory=list)
     assignment_roles: list[str] = Field(default_factory=list)
     proposed_topic: Optional[dict[str, Any]] = None
+    proposal_action: Optional[str] = Field(
+        default=None,
+        description=(
+            "Recommended action for the proposal: "
+            "'create_topic' when a new stable topic/matter is needed, "
+            "'attach_to_context' when the document fits an existing context without needing its own topic, "
+            "'attach_to_existing_topic' when it matches an existing topic, "
+            "'needs_review' when uncertain. "
+            "Use 'attach_to_context' for single bills, invoices, payments that don't need their own topic."
+        ),
+    )
     confidence: float = Field(..., ge=0, le=1)
     rationale: str
 
