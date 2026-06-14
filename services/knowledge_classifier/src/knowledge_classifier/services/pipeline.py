@@ -45,6 +45,7 @@ from knowledge_classifier.services.pipeline_strategies import (
 )
 from knowledge_classifier.services.routing import PipelineRouterService, PipelineRoutingDecision
 from knowledge_classifier.services.segmentation import SegmentationService
+from knowledge_classifier.services.archive_identity import derive_archive_identity
 from knowledge_classifier.services.title_generation import derive_document_unit_title
 from knowledge_classifier.services.topic_assignment import TopicAssignmentService
 from knowledge_classifier.services.topic_retrieval import TopicRetrievalService
@@ -205,6 +206,7 @@ class KnowledgePipelineService:
             ocr_result,
         )
         self._consolidate_scan_semantics(scan_unit, document_units, entity_results, ocr_result)
+        self._derive_archive_identities(document_units)
 
         needs_review = any(
             du.review_status == ReviewStatus.NEEDS_REVIEW.value
@@ -372,6 +374,24 @@ class KnowledgePipelineService:
                 doc_unit.id,
                 title,
             )
+
+    def _derive_archive_identities(self, document_units: list[DBDocumentUnit]) -> None:
+        """Derive archive identity for each document unit."""
+        for doc_unit in document_units:
+            document_type_code = self._get_document_type_code(doc_unit)
+            identity = derive_archive_identity(
+                document_type_code=document_type_code,
+                entities=list(doc_unit.entities),
+                specialist_results=list(doc_unit.specialist_results),
+            )
+            doc_unit.archive_identity_json = identity
+            if identity:
+                logger.debug(
+                    "Archive identity for document_unit %s: family=%s context=%s",
+                    doc_unit.id,
+                    identity.get("document_family"),
+                    identity.get("context_key"),
+                )
 
     def _has_active_specialist_jobs(self, document_units: list[DBDocumentUnit]) -> bool:
         active_statuses = {"queued", "pending", "processing"}

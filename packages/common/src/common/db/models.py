@@ -248,6 +248,7 @@ class DocumentUnit(Base):
     document_type_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     segmentation_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     extracted_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    archive_identity_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     review_status: Mapped[str] = mapped_column(String(32), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

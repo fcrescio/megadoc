@@ -279,6 +279,7 @@ def ensure_knowledge_schema(engine) -> None:
                 FOREIGN KEY (specialist_result_id) REFERENCES specialist_results(id) ON DELETE SET NULL;
             END IF;
         END $$""",
+        "ALTER TABLE document_units ADD COLUMN IF NOT EXISTS archive_identity_json JSON NULL",
     ]
     with engine.begin() as conn:
         for statement in statements:
