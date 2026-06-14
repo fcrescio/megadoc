@@ -305,12 +305,6 @@ const ProposalCard = memo(function ProposalCard({
 
           <div className="flex flex-col gap-2">
             <button
-              onClick={onToggleExpanded}
-              className="px-3 py-2 rounded-full bg-white/5 text-slate-200 text-sm font-medium border border-white/10 hover:bg-white/10"
-            >
-              Chiudi dettaglio
-            </button>
-            <button
               onClick={handleApprove}
               disabled={busy || !targetTopicSelectionIsValid}
               className="px-3 py-2 rounded-full bg-emerald-400/15 text-emerald-200 text-sm font-medium border border-emerald-300/25 hover:bg-emerald-400/25 disabled:opacity-50"
@@ -423,7 +417,7 @@ function ProposalList({ onClose, initialProposals }: Props) {
               onChange={(event) => setIncludeConsolidated(event.target.checked)}
               className="rounded border-white/20 bg-slate-900 text-cyan-400 focus:ring-cyan-400"
             />
-            Show consolidated
+            Mostra già processate
           </label>
           <button
             onClick={onClose}
