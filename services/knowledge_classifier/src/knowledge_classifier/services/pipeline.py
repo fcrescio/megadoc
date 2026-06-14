@@ -193,6 +193,10 @@ class KnowledgePipelineService:
             for doc_unit in document_units
         }
 
+        # Derive archive identity before topic assignment so proposal payloads
+        # have access to matched/missing axes from the start.
+        self._derive_archive_identities(document_units)
+
         self._assign_topics(scan_unit, document_units, entity_results, ocr_result)
         self.db.flush()
         for doc_unit in document_units:
@@ -206,7 +210,7 @@ class KnowledgePipelineService:
             ocr_result,
         )
         self._consolidate_scan_semantics(scan_unit, document_units, entity_results, ocr_result)
-        self._derive_archive_identities(document_units)
+        # Archive identities are already derived above; no need to call again.
 
         needs_review = any(
             du.review_status == ReviewStatus.NEEDS_REVIEW.value
