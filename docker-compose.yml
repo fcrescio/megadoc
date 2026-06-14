@@ -335,6 +335,7 @@ services:
       dockerfile: Dockerfile
       args:
         VITE_GIT_HASH: ${VITE_GIT_HASH:-unknown}
+        REACT_PROFILING: ${REACT_PROFILING:-false}
     restart: unless-stopped
     depends_on:
       api:
