@@ -1,4 +1,4 @@
-import { memo, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import {
   useApproveTopicProposal,
   useKnowledgeTopics,
@@ -6,7 +6,6 @@ import {
   useTopicProposals,
 } from '../hooks/useDocuments';
 import type { KnowledgeTopicProposal, KnowledgeTopicSummary, TopicCreatePayload } from '../types';
-import { Virtuoso } from 'react-virtuoso';
 
 interface Props {
   onClose: () => void;
@@ -354,7 +353,7 @@ const ProposalCard = memo(function ProposalCard({
 
 function ProposalList({ onClose, initialProposals }: Props) {
   const [includeConsolidated, setIncludeConsolidated] = useState(false);
-  const [expandedProposalId, setExpandedProposalId] = useState<string | null>(null);
+  const [currentIndex, setCurrentIndex] = useState(0);
   const shouldFetchProposals = includeConsolidated || !initialProposals;
   const proposalsQuery = useTopicProposals(includeConsolidated, shouldFetchProposals);
   const proposals = !includeConsolidated && initialProposals ? initialProposals : proposalsQuery.data;
@@ -375,9 +374,16 @@ function ProposalList({ onClose, initialProposals }: Props) {
     });
   }, [topics]);
 
-  const toggleExpandedProposal = (proposalId: string) => {
-    setExpandedProposalId((current) => (current === proposalId ? null : proposalId));
-  };
+  // Reset index when proposals list changes
+  useEffect(() => {
+    setCurrentIndex(0);
+  }, [proposals?.length]);
+
+  const currentProposal = proposals?.[currentIndex];
+  const totalCount = proposals?.length ?? 0;
+
+  const goNext = () => setCurrentIndex((i) => Math.min(i + 1, totalCount - 1));
+  const goPrev = () => setCurrentIndex((i) => Math.max(i - 1, 0));
 
   if (isLoading) {
     return (
@@ -428,35 +434,47 @@ function ProposalList({ onClose, initialProposals }: Props) {
         </div>
       </div>
 
-      {proposals?.length === 0 ? (
+      {totalCount === 0 ? (
         <div className="p-8 text-center bg-white/5 border border-white/10 rounded-2xl">
           <p className="text-slate-400">
             {includeConsolidated ? 'Nessuna proposta in questa vista.' : 'Nessuna proposta pendente.'}
           </p>
         </div>
       ) : (
-        <div className="border border-slate-700 rounded-lg bg-slate-800 overflow-hidden">
-          <Virtuoso
-            style={{ height: 'min(70vh, 600px)' }}
-            totalCount={proposals?.length ?? 0}
-            itemContent={(index) => {
-              const proposal = proposals![index];
-              return (
-                <div className="p-4 border-b border-white/10 last:border-b-0">
-                  <ProposalCard
-                    proposal={proposal}
-                    topicOptions={topicOptions}
-                    onApprove={(proposalId, payload) => approve.mutate({ proposalId, payload })}
-                    onReject={(proposalId) => reject.mutate(proposalId)}
-                    busy={approve.isPending || reject.isPending}
-                    expanded={expandedProposalId === proposal.id}
-                    onToggleExpanded={() => toggleExpandedProposal(proposal.id)}
-                  />
-                </div>
-              );
-            }}
-            increaseViewportBy={{ top: 200, bottom: 200 }}
-          />
+        <div className="space-y-4">
+          {/* Stepper navigation */}
+          <div className="flex items-center justify-between">
+            <button
+              onClick={goPrev}
+              disabled={currentIndex === 0}
+              className="px-4 py-2 rounded-full bg-white/10 text-slate-200 text-sm font-medium border border-white/10 hover:bg-white/20 disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              ← Precedente
+            </button>
+            <span className="text-sm text-slate-400">
+              Proposta {currentIndex + 1} di {totalCount}
+            </span>
+            <button
+              onClick={goNext}
+              disabled={currentIndex >= totalCount - 1}
+              className="px-4 py-2 rounded-full bg-white/10 text-slate-200 text-sm font-medium border border-white/10 hover:bg-white/20 disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              Successiva →
+            </button>
+          </div>
+
+          {/* Current proposal */}
+          {currentProposal && (
+            <ProposalCard
+              proposal={currentProposal}
+              topicOptions={topicOptions}
+              onApprove={(proposalId, payload) => approve.mutate({ proposalId, payload })}
+              onReject={(proposalId) => reject.mutate(proposalId)}
+              busy={approve.isPending || reject.isPending}
+              expanded={true}
+              onToggleExpanded={() => {}}
+            />
+          )}
         </div>
       )}
     </div>
