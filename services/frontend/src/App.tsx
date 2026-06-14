@@ -97,10 +97,10 @@ function App() {
   const activeView = route.selectedDoc ? 'documents' : route.view;
 
   return (
-    <div className="min-h-screen text-slate-100 bg-[radial-gradient(circle_at_top_left,_rgba(45,212,191,0.18),_transparent_28%),radial-gradient(circle_at_top_right,_rgba(59,130,246,0.18),_transparent_30%),linear-gradient(180deg,_#07111f_0%,_#091827_48%,_#0b1220_100%)]">
-      <div className="absolute inset-0 pointer-events-none opacity-40 bg-[linear-gradient(rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-[size:32px_32px]" />
+    <div className="min-h-screen text-slate-100 bg-slate-900">
+      <div className="absolute inset-0 pointer-events-none opacity-20 bg-[linear-gradient(rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-[size:32px_32px]" />
 
-      <header className="sticky top-0 z-20 backdrop-blur-xl bg-slate-950/55 border-b border-white/10">
+      <header className="sticky top-0 z-20 bg-slate-950 border-b border-slate-700">
         <div className="max-w-7xl mx-auto px-5 py-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <p className="text-xs uppercase tracking-[0.35em] text-cyan-300/80">Megadoc</p>
@@ -120,7 +120,7 @@ function App() {
                   onClick={() => openView(item.id as View)}
                   className={`px-4 py-2 rounded-full text-sm font-medium transition ${
                     activeView === item.id
-                      ? 'bg-cyan-400/15 text-cyan-200 border border-cyan-300/30 shadow-[0_0_30px_rgba(34,211,238,0.18)]'
+                      ? 'bg-cyan-400/15 text-cyan-200 border border-cyan-300/30'
                       : 'bg-white/5 text-slate-300 border border-white/10 hover:bg-white/10'
                   }`}
                 >
@@ -135,7 +135,7 @@ function App() {
 
       <main className="relative max-w-7xl mx-auto px-5 py-4">
         {!route.selectedDoc && route.view !== 'knowledge' && (
-          <section className="mb-8 rounded-[28px] border border-white/10 bg-white/5 backdrop-blur-md shadow-[0_24px_80px_rgba(0,0,0,0.35)] overflow-hidden">
+          <section className="mb-8 rounded-xl border border-slate-700 bg-slate-800 overflow-hidden">
             <div className="grid gap-6 lg:grid-cols-[1.4fr_0.9fr] p-6 lg:p-8">
               <div>
                 <p className="text-sm text-cyan-200/80 mb-3">OCR, classificazione e consultazione.</p>

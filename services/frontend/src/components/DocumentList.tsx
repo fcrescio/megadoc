@@ -11,7 +11,7 @@ const DocumentRow = memo(function DocumentRow({ doc, onSelect }: { doc: Document
   return (
     <button
       onClick={() => onSelect(doc.id)}
-      className="w-full p-4 hover:bg-white/5 text-left transition-colors will-change-auto border-b border-white/10"
+      className="w-full p-4 hover:bg-slate-700 text-left border-b border-slate-700"
     >
       <div className="flex items-center justify-between">
         <div>
@@ -63,7 +63,7 @@ function DocumentList({ onSelectDocument }: Props) {
       {documents && documents.length === 0 ? (
         <p className="text-slate-400">Nessun documento trovato.</p>
       ) : (
-        <div className="bg-white/5 border border-white/10 rounded-[24px] shadow-[0_18px_60px_rgba(2,6,23,0.35)] overflow-hidden backdrop-blur-md">
+        <div className="border border-slate-700 rounded-lg bg-slate-800 overflow-hidden">
           <Virtuoso
             style={{ height: 'min(70vh, 600px)' }}
             totalCount={documents?.length ?? 0}

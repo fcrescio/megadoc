@@ -52,7 +52,7 @@ function KnowledgeBase({ onOpenDocument }: Props) {
 
   return (
     <div className="flex h-[calc(100vh-7.75rem)] min-h-[38rem] flex-col gap-3">
-      <section className="shrink-0 rounded-3xl border border-cyan-300/15 bg-slate-950/55 p-4 shadow-[0_20px_70px_rgba(8,47,73,0.28)] backdrop-blur-xl">
+      <section className="shrink-0 rounded-lg border border-slate-700 bg-slate-800 p-4">
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex min-w-[16rem] flex-1 items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-2.5">
             <span className="text-cyan-200">⌕</span>
@@ -99,7 +99,7 @@ function KnowledgeBase({ onOpenDocument }: Props) {
         </nav>
       </section>
 
-      <section className="min-h-0 flex-1 overflow-hidden rounded-3xl border border-white/10 bg-white/5 p-4 backdrop-blur-md">
+      <section className="min-h-0 flex-1 overflow-hidden rounded-lg border border-slate-700 bg-slate-800 p-4">
         {panel === 'comparisons' && <ComparisonsPanel onOpenDocument={onOpenDocument} />}
         {panel === 'facts' && <FactsPanel onOpenDocument={onOpenDocument} deferredSearch={deferredSearch} />}
         {panel === 'specialists' && <SpecialistsPanel onOpenDocument={onOpenDocument} deferredSearch={deferredSearch} />}
@@ -109,7 +109,7 @@ function KnowledgeBase({ onOpenDocument }: Props) {
       </section>
 
       {showProposals && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm" onClick={() => setShowProposals(false)}>
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/75 p-4" onClick={() => setShowProposals(false)}>
           <div className="max-h-[88vh] w-full max-w-5xl overflow-y-auto rounded-3xl border border-amber-300/20 bg-slate-900 p-5 shadow-2xl" onClick={(event) => event.stopPropagation()}>
             <ProposalList
               initialProposals={proposals.data}

@@ -256,7 +256,7 @@ export const FactsPanel = memo(function FactsPanel({ onOpenDocument, deferredSea
         </div>
       </div>
       {showNodeDetail && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm" onClick={() => setShowNodeDetail(false)}>
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/75 p-4" onClick={() => setShowNodeDetail(false)}>
           <div className="flex max-h-[85vh] w-full max-w-4xl flex-col rounded-3xl border border-indigo-300/20 bg-slate-900 p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="mb-4 flex items-center justify-between">
               <p className="text-lg font-semibold text-white">{nodeDetail.data?.node.label ?? 'Dettaglio nodo'}</p>

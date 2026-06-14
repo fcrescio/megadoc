@@ -141,7 +141,7 @@ function ManualView() {
 
   return (
     <div className="space-y-6">
-      <div className="rounded-[32px] border border-fuchsia-300/15 bg-[radial-gradient(circle_at_top_left,_rgba(244,114,182,0.16),_transparent_34%),radial-gradient(circle_at_bottom_right,_rgba(14,165,233,0.16),_transparent_30%),rgba(2,6,23,0.84)] backdrop-blur-2xl shadow-[0_30px_120px_rgba(59,7,100,0.38)] overflow-hidden">
+      <div className="rounded-xl border border-slate-700 bg-slate-800 overflow-hidden">
         <div className="grid gap-8 lg:grid-cols-[1.2fr_0.8fr] p-6 lg:p-8">
           <div>
             <p className="text-xs uppercase tracking-[0.35em] text-fuchsia-200/80 mb-3">Manuale Vivo</p>
@@ -176,7 +176,7 @@ function ManualView() {
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
-        <div className="rounded-[28px] border border-white/10 bg-white/5 shadow-[0_20px_80px_rgba(2,6,23,0.35)] backdrop-blur-md overflow-hidden">
+        <div className="rounded-xl border border-slate-700 bg-slate-800 overflow-hidden">
           <div className="border-b border-white/10 px-6 py-4 flex items-center justify-between gap-3">
             <div>
               <p className="text-xs uppercase tracking-[0.28em] text-fuchsia-200/70">Testo di Riferimento</p>
@@ -197,7 +197,7 @@ function ManualView() {
         </div>
 
         <div className="space-y-4">
-          <div className="rounded-[28px] border border-fuchsia-300/20 bg-slate-950/55 p-5 shadow-[0_18px_60px_rgba(2,6,23,0.35)] backdrop-blur-md">
+          <div className="rounded-xl border border-slate-700 bg-slate-800 p-5">
             <p className="text-xs uppercase tracking-[0.28em] text-fuchsia-200/70 mb-3">Passaggio Selezionato</p>
             {selection ? (
               <div className="space-y-3">
@@ -249,7 +249,7 @@ function ManualView() {
             )}
           </div>
 
-          <div className="rounded-[28px] border border-white/10 bg-white/5 shadow-[0_18px_60px_rgba(2,6,23,0.35)] backdrop-blur-md overflow-hidden">
+          <div className="rounded-xl border border-slate-700 bg-slate-800 overflow-hidden">
             <div className="border-b border-white/10 px-5 py-4">
               <p className="text-xs uppercase tracking-[0.28em] text-fuchsia-200/70">Flusso Commenti</p>
               <h3 className="text-lg font-semibold text-white mt-1">Feedback sul manuale</h3>

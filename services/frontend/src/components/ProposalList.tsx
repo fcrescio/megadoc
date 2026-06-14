@@ -112,7 +112,7 @@ const ProposalCard = memo(function ProposalCard({
   };
 
   return (
-    <div className="border border-white/10 rounded-2xl p-4 bg-slate-950/30 backdrop-blur-sm space-y-4">
+    <div className="border border-slate-700 rounded-lg p-4 bg-slate-800 space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
@@ -435,7 +435,7 @@ function ProposalList({ onClose, initialProposals }: Props) {
           </p>
         </div>
       ) : (
-        <div className="bg-white/5 border border-white/10 rounded-[24px] overflow-hidden backdrop-blur-md">
+        <div className="border border-slate-700 rounded-lg bg-slate-800 overflow-hidden">
           <Virtuoso
             style={{ height: 'min(70vh, 600px)' }}
             totalCount={proposals?.length ?? 0}

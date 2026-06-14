@@ -147,7 +147,7 @@ function AccountingReconciliationModal({ comparison, onClose }: Props) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4" onClick={onClose}>
       <div className="flex max-h-[92vh] w-full max-w-7xl flex-col rounded-3xl border border-amber-300/20 bg-slate-900 p-5 shadow-2xl" onClick={(event) => event.stopPropagation()}>
         <div className="mb-4 flex shrink-0 flex-wrap items-start justify-between gap-3">
           <div>

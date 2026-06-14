@@ -29,7 +29,7 @@ export default function SystemStatusButton() {
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
-        className={`px-4 py-2 rounded-full text-sm font-medium transition border shadow-[0_0_30px_rgba(15,23,42,0.22)] ${badgeClasses}`}
+        className={`px-4 py-2 rounded-full text-sm font-medium border ${badgeClasses}`}
         aria-expanded={open}
       >
         <span className="flex items-center gap-2">
@@ -39,7 +39,7 @@ export default function SystemStatusButton() {
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-3 w-[22rem] rounded-3xl border border-white/10 bg-slate-950/95 backdrop-blur-2xl shadow-[0_24px_80px_rgba(0,0,0,0.45)] p-4 space-y-3 z-30">
+        <div className="absolute right-0 mt-3 w-[22rem] rounded-lg border border-slate-700 bg-slate-800 p-4 space-y-3 z-30">
           <div>
             <p className="text-xs uppercase tracking-[0.28em] text-cyan-300/75">Stato sistema</p>
             <p className="mt-1 text-sm text-slate-300">

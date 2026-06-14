@@ -52,7 +52,7 @@ function JobStatus() {
       {jobs && jobs.length === 0 ? (
         <p className="text-slate-400">Nessun lavoro trovato.</p>
       ) : (
-        <div className="bg-white/5 border border-white/10 rounded-[24px] shadow-[0_18px_60px_rgba(2,6,23,0.35)] divide-y divide-white/10 overflow-hidden backdrop-blur-md">
+        <div className="border border-slate-700 rounded-lg bg-slate-800 divide-y divide-slate-700 overflow-hidden">
           {jobs?.map((job: Job) => (
             <div key={job.id} className="p-4">
               <div className="flex items-center justify-between">
