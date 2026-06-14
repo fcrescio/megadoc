@@ -2388,11 +2388,16 @@ def merge_topic(
         acted_by=payload.acted_by,
     )
     db.add(review)
-    db.commit()
 
-    # Rebuild derived projections so graph/contexts reflect the merge
-    rebuild_knowledge_graph(db)
-    rebuild_knowledge_contexts(db)
+    # Rebuild derived projections so graph/contexts reflect the merge.
+    # Commit after rebuilds so both merge and projections are persisted together.
+    try:
+        rebuild_knowledge_graph(db)
+        rebuild_knowledge_contexts(db)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
 
     return TopicMergeResponse(
         status="ok",
