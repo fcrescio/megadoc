@@ -514,3 +514,77 @@ def test_attach_to_context_proposal_creates_reviewable_proposal(db_session):
 
     # Verify doc_unit is marked for review
     assert doc_unit.review_status == "needs_review"
+
+
+def test_ensure_attach_context_proposed_topic_fallback_when_missing(db_session):
+    """_ensure_attach_context_proposed_topic must build a minimal proposed_topic when it is None."""
+    doc_unit = DocumentUnit(
+        scan_unit=ScanUnit(
+            source_document_id=uuid.uuid4(),
+            source_ocr_result_id=uuid.uuid4(),
+            page_count=1,
+            status="processing",
+        ),
+        ordinal=1,
+        start_page=1,
+        end_page=1,
+        review_status="auto_accepted",
+        title="Fattura Elettrosat marzo 2007",
+    )
+    db_session.add(doc_unit)
+    db_session.flush()
+
+    decision = type(
+        "Decision",
+        (),
+        {
+            "proposed_topic": None,
+            "proposal_action": "attach_to_context",
+            "confidence": 0.85,
+            "rationale": "Documento ripetitivo.",
+        },
+    )()
+
+    KnowledgePipelineService._ensure_attach_context_proposed_topic(decision, doc_unit)
+
+    assert decision.proposed_topic is not None
+    assert decision.proposed_topic["proposed_slug"] == f"attach-to-context-{doc_unit.id.hex[:8]}"
+    assert decision.proposed_topic["proposed_title"] == "Allega a contesto: Fattura Elettrosat marzo 2007"
+    assert decision.proposed_topic["topic_class"] == "other"
+    assert decision.proposed_topic["topic_kind"] == "context"
+
+
+def test_ensure_attach_context_proposed_topic_does_not_overwrite_existing(db_session):
+    """_ensure_attach_context_proposed_topic must not overwrite an existing proposed_topic."""
+    doc_unit = DocumentUnit(
+        scan_unit=ScanUnit(
+            source_document_id=uuid.uuid4(),
+            source_ocr_result_id=uuid.uuid4(),
+            page_count=1,
+            status="processing",
+        ),
+        ordinal=1,
+        start_page=1,
+        end_page=1,
+        review_status="auto_accepted",
+        title="Fattura Elettrosat marzo 2007",
+    )
+    db_session.add(doc_unit)
+    db_session.flush()
+
+    existing_topic = {"proposed_slug": "custom-slug", "proposed_title": "Custom Title", "topic_class": "vendor_relationship"}
+    decision = type(
+        "Decision",
+        (),
+        {
+            "proposed_topic": existing_topic,
+            "proposal_action": "attach_to_context",
+            "confidence": 0.85,
+            "rationale": "Documento ripetitivo.",
+        },
+    )()
+
+    KnowledgePipelineService._ensure_attach_context_proposed_topic(decision, doc_unit)
+
+    assert decision.proposed_topic is existing_topic
+    assert decision.proposed_topic["proposed_slug"] == "custom-slug"
