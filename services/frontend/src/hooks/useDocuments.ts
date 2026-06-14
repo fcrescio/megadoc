@@ -34,6 +34,8 @@ import type {
   GraphConsolidationSuggestions,
   GraphConsolidationReviewPayload,
   GraphConsolidationReviewResult,
+  TopicMergePayload,
+  TopicMergeResult,
   KnowledgeTopicProposal,
   TopicAssignmentUpsertPayload,
   TopicCreatePayload,
@@ -72,6 +74,7 @@ import {
   runKnowledgeConsolidation,
   getGraphConsolidationSuggestions,
   reviewGraphConsolidationSuggestion,
+  mergeTopic,
   uploadDocument,
   getTopicProposals,
   rejectTopicProposal,
@@ -426,6 +429,21 @@ export function useReviewGraphConsolidationSuggestion() {
       queryClient.invalidateQueries({ queryKey: ['knowledge-topic'] });
       queryClient.invalidateQueries({ queryKey: ['knowledge-search'] });
       queryClient.invalidateQueries({ queryKey: ['knowledge'] });
+    },
+  });
+}
+
+export function useMergeTopic() {
+  const queryClient = useQueryClient();
+
+  return useMutation<TopicMergeResult, Error, { sourceId: string; payload: TopicMergePayload }>({
+    mutationFn: ({ sourceId, payload }) => mergeTopic(sourceId, payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['knowledge-topics'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-topic'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-search'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge'] });
+      queryClient.invalidateQueries({ queryKey: ['graph-consolidation-suggestions'] });
     },
   });
 }

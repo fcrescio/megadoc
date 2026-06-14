@@ -13,12 +13,13 @@ import {
   EntitiesPanel,
   ReviewsPanel,
 } from './KnowledgeBasePanels';
+import { TopicCleanupPanel } from './TopicCleanupPanel';
 
 interface Props {
   onOpenDocument: (documentId: string) => void;
 }
 
-type Panel = 'comparisons' | 'facts' | 'specialists' | 'topics' | 'entities' | 'reviews';
+type Panel = 'comparisons' | 'facts' | 'specialists' | 'topics' | 'entities' | 'reviews' | 'cleanup';
 
 function KnowledgeBase({ onOpenDocument }: Props) {
   const [panel, setPanel] = useState<Panel>('comparisons');
@@ -91,6 +92,7 @@ function KnowledgeBase({ onOpenDocument }: Props) {
             { id: 'topics' as Panel, label: 'Topic' },
             { id: 'entities' as Panel, label: 'Entità' },
             { id: 'reviews' as Panel, label: 'Revisioni' },
+            { id: 'cleanup' as Panel, label: 'Cleanup' },
           ].map((tab) => (
             <button key={tab.id} onClick={() => setPanel(tab.id)} className={tabClass(panel === tab.id)}>
               {tab.label}
@@ -106,6 +108,7 @@ function KnowledgeBase({ onOpenDocument }: Props) {
         {panel === 'topics' && <TopicsPanel onOpenDocument={onOpenDocument} deferredSearch={deferredSearch} includeInactive={false} />}
         {panel === 'entities' && <EntitiesPanel onOpenDocument={onOpenDocument} deferredSearch={deferredSearch} />}
         {panel === 'reviews' && <ReviewsPanel deferredSearch={deferredSearch} />}
+        {panel === 'cleanup' && <TopicCleanupPanel deferredSearch={deferredSearch} />}
       </section>
 
       {showProposals && (
