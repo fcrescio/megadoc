@@ -167,6 +167,7 @@ function AccountingSpecialistCard({ result }: { result: Record<string, unknown> 
   const [activeSectionId, setActiveSectionId] = useState<string | null>(
     typeof sections[0]?.section_id === 'string' ? sections[0].section_id : null,
   );
+  const sectionsKey = useMemo(() => sections.map((s) => s.section_id as string).join(','), [sections]);
   useEffect(() => {
     if (!sections.length) {
       setActiveSectionId(null);
@@ -175,7 +176,7 @@ function AccountingSpecialistCard({ result }: { result: Record<string, unknown> 
     if (!sections.some((section) => section.section_id === activeSectionId)) {
       setActiveSectionId(typeof sections[0].section_id === 'string' ? sections[0].section_id : null);
     }
-  }, [sections]);
+  }, [sectionsKey]);
   const visibleTables = activeSectionId
     ? tables.filter((table) => table.section_id === activeSectionId)
     : tables;

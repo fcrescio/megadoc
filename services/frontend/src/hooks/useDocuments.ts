@@ -85,6 +85,7 @@ export function useDocuments(limit = 100) {
   return useQuery<Document[]>({
     queryKey: ['documents', limit],
     queryFn: () => getDocuments(limit),
+    placeholderData: (previousData) => previousData,
   });
 }
 
@@ -229,6 +230,7 @@ export function useKnowledgeEntities(options?: { query?: string; entityType?: st
     queryKey: ['knowledge-entities', options?.query, options?.entityType, options?.limit],
     queryFn: () => getKnowledgeEntities(options),
     enabled,
+    placeholderData: (previousData) => previousData,
   });
 }
 
@@ -341,6 +343,7 @@ export function useKnowledgeNodes(options?: { query?: string; nodeKind?: string;
     queryKey: ['knowledge-nodes', options?.query, options?.nodeKind, options?.limit],
     queryFn: () => getKnowledgeNodes(options),
     enabled,
+    placeholderData: (previousData) => previousData,
   });
 }
 
@@ -357,6 +360,7 @@ export function useKnowledgeAssertions(options?: { query?: string; predicate?: s
     queryKey: ['knowledge-assertions', options?.query, options?.predicate, options?.nodeId, options?.limit],
     queryFn: () => getKnowledgeAssertions(options),
     enabled,
+    placeholderData: (previousData) => previousData,
   });
 }
 

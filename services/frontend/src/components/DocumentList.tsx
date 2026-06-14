@@ -7,15 +7,6 @@ interface Props {
   onSelectDocument: (id: string) => void;
 }
 
-import { memo } from 'react';
-import { useDocuments } from '../hooks/useDocuments';
-import type { Document } from '../types';
-import { Virtuoso } from 'react-virtuoso';
-
-interface Props {
-  onSelectDocument: (id: string) => void;
-}
-
 const DocumentRow = memo(function DocumentRow({ doc, onSelect }: { doc: Document; onSelect: (id: string) => void }) {
   return (
     <button

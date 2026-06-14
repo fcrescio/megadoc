@@ -65,6 +65,7 @@ export const ComparisonsPanel = memo(function ComparisonsPanel({ onOpenDocument:
 
   const contextsQuery = useKnowledgeContexts({ limit: 40 }, true);
   const contexts = contextsQuery.data ?? [];
+  const contextsKey = useMemo(() => contexts.map((c) => c.id).join(','), [contexts]);
   const accountingSubjects = useContextAccountingSubjects(selectedContextId, {
     query: deferredComparisonSubject || undefined,
     limit: 20,
@@ -85,7 +86,7 @@ export const ComparisonsPanel = memo(function ComparisonsPanel({ onOpenDocument:
     } else if (!selectedContextId || !contexts.some((c) => c.id === selectedContextId)) {
       setSelectedContextId(contexts[0].id);
     }
-  }, [contexts]);
+  }, [contextsKey]);
 
   useEffect(() => {
     if (selectedAccountKey && !(accountingSubjects.data ?? []).some((s) => s.account_key === selectedAccountKey)) {
@@ -198,13 +199,14 @@ export const FactsPanel = memo(function FactsPanel({ onOpenDocument, deferredSea
 
   const nodesQuery = useKnowledgeNodes({ query: deferredSearch || undefined, nodeKind: nodeKindFilter, limit: 60 }, true);
   const nodes = nodesQuery.data ?? [];
+  const nodesKey = useMemo(() => nodes.map((n) => n.id).join(','), [nodes]);
   const assertionsQuery = useKnowledgeAssertions({ query: deferredSearch || undefined, nodeId: selectedNodeId || undefined, limit: 80 }, true);
   const nodeDetail = useKnowledgeNode(selectedNodeId);
 
   useEffect(() => {
     if (!nodes.length) { setSelectedNodeId(null); return; }
     if (!selectedNodeId || !nodes.some((n) => n.id === selectedNodeId)) setSelectedNodeId(nodes[0].id);
-  }, [nodes]);
+  }, [nodesKey]);
 
   useEffect(() => {
     if (!showNodeDetail) return;
@@ -435,11 +437,12 @@ export const TopicsPanel = memo(function TopicsPanel({ onOpenDocument, deferredS
       return topic.title.toLowerCase().includes(query) || topic.slug.toLowerCase().includes(query);
     });
   }, [deferredSearch, topicClassFilter, topicKindFilter, topicSearch.data, topics]);
+  const visibleTopicsKey = useMemo(() => visibleTopics.map((t) => t.id).join(','), [visibleTopics]);
 
   useEffect(() => {
     if (!visibleTopics.length) { setSelectedTopicId(null); return; }
     if (!selectedTopicId || !visibleTopics.some((t) => t.id === selectedTopicId)) setSelectedTopicId(visibleTopics[0].id);
-  }, [visibleTopics]);
+  }, [visibleTopicsKey]);
 
   return (
     <div className="flex h-full flex-col gap-3">
@@ -506,6 +509,7 @@ export const EntitiesPanel = memo(function EntitiesPanel({ onOpenDocument, defer
 
   const entityQuery = useKnowledgeEntities({ query: deferredSearch || undefined, entityType: entityTypeFilter, limit: 40 }, true);
   const entities = entityQuery.data ?? [];
+  const entitiesKey = useMemo(() => entities.map((e) => `${e.entity_type}:${e.entity_key}`).join(','), [entities]);
   const canonicalQuery = useCanonicalEntities({ query: deferredSearch || undefined, entityType: entityTypeFilter, limit: 40 }, true);
   const entityDetail = useKnowledgeEntityDetail(selectedEntityType, selectedEntityKey);
   const mergeCanonicalEntity = useMergeCanonicalEntity();
@@ -516,14 +520,16 @@ export const EntitiesPanel = memo(function EntitiesPanel({ onOpenDocument, defer
       setSelectedEntityKey(entities[0].entity_key);
       setSelectedEntityType(entities[0].entity_type);
     }
-  }, [entities]);
+  }, [entitiesKey]);
+
+  const entityDetailKey = entityDetail.data ? `${entityDetail.data.entity_type}:${entityDetail.data.entity_key}` : null;
 
   useEffect(() => {
-    if (!entityDetail.data) return;
-    setNewCanonicalValue(entityDetail.data.entity_key);
-    setNewCanonicalDisplay(entityDetail.data.display_value);
+    if (!entityDetailKey) return;
+    setNewCanonicalValue(entityDetail.data!.entity_key);
+    setNewCanonicalDisplay(entityDetail.data!.display_value);
     setCanonicalEntityId('');
-  }, [entityDetail.data]);
+  }, [entityDetailKey]);
 
   return (
     <div className="flex h-full flex-col gap-3">

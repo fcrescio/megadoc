@@ -107,6 +107,7 @@ function AccountingReconciliationModal({ comparison, onClose }: Props) {
   );
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = allSources.find((source) => source.fact_id === selectedId) ?? null;
+  const selectedKey = selected?.fact_id ?? null;
   const [amount, setAmount] = useState('');
   const [categoryLabel, setCategoryLabel] = useState('');
   const [isTotal, setIsTotal] = useState(false);
@@ -122,12 +123,12 @@ function AccountingReconciliationModal({ comparison, onClose }: Props) {
   }, [allSources]);
 
   useEffect(() => {
-    if (!selected) return;
-    setAmount(String(selected.amount));
-    setCategoryLabel(selected.category_label ?? '');
-    setIsTotal(selected.is_total);
+    if (!selectedKey) return;
+    setAmount(String(selected!.amount));
+    setCategoryLabel(selected!.category_label ?? '');
+    setIsTotal(selected!.is_total);
     setNote('');
-  }, [selected]);
+  }, [selectedKey]);
 
   const saveCorrection = () => {
     if (!selected) return;
