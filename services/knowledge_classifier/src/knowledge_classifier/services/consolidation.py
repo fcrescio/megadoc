@@ -1264,6 +1264,15 @@ class KnowledgeBaseConsolidationService:
                 topic_identity_jsons[str(row.topic_id)].append(row.archive_identity_json)
 
         # Derive dominant axes and families per topic (in memory)
+        # Use deterministic tie-break: (count DESC, value ASC) so results
+        # match scripts/topic_cleanup_report.py regardless of row order.
+        def _most_common_det(vals: list[str]) -> str | None:
+            if not vals:
+                return None
+            counts = Counter(vals)
+            # Sort by (-count, value) for deterministic tie-break
+            return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
+
         topic_dominant_axes: dict[str, dict[str, str | None]] = {}
         topic_dominant_family: dict[str, str | None] = {}
         for tid in topic_ids:
@@ -1281,9 +1290,9 @@ class KnowledgeBaseConsolidationService:
                         axes[key].append(val)
             dominant = {}
             for key, vals in axes.items():
-                dominant[key] = Counter(vals).most_common(1)[0][0] if vals else None
+                dominant[key] = _most_common_det(vals)
             topic_dominant_axes[sid] = dominant
-            topic_dominant_family[sid] = Counter(families).most_common(1)[0][0] if families else None
+            topic_dominant_family[sid] = _most_common_det(families)
 
         categories: dict[str, list[dict[str, Any]]] = {
             "near_orphans": [],

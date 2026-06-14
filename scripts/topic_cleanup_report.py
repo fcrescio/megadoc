@@ -72,7 +72,9 @@ def _dominant_family_for_topic(session: Session, topic_id: str) -> str | None:
                 families.append(f)
     if not families:
         return None
-    return Counter(families).most_common(1)[0][0]
+    # Deterministic tie-break: (count DESC, value ASC)
+    counts = Counter(families)
+    return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
 
 
 def find_near_orphans(session: Session) -> list[dict[str, Any]]:
@@ -169,7 +171,11 @@ def find_shared_identity_axis(session: Session) -> list[dict[str, Any]]:
                         axes[key].append(val)
         dominant = {}
         for key, vals in axes.items():
-            dominant[key] = Counter(vals).most_common(1)[0][0] if vals else None
+            if vals:
+                counts = Counter(vals)
+                dominant[key] = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
+            else:
+                dominant[key] = None
         topic_axes[str(topic.id)] = dominant
 
     axis_groups: dict[str, list[tuple[str, str]]] = defaultdict(list)
