@@ -632,10 +632,21 @@ class KnowledgePipelineService:
             elif decision.action == "propose_new":
                 proposal_action = (decision.proposal_action or "create_topic").lower()
                 if proposal_action == "attach_to_context":
-                    # Routine/repetitive document: no topic needed, findable via entities/context
-                    doc_unit.review_status = ReviewStatus.NEEDS_REVIEW.value
+                    # Routine/repetitive document: no topic needed, findable via entities/context.
+                    # Create a proposal so the decision is visible and actionable in the UI.
+                    if not decision.proposed_topic:
+                        # Build a minimal proposed_topic so _create_topic_proposal can proceed.
+                        doc_title = doc_unit.title or f"Document unit {doc_unit.id}"
+                        decision.proposed_topic = {
+                            "proposed_slug": f"attach-to-context-{doc_unit.id.hex[:8]}",
+                            "proposed_title": f"Allega a contesto: {doc_title[:80]}",
+                            "topic_class": "other",
+                            "topic_kind": "context",
+                            "description": "Documento ripetitivo/routine da agganciare a contesto esistente senza creare topic canonico.",
+                        }
+                    self._create_topic_proposal(scan_unit, doc_unit, decision, entities, candidates_result.candidates)
                     logger.info(
-                        "Document unit %s marked as attach_to_context (no topic created)",
+                        "Document unit %s: created attach_to_context proposal",
                         doc_unit.id,
                     )
                 else:
