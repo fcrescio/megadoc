@@ -200,6 +200,7 @@ class TopicProposal(Base):
     matched_existing_topic_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, ForeignKey("topics.id"), nullable=True)
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
+    review_payload_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

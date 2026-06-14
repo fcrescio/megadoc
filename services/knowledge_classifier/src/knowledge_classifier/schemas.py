@@ -218,6 +218,7 @@ class TopicProposalResponse(BaseModel):
     source_end_page: Optional[int] = None
     confidence: Optional[float] = None
     rationale: Optional[str] = None
+    review_payload_json: Optional[dict[str, Any]] = None
     created_at: datetime
     reviewed_at: Optional[datetime] = None
 

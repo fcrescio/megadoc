@@ -159,6 +159,7 @@ def _serialize_topic_proposal(proposal: TopicProposal | None) -> dict[str, Any] 
         "source_end_page": source_document_unit.end_page if source_document_unit else None,
         "confidence": proposal.confidence,
         "rationale": proposal.rationale,
+        "review_payload_json": proposal.review_payload_json,
         "created_at": proposal.created_at,
         "reviewed_at": proposal.reviewed_at,
     }

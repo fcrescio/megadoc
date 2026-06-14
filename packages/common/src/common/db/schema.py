@@ -280,6 +280,7 @@ def ensure_knowledge_schema(engine) -> None:
             END IF;
         END $$""",
         "ALTER TABLE document_units ADD COLUMN IF NOT EXISTS archive_identity_json JSON NULL",
+        "ALTER TABLE topic_proposals ADD COLUMN IF NOT EXISTS review_payload_json JSON NULL",
     ]
     with engine.begin() as conn:
         for statement in statements:

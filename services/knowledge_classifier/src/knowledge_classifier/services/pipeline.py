@@ -647,7 +647,7 @@ class KnowledgePipelineService:
                         )
                         self._create_topic_assignments(doc_unit, decision)
                     else:
-                        self._create_topic_proposal(scan_unit, doc_unit, decision, entities)
+                        self._create_topic_proposal(scan_unit, doc_unit, decision, entities, candidates_result.candidates)
             elif decision.action == "needs_review":
                 doc_unit.review_status = ReviewStatus.NEEDS_REVIEW.value
                 # Still create tentative assignment
@@ -745,6 +745,7 @@ class KnowledgePipelineService:
         doc_unit: DBDocumentUnit,
         decision: Any,
         entities: list[Any],
+        candidates: list[Any] | None = None,
     ):
         """Create topic proposal from decision."""
         if not decision.proposed_topic:
@@ -772,6 +773,9 @@ class KnowledgePipelineService:
         else:
             provisional_topic.topic_kind = provisional_topic.topic_kind or proposed_topic_kind
 
+        # Build structured review payload
+        review_payload = self._build_proposal_payload(doc_unit, decision, candidates)
+
         proposal = TopicProposal(
             proposed_slug=proposed_slug,
             proposed_title=proposed_title,
@@ -783,6 +787,7 @@ class KnowledgePipelineService:
             matched_existing_topic_id=provisional_topic.id,
             confidence=decision.confidence,
             rationale=decision.rationale,
+            review_payload_json=review_payload,
         )
         self.db.add(proposal)
         upsert_document_unit_topic_assignment(
@@ -794,6 +799,58 @@ class KnowledgePipelineService:
             rationale=decision.rationale,
         )
         doc_unit.review_status = ReviewStatus.NEEDS_REVIEW.value
+
+    def _build_proposal_payload(
+        self,
+        doc_unit: DBDocumentUnit,
+        decision: Any,
+        candidates: list[Any] | None = None,
+    ) -> dict[str, Any] | None:
+        """Build structured review payload for a topic proposal."""
+        # Determine axes from archive identity
+        identity = doc_unit.archive_identity_json or {}
+        matched_axes: list[str] = []
+        missing_axes: list[str] = []
+
+        for axis in ["document_family", "context_key", "primary_party_key", "subject_key", "period_key"]:
+            if identity.get(axis):
+                matched_axes.append(axis)
+            else:
+                missing_axes.append(axis)
+
+        # Build candidate info
+        candidate_info: list[dict[str, Any]] = []
+        if candidates:
+            for c in candidates:
+                entry: dict[str, Any] = {
+                    "topic_id": getattr(c, "topic_id", None) or (c.get("topic_id") if isinstance(c, dict) else None),
+                    "title": getattr(c, "title", None) or (c.get("title") if isinstance(c, dict) else None),
+                    "score": getattr(c, "score", None) or (c.get("score") if isinstance(c, dict) else None),
+                }
+                candidate_info.append(entry)
+
+        # Extract confidence factors from rationale
+        rationale = decision.rationale or ""
+        confidence_factors: list[str] = []
+        for keyword in [
+            "stesso fornitore", "stesso condominio", "stesso indirizzo",
+            "stessa persona", "stesso periodo", "stesso contesto",
+            "same vendor", "same condominium", "same address",
+            "same person", "same period", "same context",
+            "entità corrispondente", "entita corrispondente",
+        ]:
+            if keyword.lower() in rationale.lower():
+                confidence_factors.append(keyword)
+
+        payload: dict[str, Any] = {
+            "recommended_action": (decision.proposal_action or "create_topic").lower(),
+            "matched_axes": matched_axes,
+            "conflicting_axes": [],
+            "missing_axes": missing_axes,
+            "candidate_topics_considered": candidate_info[:5],
+            "confidence_factors": confidence_factors[:5],
+        }
+        return payload
 
     def _infer_topic_kind(self, topic_kind: str | None, topic_class: str) -> str:
         if topic_kind:

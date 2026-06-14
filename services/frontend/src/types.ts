@@ -128,6 +128,7 @@ export interface KnowledgeTopicProposal {
   source_end_page: number | null;
   confidence: number | null;
   rationale: string | null;
+  review_payload_json: Record<string, unknown> | null;
   created_at: string;
   reviewed_at: string | null;
 }

@@ -147,6 +147,44 @@ const ProposalCard = memo(function ProposalCard({
               <p className="text-sm text-slate-300">{proposal.rationale}</p>
             </div>
           )}
+
+          {proposal.review_payload_json && (
+            <div className="mt-3 space-y-2">
+              <p className="text-xs text-slate-400 uppercase tracking-wide">Review payload</p>
+              <div className="flex flex-wrap gap-2">
+                {proposal.review_payload_json.recommended_action && (
+                  <span className="px-2 py-0.5 rounded-full bg-amber-400/10 text-amber-200 text-xs border border-amber-300/20">
+                    {String(proposal.review_payload_json.recommended_action)}
+                  </span>
+                )}
+                {Array.isArray(proposal.review_payload_json.matched_axes) && (
+                  (proposal.review_payload_json.matched_axes as string[]).map((axis: string) => (
+                    <span key={axis} className="px-2 py-0.5 rounded-full bg-emerald-400/10 text-emerald-200 text-xs border border-emerald-300/20">
+                      {axis}
+                    </span>
+                  ))
+                )}
+                {Array.isArray(proposal.review_payload_json.missing_axes) && (
+                  (proposal.review_payload_json.missing_axes as string[]).map((axis: string) => (
+                    <span key={axis} className="px-2 py-0.5 rounded-full bg-slate-500/20 text-slate-400 text-xs border border-slate-400/20">
+                      missing: {axis}
+                    </span>
+                  ))
+                )}
+              </div>
+              {Array.isArray(proposal.review_payload_json.confidence_factors) &&
+               (proposal.review_payload_json.confidence_factors as string[]).length > 0 && (
+                <div className="p-2 bg-white/5 rounded-lg">
+                  <p className="text-xs text-slate-400 uppercase tracking-wide mb-1">Confidence factors</p>
+                  <ul className="text-xs text-slate-300 space-y-0.5">
+                    {(proposal.review_payload_json.confidence_factors as string[]).map((factor: string, idx: number) => (
+                      <li key={idx}>• {factor}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
