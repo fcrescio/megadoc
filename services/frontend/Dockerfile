@@ -21,7 +21,9 @@ RUN if [ "$REACT_PROFILING" = "true" ]; then \
       cp node_modules/react-dom/cjs/react-dom.profiling.min.js node_modules/react-dom/cjs/react-dom.development.js; \
     fi
 
-RUN npm run build
+RUN rm -rf node_modules/.vite .vite dist && \
+    npm run build && \
+    printf '{"git_hash":"%s","react_profiling":"%s"}\n' "$VITE_GIT_HASH" "$REACT_PROFILING" > dist/build-info.json
 
 FROM nginx:alpine
 
