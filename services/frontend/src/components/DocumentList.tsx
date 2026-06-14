@@ -1,6 +1,16 @@
 import { memo } from 'react';
 import { useDocuments } from '../hooks/useDocuments';
 import type { Document } from '../types';
+import { Virtuoso } from 'react-virtuoso';
+
+interface Props {
+  onSelectDocument: (id: string) => void;
+}
+
+import { memo } from 'react';
+import { useDocuments } from '../hooks/useDocuments';
+import type { Document } from '../types';
+import { Virtuoso } from 'react-virtuoso';
 
 interface Props {
   onSelectDocument: (id: string) => void;
@@ -9,9 +19,8 @@ interface Props {
 const DocumentRow = memo(function DocumentRow({ doc, onSelect }: { doc: Document; onSelect: (id: string) => void }) {
   return (
     <button
-      key={doc.id}
       onClick={() => onSelect(doc.id)}
-      className="w-full p-4 hover:bg-white/5 text-left transition-colors will-change-auto"
+      className="w-full p-4 hover:bg-white/5 text-left transition-colors will-change-auto border-b border-white/10"
     >
       <div className="flex items-center justify-between">
         <div>
@@ -63,10 +72,15 @@ function DocumentList({ onSelectDocument }: Props) {
       {documents && documents.length === 0 ? (
         <p className="text-slate-400">Nessun documento trovato.</p>
       ) : (
-        <div className="bg-white/5 border border-white/10 rounded-[24px] shadow-[0_18px_60px_rgba(2,6,23,0.35)] divide-y divide-white/10 overflow-hidden backdrop-blur-md">
-          {documents?.map((doc: Document) => (
-            <DocumentRow key={doc.id} doc={doc} onSelect={onSelectDocument} />
-          ))}
+        <div className="bg-white/5 border border-white/10 rounded-[24px] shadow-[0_18px_60px_rgba(2,6,23,0.35)] overflow-hidden backdrop-blur-md">
+          <Virtuoso
+            style={{ height: 'min(70vh, 600px)' }}
+            totalCount={documents?.length ?? 0}
+            itemContent={(index) => (
+              <DocumentRow doc={documents![index]} onSelect={onSelectDocument} />
+            )}
+            increaseViewportBy={{ top: 200, bottom: 200 }}
+          />
         </div>
       )}
     </div>

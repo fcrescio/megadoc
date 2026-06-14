@@ -207,6 +207,22 @@ After a rebuild or restart, verify the deployed process, not just the build outp
 - If the UI still shows an old hash, suspect browser cache, stale container image, or a build arg fallback before debugging the application logic.
 - Compose may rebuild dependent images even when targeting one service. Watch the command until it exits and check dependent healthchecks before declaring the UI ready.
 
+## Build Debugging — Avoiding Loops
+
+When a frontend build produces unexpected output (wrong hash, stale bundles), do not iterate on the same hypothesis more than twice. After two failed attempts, stop and change strategy.
+
+Common failure modes and their remedies:
+
+1. **Vite internal cache (`node_modules/.vite/`)** persists across docker builds even with `--no-cache`. If bundle output does not change after a code or env change, clear vite cache explicitly: `rm -rf node_modules/.vite .vite dist` before `npm run build`.
+
+2. **`docker compose build --build-arg` does not forward args the same way as `docker build --build-arg`.** Prefer exporting env vars in the shell before `docker compose build`; the compose file maps them via `${VAR:-default}` syntax. Alternatively, use `docker build` directly and tag the image.
+
+3. **Verify the output, not the build command.** Do not grep bundle JS for strings. Use a dedicated verification mechanism: `dist/build-info.json` (served at `/build-info.json`) exposes the actual build-time values of `VITE_GIT_HASH` and `REACT_PROFILING`. Fetch it with `curl` or `wget` instead of inspecting bundles.
+
+4. **If the same build command produces different results in different contexts** (e.g., heredoc Dockerfile works, file-based Dockerfile does not), compare the full build context and layer cache state. Run `docker builder prune -a` if cache invalidation is suspect.
+
+5. **When stuck on a build issue for more than 3 tool calls**, write a report to a file and present it to the user. Do not continue retrying the same approach.
+
 ## Git Discipline
 
 Use commits as rollback points.
