@@ -119,7 +119,7 @@ function AccountingReconciliationModal({ comparison, onClose }: Props) {
     } else if (!selectedId || !allSources.some((source) => source.fact_id === selectedId)) {
       setSelectedId(allSources[0].fact_id);
     }
-  }, [allSources, selectedId]);
+  }, [allSources]);
 
   useEffect(() => {
     if (!selected) return;

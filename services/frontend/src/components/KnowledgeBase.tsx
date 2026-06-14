@@ -194,7 +194,7 @@ function KnowledgeBase({ onOpenDocument }: Props) {
     if (!selectedContextId || !contexts.some((context) => context.id === selectedContextId)) {
       setSelectedContextId(contexts[0].id);
     }
-  }, [contexts, selectedContextId]);
+  }, [contexts]);
 
   useEffect(() => {
     if (selectedAccountKey && !(accountingSubjects.data ?? []).some((subject) => subject.account_key === selectedAccountKey)) {
@@ -210,7 +210,7 @@ function KnowledgeBase({ onOpenDocument }: Props) {
     if (!selectedNodeId || !nodes.some((node) => node.id === selectedNodeId)) {
       setSelectedNodeId(nodes[0].id);
     }
-  }, [nodes, selectedNodeId]);
+  }, [nodes]);
 
   useEffect(() => {
     if (!topicsPanelActive) return;
@@ -221,7 +221,7 @@ function KnowledgeBase({ onOpenDocument }: Props) {
     if (!selectedTopicId || !visibleTopics.some((topic) => topic.id === selectedTopicId)) {
       setSelectedTopicId(visibleTopics[0].id);
     }
-  }, [selectedTopicId, topicsPanelActive, visibleTopics]);
+  }, [topicsPanelActive, visibleTopics]);
 
   useEffect(() => {
     if (!entities.length) {
@@ -237,7 +237,7 @@ function KnowledgeBase({ onOpenDocument }: Props) {
       setSelectedEntityKey(entities[0].entity_key);
       setSelectedEntityType(entities[0].entity_type);
     }
-  }, [entities, selectedEntityKey, selectedEntityType]);
+  }, [entities]);
 
   useEffect(() => {
     if (!entityDetail.data) return;

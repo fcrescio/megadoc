@@ -175,7 +175,7 @@ function AccountingSpecialistCard({ result }: { result: Record<string, unknown> 
     if (!sections.some((section) => section.section_id === activeSectionId)) {
       setActiveSectionId(typeof sections[0].section_id === 'string' ? sections[0].section_id : null);
     }
-  }, [activeSectionId, sections]);
+  }, [sections]);
   const visibleTables = activeSectionId
     ? tables.filter((table) => table.section_id === activeSectionId)
     : tables;
