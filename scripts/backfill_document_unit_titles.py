@@ -88,6 +88,7 @@ def main():
         logger.info("Found %d document units without titles", len(units))
 
         updated_count = 0
+        applied_count = 0
         skipped_count = 0
 
         for doc_unit in units:
@@ -98,6 +99,7 @@ def main():
                 skipped_count += 1
                 continue
 
+            updated_count += 1
             print(
                 f"  {doc_unit.id}: "
                 f"'{old_title[:60]}' -> '{new_title[:80]}'"
@@ -105,12 +107,12 @@ def main():
 
             if args.apply:
                 doc_unit.title = new_title[:512]
-                updated_count += 1
+                applied_count += 1
 
         if args.apply:
             session.flush()
             session.commit()
-            logger.info("Updated %d titles, skipped %d", updated_count, skipped_count)
+            logger.info("Applied %d titles, skipped %d", applied_count, skipped_count)
         else:
             logger.info(
                 "Dry-run: %d would be updated, %d skipped. Use --apply to persist.",
