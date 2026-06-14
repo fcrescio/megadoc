@@ -1,9 +1,37 @@
+import { memo } from 'react';
 import { useDocuments } from '../hooks/useDocuments';
 import type { Document } from '../types';
 
 interface Props {
   onSelectDocument: (id: string) => void;
 }
+
+const DocumentRow = memo(function DocumentRow({ doc, onSelect }: { doc: Document; onSelect: (id: string) => void }) {
+  return (
+    <button
+      key={doc.id}
+      onClick={() => onSelect(doc.id)}
+      className="w-full p-4 hover:bg-white/5 text-left transition-colors will-change-auto"
+    >
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="font-medium text-slate-100">{doc.original_filename}</p>
+          {doc.external_id && (
+            <p className="text-sm text-slate-400">ID: {doc.external_id}</p>
+          )}
+        </div>
+        <div className="text-right">
+          <p className="text-sm text-slate-400">
+            {new Date(doc.created_at).toLocaleDateString()}
+          </p>
+          <p className="text-xs text-slate-500">
+            {(doc.size_bytes / 1024).toFixed(1)} KB
+          </p>
+        </div>
+      </div>
+    </button>
+  );
+});
 
 function DocumentList({ onSelectDocument }: Props) {
   const { data: documents, isLoading, error } = useDocuments();
@@ -37,28 +65,7 @@ function DocumentList({ onSelectDocument }: Props) {
       ) : (
         <div className="bg-white/5 border border-white/10 rounded-[24px] shadow-[0_18px_60px_rgba(2,6,23,0.35)] divide-y divide-white/10 overflow-hidden backdrop-blur-md">
           {documents?.map((doc: Document) => (
-            <button
-              key={doc.id}
-              onClick={() => onSelectDocument(doc.id)}
-              className="w-full p-4 hover:bg-white/5 text-left transition-colors"
-            >
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-medium text-slate-100">{doc.original_filename}</p>
-                  {doc.external_id && (
-                    <p className="text-sm text-slate-400">ID: {doc.external_id}</p>
-                  )}
-                </div>
-                <div className="text-right">
-                  <p className="text-sm text-slate-400">
-                    {new Date(doc.created_at).toLocaleDateString()}
-                  </p>
-                  <p className="text-xs text-slate-500">
-                    {(doc.size_bytes / 1024).toFixed(1)} KB
-                  </p>
-                </div>
-              </div>
-            </button>
+            <DocumentRow key={doc.id} doc={doc} onSelect={onSelectDocument} />
           ))}
         </div>
       )}

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import {
   useApproveTopicProposal,
   useKnowledgeTopics,
@@ -32,7 +32,7 @@ function slugify(value: string) {
     .slice(0, 120);
 }
 
-function ProposalCard({
+const ProposalCard = memo(function ProposalCard({
   proposal,
   topicOptions,
   onApprove,
@@ -325,7 +325,7 @@ function ProposalCard({
       )}
     </div>
   );
-}
+});
 
 function ProposalList({ onClose, initialProposals }: Props) {
   const [includeConsolidated, setIncludeConsolidated] = useState(false);
