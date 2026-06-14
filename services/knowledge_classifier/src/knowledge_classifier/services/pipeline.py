@@ -45,6 +45,7 @@ from knowledge_classifier.services.pipeline_strategies import (
 )
 from knowledge_classifier.services.routing import PipelineRouterService, PipelineRoutingDecision
 from knowledge_classifier.services.segmentation import SegmentationService
+from knowledge_classifier.services.title_generation import derive_document_unit_title
 from knowledge_classifier.services.topic_assignment import TopicAssignmentService
 from knowledge_classifier.services.topic_retrieval import TopicRetrievalService
 
@@ -184,6 +185,7 @@ class KnowledgePipelineService:
         if self._has_active_specialist_jobs(document_units):
             raise RuntimeError("Specialist jobs are still active for this scan unit.")
 
+        self._generate_titles(document_units)
         self._reset_topic_outputs(document_units)
         entity_results = {
             doc_unit.id: SimpleNamespace(entities=list(doc_unit.entities))
@@ -350,6 +352,26 @@ class KnowledgePipelineService:
             )
             .order_by(DBDocumentUnit.ordinal.asc())
         ).scalars().all()
+
+    def _generate_titles(self, document_units: list[DBDocumentUnit]) -> None:
+        """Generate deterministic titles for document units that have none."""
+        for doc_unit in document_units:
+            if doc_unit.title and doc_unit.title.strip():
+                continue
+            document_type_code = self._get_document_type_code(doc_unit)
+            title = derive_document_unit_title(
+                document_type_code=document_type_code,
+                summary=doc_unit.extracted_summary,
+                entities=list(doc_unit.entities),
+                specialist_results=list(doc_unit.specialist_results),
+                page_range=(doc_unit.start_page, doc_unit.end_page),
+            )
+            doc_unit.title = title[:512]
+            logger.info(
+                "Generated title for document_unit %s: %s",
+                doc_unit.id,
+                title,
+            )
 
     def _has_active_specialist_jobs(self, document_units: list[DBDocumentUnit]) -> bool:
         active_statuses = {"queued", "pending", "processing"}
