@@ -38,6 +38,8 @@ const ProposalCard = memo(function ProposalCard({
   onApprove,
   onReject,
   busy,
+  expanded,
+  onToggleExpanded,
 }: {
   proposal: KnowledgeTopicProposal;
   topicOptions: KnowledgeTopicSummary[];
@@ -49,6 +51,8 @@ const ProposalCard = memo(function ProposalCard({
   }) => void;
   onReject: (proposalId: string) => void;
   busy: boolean;
+  expanded: boolean;
+  onToggleExpanded: () => void;
 }) {
   const [mode, setMode] = useState<'merge_into_existing' | 'approve_new_topic' | 'add_secondary_topic'>(
     proposal.matched_existing_topic_id ? 'merge_into_existing' : 'approve_new_topic',
@@ -146,7 +150,21 @@ const ProposalCard = memo(function ProposalCard({
         </div>
       </div>
 
-      {proposal.proposal_status === 'proposed' ? (
+      {proposal.proposal_status === 'proposed' && !expanded ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2">
+          <p className="text-sm text-slate-300">
+            {proposal.matched_existing_topic_id
+              ? 'Ha un possibile topic esistente: apri la review per confermare o cambiare target.'
+              : 'Apri la review per creare un topic o collegarla a un topic esistente.'}
+          </p>
+          <button
+            onClick={onToggleExpanded}
+            className="rounded-full border border-cyan-300/25 bg-cyan-400/15 px-4 py-2 text-sm font-medium text-cyan-100 hover:bg-cyan-400/25"
+          >
+            Rivedi proposta
+          </button>
+        </div>
+      ) : proposal.proposal_status === 'proposed' ? (
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_15rem]">
           <div className="space-y-3">
             <div className="flex flex-wrap gap-2">
@@ -287,6 +305,12 @@ const ProposalCard = memo(function ProposalCard({
 
           <div className="flex flex-col gap-2">
             <button
+              onClick={onToggleExpanded}
+              className="px-3 py-2 rounded-full bg-white/5 text-slate-200 text-sm font-medium border border-white/10 hover:bg-white/10"
+            >
+              Chiudi dettaglio
+            </button>
+            <button
               onClick={handleApprove}
               disabled={busy || !targetTopicSelectionIsValid}
               className="px-3 py-2 rounded-full bg-emerald-400/15 text-emerald-200 text-sm font-medium border border-emerald-300/25 hover:bg-emerald-400/25 disabled:opacity-50"
@@ -329,6 +353,7 @@ const ProposalCard = memo(function ProposalCard({
 
 function ProposalList({ onClose, initialProposals }: Props) {
   const [includeConsolidated, setIncludeConsolidated] = useState(false);
+  const [expandedProposalId, setExpandedProposalId] = useState<string | null>(null);
   const shouldFetchProposals = includeConsolidated || !initialProposals;
   const proposalsQuery = useTopicProposals(includeConsolidated, shouldFetchProposals);
   const proposals = !includeConsolidated && initialProposals ? initialProposals : proposalsQuery.data;
@@ -348,6 +373,10 @@ function ProposalList({ onClose, initialProposals }: Props) {
       return left.title.localeCompare(right.title, 'it');
     });
   }, [topics]);
+
+  const toggleExpandedProposal = (proposalId: string) => {
+    setExpandedProposalId((current) => (current === proposalId ? null : proposalId));
+  };
 
   if (isLoading) {
     return (
@@ -414,6 +443,8 @@ function ProposalList({ onClose, initialProposals }: Props) {
               onApprove={(proposalId, payload) => approve.mutate({ proposalId, payload })}
               onReject={(proposalId) => reject.mutate(proposalId)}
               busy={approve.isPending || reject.isPending}
+              expanded={expandedProposalId === proposal.id}
+              onToggleExpanded={() => toggleExpandedProposal(proposal.id)}
             />
           ))}
         </div>
