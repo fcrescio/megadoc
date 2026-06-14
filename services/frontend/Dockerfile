@@ -5,6 +5,8 @@ WORKDIR /app
 RUN apk add --no-cache git
 ARG VITE_GIT_HASH=unknown
 ENV VITE_GIT_HASH=$VITE_GIT_HASH
+ARG REACT_PROFILING=false
+ENV REACT_PROFILING=$REACT_PROFILING
 
 COPY package*.json ./
 RUN npm install
