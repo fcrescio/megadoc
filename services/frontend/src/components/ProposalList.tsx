@@ -6,6 +6,7 @@ import {
   useTopicProposals,
 } from '../hooks/useDocuments';
 import type { KnowledgeTopicProposal, KnowledgeTopicSummary, TopicCreatePayload } from '../types';
+import { Virtuoso } from 'react-virtuoso';
 
 interface Props {
   onClose: () => void;
@@ -405,17 +406,26 @@ function ProposalList({ onClose, initialProposals }: Props) {
           </p>
         </div>
       ) : (
-        <div className="space-y-3">
-          {proposals?.map((proposal) => (
-            <ProposalCard
-              key={proposal.id}
-              proposal={proposal}
-              topicOptions={topicOptions}
-              onApprove={(proposalId, payload) => approve.mutate({ proposalId, payload })}
-              onReject={(proposalId) => reject.mutate(proposalId)}
-              busy={approve.isPending || reject.isPending}
-            />
-          ))}
+        <div className="bg-white/5 border border-white/10 rounded-[24px] overflow-hidden backdrop-blur-md">
+          <Virtuoso
+            style={{ height: 'min(70vh, 600px)' }}
+            totalCount={proposals?.length ?? 0}
+            itemContent={(index) => {
+              const proposal = proposals![index];
+              return (
+                <div className="p-4 border-b border-white/10 last:border-b-0">
+                  <ProposalCard
+                    proposal={proposal}
+                    topicOptions={topicOptions}
+                    onApprove={(proposalId, payload) => approve.mutate({ proposalId, payload })}
+                    onReject={(proposalId) => reject.mutate(proposalId)}
+                    busy={approve.isPending || reject.isPending}
+                  />
+                </div>
+              );
+            }}
+            increaseViewportBy={{ top: 200, bottom: 200 }}
+          />
         </div>
       )}
     </div>
