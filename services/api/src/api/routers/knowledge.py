@@ -15,6 +15,7 @@ from common.application.knowledge import (
     ensure_scan_unit_for_ocr_result,
     has_active_ingestion_jobs,
     mark_knowledge_job_pending_dispatch,
+    upsert_document_unit_topic_assignment,
 )
 from common.application.graph import graph_stats, rebuild_knowledge_graph
 from common.application.contexts import rebuild_knowledge_contexts
@@ -660,28 +661,14 @@ def _assign_topic_to_document_unit(
     confidence: float | None = None,
     rationale: str | None = None,
 ) -> DocumentUnitTopicAssignment:
-    existing = next(
-        (
-            assignment
-            for assignment in doc_unit.topic_assignments
-            if assignment.topic_id == topic.id and assignment.assignment_role == assignment_role
-        ),
-        None,
-    )
-    if existing is not None:
-        existing.confidence = confidence if confidence is not None else existing.confidence
-        existing.rationale = rationale or existing.rationale
-        return existing
-    assignment = DocumentUnitTopicAssignment(
-        document_unit_id=doc_unit.id,
-        topic_id=topic.id,
+    return upsert_document_unit_topic_assignment(
+        session=db,
+        doc_unit=doc_unit,
+        topic=topic,
         assignment_role=assignment_role,
         confidence=confidence,
         rationale=rationale,
     )
-    db.add(assignment)
-    doc_unit.topic_assignments.append(assignment)
-    return assignment
 
 
 @router.get("/documents/{document_id}")

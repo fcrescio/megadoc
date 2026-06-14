@@ -6,7 +6,15 @@ from sqlalchemy import func
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from common.db.models import IngestionJob, KnowledgeJob, OCRResult, ScanUnit
+from common.db.models import (
+    DocumentUnit,
+    DocumentUnitTopicAssignment,
+    IngestionJob,
+    KnowledgeJob,
+    OCRResult,
+    ScanUnit,
+    Topic,
+)
 
 
 def ensure_scan_unit_for_ocr_result(
@@ -116,3 +124,43 @@ def parse_uuid(value: str | uuid.UUID) -> uuid.UUID:
     if isinstance(value, uuid.UUID):
         return value
     return uuid.UUID(value)
+
+
+def upsert_document_unit_topic_assignment(
+    session: Session,
+    doc_unit: DocumentUnit,
+    topic: Topic,
+    assignment_role: str,
+    confidence: float | None = None,
+    rationale: str | None = None,
+) -> DocumentUnitTopicAssignment:
+    """Create or update a topic assignment for a document unit.
+
+    Matches on (document_unit_id, topic_id, assignment_role).
+    If an assignment already exists, updates confidence and rationale.
+    Otherwise creates a new assignment.
+    """
+    existing = session.execute(
+        select(DocumentUnitTopicAssignment).where(
+            DocumentUnitTopicAssignment.document_unit_id == doc_unit.id,
+            DocumentUnitTopicAssignment.topic_id == topic.id,
+            DocumentUnitTopicAssignment.assignment_role == assignment_role,
+        )
+    ).scalar_one_or_none()
+
+    if existing is not None:
+        if confidence is not None:
+            existing.confidence = confidence
+        if rationale is not None:
+            existing.rationale = rationale
+        return existing
+
+    assignment = DocumentUnitTopicAssignment(
+        document_unit_id=doc_unit.id,
+        topic_id=topic.id,
+        assignment_role=assignment_role,
+        confidence=confidence,
+        rationale=rationale,
+    )
+    session.add(assignment)
+    return assignment

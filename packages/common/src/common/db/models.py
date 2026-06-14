@@ -704,6 +704,12 @@ class KnowledgeAssertion(Base):
 
 class DocumentUnitTopicAssignment(Base):
     __tablename__ = "document_unit_topic_assignments"
+    __table_args__ = (
+        UniqueConstraint(
+            "document_unit_id", "topic_id", "assignment_role",
+            name="uq_document_unit_topic_assignments_unit_topic_role",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     document_unit_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("document_units.id", ondelete="CASCADE"), nullable=False)

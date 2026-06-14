@@ -8,6 +8,7 @@ def ensure_knowledge_schema(engine) -> None:
         "ALTER TABLE document_unit_topic_assignments ALTER COLUMN assignment_role TYPE VARCHAR(32)",
         "UPDATE document_unit_topic_assignments SET assignment_role = 'subject' WHERE assignment_role = 'primary'",
         "UPDATE document_unit_topic_assignments SET assignment_role = 'document_family' WHERE assignment_role = 'secondary'",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_document_unit_topic_assignments_unit_topic_role ON document_unit_topic_assignments(document_unit_id, topic_id, assignment_role)",
         """UPDATE topics
         SET topic_kind = CASE topic_class
             WHEN 'financial_period' THEN 'family'

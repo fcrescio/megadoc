@@ -10,6 +10,7 @@ from typing import Any
 from sqlalchemy import delete, insert, select
 from sqlalchemy.orm import Session, selectinload
 
+from common.application.knowledge import upsert_document_unit_topic_assignment
 from common.application.graph import project_document_unit
 from common.application.contexts import rebuild_knowledge_contexts
 from common.db.models import (
@@ -636,7 +637,7 @@ class KnowledgePipelineService:
         decision: Any,
         candidates: list[TopicCandidate] | None = None,
     ):
-        """Create topic assignments from decision."""
+        """Create or update topic assignments from decision."""
         for topic_reference, role in zip(decision.topic_ids, decision.assignment_roles):
             topic_id = self._resolve_topic_reference(topic_reference, candidates or [])
             if topic_id is None:
@@ -647,14 +648,18 @@ class KnowledgePipelineService:
                 doc_unit.review_status = ReviewStatus.NEEDS_REVIEW.value
                 continue
             normalized_role = self._normalize_assignment_role(role)
-            assignment = DBDocumentUnitTopicAssignment(
-                document_unit_id=doc_unit.id,
-                topic_id=topic_id,
+            topic = self.db.get(DBTopic, topic_id)
+            if topic is None:
+                logger.warning("Topic %s not found, skipping assignment", topic_id)
+                continue
+            upsert_document_unit_topic_assignment(
+                session=self.db,
+                doc_unit=doc_unit,
+                topic=topic,
                 assignment_role=normalized_role,
                 confidence=decision.confidence,
                 rationale=decision.rationale,
             )
-            self.db.add(assignment)
 
     def _resolve_topic_reference(
         self,
@@ -729,14 +734,14 @@ class KnowledgePipelineService:
             rationale=decision.rationale,
         )
         self.db.add(proposal)
-        assignment = DBDocumentUnitTopicAssignment(
-            document_unit_id=doc_unit.id,
-            topic_id=provisional_topic.id,
+        upsert_document_unit_topic_assignment(
+            session=self.db,
+            doc_unit=doc_unit,
+            topic=provisional_topic,
             assignment_role=self._default_assignment_role_for_topic_kind(proposed_topic_kind),
             confidence=decision.confidence,
             rationale=decision.rationale,
         )
-        self.db.add(assignment)
         doc_unit.review_status = ReviewStatus.NEEDS_REVIEW.value
 
     def _infer_topic_kind(self, topic_kind: str | None, topic_class: str) -> str:
