@@ -638,6 +638,22 @@ export interface GraphConsolidationReviewResult {
   affected_assignments: number;
 }
 
+export interface TopicMergePayload {
+  target_topic_id: string;
+  acted_by?: string | null;
+  note?: string | null;
+}
+
+export interface TopicMergeResult {
+  status: string;
+  source_topic_id: string;
+  target_topic_id: string;
+  source_topic_title: string;
+  target_topic_title: string;
+  affected_assignments: number;
+  aliases_created: number;
+}
+
 export interface TopicCreatePayload {
   slug: string;
   title: string;

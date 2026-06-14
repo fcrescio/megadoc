@@ -704,3 +704,19 @@ class GraphConsolidationReviewResponse(BaseModel):
     source_topic_id: str
     target_topic_id: str
     affected_assignments: int = 0
+
+
+class TopicMergeRequest(BaseModel):
+    target_topic_id: str
+    acted_by: Optional[str] = None
+    note: Optional[str] = None
+
+
+class TopicMergeResponse(BaseModel):
+    status: str
+    source_topic_id: str
+    target_topic_id: str
+    source_topic_title: str
+    target_topic_title: str
+    affected_assignments: int = 0
+    aliases_created: int = 0

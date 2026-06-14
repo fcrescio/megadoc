@@ -34,6 +34,8 @@ import type {
   GraphConsolidationSuggestions,
   GraphConsolidationReviewPayload,
   GraphConsolidationReviewResult,
+  TopicMergePayload,
+  TopicMergeResult,
   KnowledgeDocumentUnit,
   KnowledgeTopicProposal,
   TopicAssignmentUpsertPayload,
@@ -371,6 +373,18 @@ export async function reviewGraphConsolidationSuggestion(
     body: JSON.stringify(payload),
   });
   return handleResponse<GraphConsolidationReviewResult>(response);
+}
+
+export async function mergeTopic(
+  sourceId: string,
+  payload: TopicMergePayload,
+): Promise<TopicMergeResult> {
+  const response = await fetch(`${API_BASE}/knowledge/topics/${sourceId}/merge`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return handleResponse<TopicMergeResult>(response);
 }
 
 export function getDocumentDownloadUrl(
