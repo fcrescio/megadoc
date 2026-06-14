@@ -2390,6 +2390,10 @@ def merge_topic(
     db.add(review)
     db.commit()
 
+    # Rebuild derived projections so graph/contexts reflect the merge
+    rebuild_knowledge_graph(db)
+    rebuild_knowledge_contexts(db)
+
     return TopicMergeResponse(
         status="ok",
         source_topic_id=str(source_topic.id),
