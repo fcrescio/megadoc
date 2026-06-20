@@ -8,19 +8,42 @@ interface Props {
 }
 
 const DocumentRow = memo(function DocumentRow({ doc, onSelect }: { doc: Document; onSelect: (id: string) => void }) {
+  const tags: { label: string; color: string }[] = [];
+  if (doc.rotation_applied) {
+    tags.push({ label: 'Ruotato', color: 'bg-amber-500/20 text-amber-300 border-amber-600/30' });
+  }
+  if (doc.page_order_reversed) {
+    tags.push({ label: 'Ordine invertito', color: 'bg-orange-500/20 text-orange-300 border-orange-600/30' });
+  }
+  if (doc.document_unit_count > 0) {
+    tags.push({ label: `${doc.document_unit_count} doc unit`, color: 'bg-sky-500/20 text-sky-300 border-sky-600/30' });
+  }
+
   return (
     <button
       onClick={() => onSelect(doc.id)}
       className="w-full p-4 hover:bg-slate-700 text-left border-b border-slate-700"
     >
       <div className="flex items-center justify-between">
-        <div>
-          <p className="font-medium text-slate-100">{doc.original_filename}</p>
+        <div className="min-w-0">
+          <p className="font-medium text-slate-100 truncate">{doc.original_filename}</p>
           {doc.external_id && (
             <p className="text-sm text-slate-400">ID: {doc.external_id}</p>
           )}
+          {tags.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mt-1.5">
+              {tags.map((tag) => (
+                <span
+                  key={tag.label}
+                  className={`inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full border ${tag.color}`}
+                >
+                  {tag.label}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
-        <div className="text-right">
+        <div className="text-right shrink-0 ml-4">
           <p className="text-sm text-slate-400">
             {new Date(doc.created_at).toLocaleDateString()}
           </p>

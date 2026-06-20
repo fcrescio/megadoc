@@ -684,6 +684,64 @@ function DocumentDetail({ documentId, onBack, initialTab = 'info' }: Props) {
                   <p>{selectedVersion ? `Versione ${selectedVersion.version_number}` : 'Ultima versione'}</p>
                 </div>
               </div>
+
+              {/* Preflight / orientation info */}
+              {knowledge && knowledge.scan_units.length > 0 && (
+                <div className="border-t border-slate-200 pt-4">
+                  <h3 className="text-sm font-semibold text-gray-700 mb-2">Preflight / Orientamento</h3>
+                  <div className="space-y-2">
+                    {knowledge.scan_units.map((su) => (
+                      <div key={su.id} className="text-sm bg-slate-50 rounded-lg p-3 border border-slate-200">
+                        <div className="flex items-center gap-2 mb-1.5">
+                          <span className="font-medium text-slate-700">Scan unit</span>
+                          <span className="text-xs text-slate-400">({su.page_count} pagine)</span>
+                          {su.preflight && (
+                            <div className="flex flex-wrap gap-1 ml-auto">
+                              {su.preflight.rotation_applied && (
+                                <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full bg-amber-100 text-amber-700 border border-amber-200">
+                                  Ruotato
+                                </span>
+                              )}
+                              {su.preflight.page_order_reversed && (
+                                <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full bg-orange-100 text-orange-700 border border-orange-200">
+                                  Ordine invertito
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                        {su.preflight && (
+                          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-600">
+                            <div>Rotazione applicata: <span className="font-mono">{su.preflight.rotation_applied ?? 'n/d'}</span></div>
+                            <div>Ordine pagine invertito: <span className="font-mono">{su.preflight.page_order_reversed ? 'Si' : 'No'}</span></div>
+                            <div>Backend orientamento: <span className="font-mono">{su.preflight.orientation_backend ?? 'n/d'}</span></div>
+                            <div>Orientamento applicato: <span className="font-mono">{su.preflight.orientation_applied ? 'Si' : 'No'}</span></div>
+                            {su.preflight.dominant_declared_rotation != null && (
+                              <div>Rotazione dichiarata: <span className="font-mono">{su.preflight.dominant_declared_rotation}°</span></div>
+                            )}
+                            {su.preflight.flags.length > 0 && (
+                              <div className="col-span-2">
+                                <span className="text-slate-500">Flags:</span>{' '}
+                                <span className="font-mono">{su.preflight.flags.join(', ') || 'nessuno'}</span>
+                              </div>
+                            )}
+                            {su.preflight.warnings.length > 0 && (
+                              <div className="col-span-2">
+                                <span className="text-slate-500">Warning:</span>{' '}
+                                <span className="font-mono text-amber-600">{su.preflight.warnings.join(', ') || 'nessuno'}</span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        {!su.preflight && (
+                          <p className="text-xs text-slate-400 italic">Nessun dato preflight disponibile</p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <button
                 onClick={() => setActiveTab('pdf')}
                 className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"

@@ -598,7 +598,11 @@ def _serialize_knowledge_assertion(assertion: KnowledgeAssertion) -> KnowledgeAs
     )
 
 
-def _serialize_scan_unit(scan_unit: ScanUnit, include_units: bool = False) -> dict[str, Any]:
+def _serialize_scan_unit(
+    scan_unit: ScanUnit,
+    include_units: bool = False,
+    db: Session | None = None,
+) -> dict[str, Any]:
     payload = {
         "id": str(scan_unit.id),
         "source_document_id": str(scan_unit.source_document_id),
@@ -611,6 +615,7 @@ def _serialize_scan_unit(scan_unit: ScanUnit, include_units: bool = False) -> di
         "segmentation_confidence": scan_unit.segmentation_confidence,
         "classification_confidence": scan_unit.classification_confidence,
         "assignment_confidence": scan_unit.assignment_confidence,
+        "preflight": _load_preflight(scan_unit, db),
         "created_at": scan_unit.created_at,
         "updated_at": scan_unit.updated_at,
     }
@@ -620,6 +625,30 @@ def _serialize_scan_unit(scan_unit: ScanUnit, include_units: bool = False) -> di
             for doc_unit in sorted(scan_unit.document_units, key=lambda unit: unit.ordinal)
         ]
     return payload
+
+
+def _load_preflight(scan_unit: ScanUnit, db: Session | None = None) -> dict | None:
+    """Load preflight/orientation data from the OCR result for a scan unit."""
+    if db is None:
+        return None
+    ocr_result = db.get(OCRResult, scan_unit.source_ocr_result_id)
+    if ocr_result is None or ocr_result.confidence_summary is None:
+        return None
+    summary = ocr_result.confidence_summary
+
+    preflight = summary.get("preflight") if isinstance(summary.get("preflight"), dict) else {}
+    orientation = summary.get("orientation_preprocess") if isinstance(summary.get("orientation_preprocess"), dict) else {}
+
+    return {
+        "rotation_applied": orientation.get("rotation_applied"),
+        "rotation_confidence": None,
+        "page_order_reversed": orientation.get("page_order_reversed", False),
+        "orientation_backend": orientation.get("backend"),
+        "orientation_applied": orientation.get("applied", False),
+        "dominant_declared_rotation": preflight.get("dominant_declared_rotation"),
+        "flags": preflight.get("flags", []),
+        "warnings": preflight.get("warnings", []),
+    }
 
 
 def _get_or_create_topic_from_payload(
@@ -712,7 +741,7 @@ def get_document_knowledge(document_id: str, db: Session = Depends(get_db_sessio
     return {
         "document_id": document_id,
         "scan_units": [
-            _serialize_scan_unit(scan_unit, include_units=True)
+            _serialize_scan_unit(scan_unit, include_units=True, db=db)
             for scan_unit in scan_units
         ],
     }

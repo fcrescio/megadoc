@@ -7,6 +7,21 @@ export interface Document {
   size_bytes: number;
   source_type: string;
   created_at: string;
+  scan_unit_count: number;
+  document_unit_count: number;
+  rotation_applied: boolean | null;
+  page_order_reversed: boolean | null;
+}
+
+export interface PreflightInfo {
+  rotation_applied: boolean | null;
+  rotation_confidence: number | null;
+  page_order_reversed: boolean;
+  orientation_backend: string | null;
+  orientation_applied: boolean;
+  dominant_declared_rotation: number | null;
+  flags: string[];
+  warnings: string[];
 }
 
 export interface DocumentVersion {
@@ -201,6 +216,7 @@ export interface KnowledgeScanUnit {
   segmentation_confidence: number | null;
   classification_confidence: number | null;
   assignment_confidence: number | null;
+  preflight: PreflightInfo | null;
   created_at: string;
   updated_at: string | null;
   document_units: KnowledgeDocumentUnit[];

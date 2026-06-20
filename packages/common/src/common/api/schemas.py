@@ -44,6 +44,10 @@ class DocumentResponse(BaseModel):
     size_bytes: int
     source_type: str
     created_at: datetime
+    scan_unit_count: int = 0
+    document_unit_count: int = 0
+    rotation_applied: bool | None = None
+    page_order_reversed: bool | None = None
 
 
 class DocumentVersionResponse(BaseModel):

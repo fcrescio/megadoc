@@ -10,7 +10,7 @@ from urllib.request import Request as UrlRequest, urlopen
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile
 from redis import Redis
-from sqlalchemy import text
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from api.middleware import RequestContextMiddleware
@@ -40,7 +40,7 @@ from common.application.repositories import (
 )
 from common.application.services import DocumentService, JobService, persist_upload_to_temp
 from common.config import Settings, get_settings
-from common.db.models import ManualComment
+from common.db.models import DocumentUnit, ManualComment, OCRResult, ScanUnit
 from common.db.schema import ensure_knowledge_schema
 from common.db.session import engine, get_db_session
 from common.domain.enums import SourceType
@@ -231,7 +231,70 @@ def list_documents(
     session: Session = Depends(db_session_dep),
 ) -> list[DocumentResponse]:
     rows = DocumentRepository(session).list(limit)
-    return [DocumentResponse.model_validate(row, from_attributes=True) for row in rows]
+    if not rows:
+        return []
+
+    doc_ids = [row.id for row in rows]
+
+    # Batch: scan unit and document unit counts per document
+    counts_query = (
+        select(
+            ScanUnit.source_document_id,
+            func.count(ScanUnit.id).label("su_count"),
+            func.count(DocumentUnit.id).label("du_count"),
+        )
+        .outerjoin(DocumentUnit, DocumentUnit.scan_unit_id == ScanUnit.id)
+        .where(ScanUnit.source_document_id.in_(doc_ids))
+        .group_by(ScanUnit.source_document_id)
+    )
+    counts_map: dict[uuid.UUID, tuple[int, int]] = {}
+    for r in session.execute(counts_query).all():
+        counts_map[r.source_document_id] = (r.su_count, r.du_count)
+
+    # Batch: latest OCR result per document (for preflight info)
+    latest_ocr_subq = (
+        select(OCRResult.id)
+        .where(OCRResult.document_id.in_(doc_ids))
+        .order_by(OCRResult.document_id, OCRResult.created_at.desc())
+        .distinct(OCRResult.document_id)
+        .subquery()
+    )
+    ocr_rows = session.execute(
+        select(OCRResult).where(OCRResult.id.in_(latest_ocr_subq))
+    ).scalars().all()
+    ocr_map: dict[uuid.UUID, OCRResult] = {r.document_id: r for r in ocr_rows}
+
+    result: list[DocumentResponse] = []
+    for row in rows:
+        su_count, du_count = counts_map.get(row.id, (0, 0))
+
+        rotation_applied: bool | None = None
+        page_order_reversed: bool | None = None
+        ocr = ocr_map.get(row.id)
+        if ocr and ocr.confidence_summary:
+            orientation = ocr.confidence_summary.get("orientation_preprocess", {})
+            if isinstance(orientation, dict):
+                rotation_applied = orientation.get("rotation_applied")
+                page_order_reversed = orientation.get("page_order_reversed", False)
+
+        result.append(
+            DocumentResponse(
+                id=row.id,
+                external_id=row.external_id,
+                original_filename=row.original_filename,
+                mime_type=row.mime_type,
+                sha256=row.sha256,
+                size_bytes=row.size_bytes,
+                source_type=row.source_type,
+                created_at=row.created_at,
+                scan_unit_count=su_count,
+                document_unit_count=du_count,
+                rotation_applied=rotation_applied,
+                page_order_reversed=page_order_reversed,
+            )
+        )
+
+    return result
 
 
 @app.get("/documents/{document_id}", response_model=DocumentResponse)
@@ -239,7 +302,47 @@ def get_document(document_id: uuid.UUID, session: Session = Depends(db_session_d
     document = DocumentRepository(session).get(document_id)
     if document is None:
         raise HTTPException(status_code=404, detail="Document not found.")
-    return DocumentResponse.model_validate(document, from_attributes=True)
+
+    # Scan unit and document unit counts
+    count_result = session.execute(
+        select(
+            func.count(ScanUnit.id).label("su_count"),
+            func.count(DocumentUnit.id).label("du_count"),
+        )
+        .outerjoin(DocumentUnit, DocumentUnit.scan_unit_id == ScanUnit.id)
+        .where(ScanUnit.source_document_id == document.id)
+    ).one()
+
+    # Latest OCR result for preflight info
+    ocr_result = session.execute(
+        select(OCRResult)
+        .where(OCRResult.document_id == document.id)
+        .order_by(OCRResult.created_at.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+
+    rotation_applied: bool | None = None
+    page_order_reversed: bool | None = None
+    if ocr_result and ocr_result.confidence_summary:
+        orientation = ocr_result.confidence_summary.get("orientation_preprocess", {})
+        if isinstance(orientation, dict):
+            rotation_applied = orientation.get("rotation_applied")
+            page_order_reversed = orientation.get("page_order_reversed", False)
+
+    return DocumentResponse(
+        id=document.id,
+        external_id=document.external_id,
+        original_filename=document.original_filename,
+        mime_type=document.mime_type,
+        sha256=document.sha256,
+        size_bytes=document.size_bytes,
+        source_type=document.source_type,
+        created_at=document.created_at,
+        scan_unit_count=count_result.su_count,
+        document_unit_count=count_result.du_count,
+        rotation_applied=rotation_applied,
+        page_order_reversed=page_order_reversed,
+    )
 
 
 @app.get("/documents/{document_id}/versions", response_model=list[DocumentVersionResponse])

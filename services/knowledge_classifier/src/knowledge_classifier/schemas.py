@@ -560,6 +560,7 @@ class ScanUnitResponse(BaseModel):
     segmentation_confidence: Optional[float] = None
     classification_confidence: Optional[float] = None
     assignment_confidence: Optional[float] = None
+    preflight: Optional[dict] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 
