@@ -1548,6 +1548,9 @@ def _classify_fact_column(
     # Skip identity/metadata columns
     if lowered in ("cod", "codice", "nominativo", "condomino", "proprietario"):
         return None, None, False
+    # Skip compound headers that contain slashes (e.g. "TOTALE / categoria")
+    if "/" in lowered:
+        return None, None, False
     if "mill" in lowered and _has_fractional_precision(raw_value, minimum_digits=3):
         return None, None, False
     if payment_ledger and lowered == "importo":

@@ -127,12 +127,52 @@ def _tool_get_context(
     before: int = 600,
     after: int = 300,
 ) -> str:
-    """Return OCR text context around a table."""
+    """Return OCR text context around a table.
+
+    Uses unique row values (amounts) to locate the table in the text,
+    since headers like "Cod" appear many times and would match the
+    wrong occurrence.
+    """
     if index < 0 or index >= len(tables):
         return f"Errore: indice tabella {index} non valido."
     t = tables[index]
+    rows = t.get("rows", [])
+
+    # Strategy 1: search for a unique amount value from the first data row
+    for row in rows[:5]:
+        amounts = row.get("normalized_amounts") or {}
+        for col, val in amounts.items():
+            if isinstance(val, (int, float)) and val > 0:
+                val_str = f"{val:.2f}"
+                pos = text.find(val_str)
+                if pos >= 0:
+                    start = max(0, pos - before)
+                    end = min(len(text), pos + after)
+                    ctx = text[start:end]
+                    return (
+                        f"Contesto attorno alla tabella [{index}] "
+                        f"(valore '{val_str}' a posizione {pos}):\n"
+                        f"...{ctx}..."
+                    )
+
+    # Strategy 2: search for a unique text value from the first column
+    for row in rows[:5]:
+        cells = row.get("cells") or {}
+        for col, val in cells.items():
+            if isinstance(val, str) and len(val) > 3 and not val.replace(".", "").replace(",", "").isdigit():
+                pos = text.find(val)
+                if pos >= 0:
+                    start = max(0, pos - before)
+                    end = min(len(text), pos + after)
+                    ctx = text[start:end]
+                    return (
+                        f"Contesto attorno alla tabella [{index}] "
+                        f"(valore '{val[:40]}' a posizione {pos}):\n"
+                        f"...{ctx}..."
+                    )
+
+    # Strategy 3: fallback to header search
     headers = t.get("headers", [])
-    # Try each header as anchor
     for header in headers:
         pos = text.find(str(header))
         if pos >= 0:
@@ -144,21 +184,7 @@ def _tool_get_context(
                 f"(header '{header}' a posizione {pos}):\n"
                 f"...{ctx}..."
             )
-    # Fallback: search for a row value
-    rows = t.get("rows", [])
-    for row in rows[:3]:
-        for val in (row.get("cells") or {}).values():
-            if isinstance(val, str) and len(val) > 3:
-                pos = text.find(val)
-                if pos >= 0:
-                    start = max(0, pos - before)
-                    end = min(len(text), pos + after)
-                    ctx = text[start:end]
-                    return (
-                        f"Contesto attorno alla tabella [{index}] "
-                        f"(valore '{val[:40]}' a posizione {pos}):\n"
-                        f"...{ctx}..."
-                    )
+
     return f"Impossibile localizzare la tabella [{index}] nel testo OCR."
 
 
