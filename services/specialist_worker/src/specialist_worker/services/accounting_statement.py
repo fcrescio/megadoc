@@ -1545,6 +1545,9 @@ def _classify_fact_column(
     lowered = column.lower()
     if re.fullmatch(r"column_\d+", lowered):
         return None, None, False
+    # Skip identity/metadata columns
+    if lowered in ("cod", "codice", "nominativo", "condomino", "proprietario"):
+        return None, None, False
     if "mill" in lowered and _has_fractional_precision(raw_value, minimum_digits=3):
         return None, None, False
     if payment_ledger and lowered == "importo":
@@ -1574,8 +1577,17 @@ def _classify_fact_column(
 
 def _has_fractional_precision(value: str, *, minimum_digits: int) -> bool:
     compact = value.replace("€", "").replace(" ", "")
+    # Check for comma as decimal separator (Italian format): 1.234,56
     match = re.search(r",(\d+)$", compact)
-    return bool(match and len(match.group(1)) >= minimum_digits)
+    if match and len(match.group(1)) >= minimum_digits:
+        return True
+    # Check for dot as decimal separator — only the LAST dot qualifies
+    # (thousands separators appear before the decimal dot)
+    if "," not in compact:
+        dot_match = re.search(r"\.(\d+)$", compact)
+        if dot_match and len(dot_match.group(1)) >= minimum_digits:
+            return True
+    return False
 
 
 def _normalize_key(value: str) -> str:
