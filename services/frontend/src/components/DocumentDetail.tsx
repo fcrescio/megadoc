@@ -13,6 +13,7 @@ import {
   useKnowledgeTopics,
   useAddDocumentUnitTopicAssignment,
   useDeleteDocumentUnitTopicAssignment,
+  useDeleteDocumentUnit,
   useReingestDocument,
 } from '../hooks/useDocuments';
 import { downloadAsset, getDocumentDownloadUrl, getSpecialistResultExportUrl } from '../api/client';
@@ -595,6 +596,7 @@ function DocumentDetail({ documentId, onBack, initialTab = 'info' }: Props) {
   const ensureKnowledge = useEnsureDocumentKnowledge();
   const ensureSpecialists = useEnsureDocumentSpecialists();
   const reingest = useReingestDocument();
+  const deleteDocUnit = useDeleteDocumentUnit();
 
   useEffect(() => {
     setActiveTab(initialTab);
@@ -913,7 +915,21 @@ function DocumentDetail({ documentId, onBack, initialTab = 'info' }: Props) {
                                     ` · ${(unit.document_type_confidence * 100).toFixed(0)}% confidence`}
                                 </p>
                               </div>
-                              <p className="font-mono text-xs text-gray-400">{unit.id}</p>
+                              <div className="flex items-center gap-2">
+                                <p className="font-mono text-xs text-gray-400">{unit.id}</p>
+                                <button
+                                  onClick={() => {
+                                    if (window.confirm(`Sopprimere la document unit ${unit.ordinal} (${unit.document_type_code ?? 'sconosciuto'}) e tutti i dati derivati?`)) {
+                                      deleteDocUnit.mutate(unit.id);
+                                    }
+                                  }}
+                                  disabled={deleteDocUnit.isPending}
+                                  className="px-2 py-1 text-xs font-medium rounded-md bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 disabled:opacity-60"
+                                  title="Elimina questa document unit e tutti i dati derivati"
+                                >
+                                  Sopprimi
+                                </button>
+                              </div>
                             </div>
 
                             {unit.extracted_summary && (

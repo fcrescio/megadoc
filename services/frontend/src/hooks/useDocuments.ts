@@ -84,6 +84,7 @@ import {
   createKnowledgeTopic,
   addDocumentUnitTopicAssignment,
   deleteDocumentUnitTopicAssignment,
+  deleteDocumentUnit,
   reingestDocument,
 } from '../api/client';
 
@@ -483,6 +484,29 @@ export function useReingestDocument() {
       queryClient.invalidateQueries({ queryKey: ['document'] });
       queryClient.invalidateQueries({ queryKey: ['jobs'] });
       queryClient.invalidateQueries({ queryKey: ['knowledge'] });
+    },
+  });
+}
+
+export function useDeleteDocumentUnit() {
+  const queryClient = useQueryClient();
+
+  return useMutation<void, Error, string>({
+    mutationFn: (documentUnitId) => deleteDocumentUnit(documentUnitId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['knowledge'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-topics'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-topic'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-search'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-entities'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-entity-detail'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-graph'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-nodes'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-node'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-assertions'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-contexts'] });
+      queryClient.invalidateQueries({ queryKey: ['topic-proposals'] });
+      queryClient.invalidateQueries({ queryKey: ['cleanup-report'] });
     },
   });
 }

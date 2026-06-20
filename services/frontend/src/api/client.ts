@@ -77,6 +77,16 @@ export async function reingestDocument(documentId: string, ocrBackend?: string):
   return handleResponse<Document>(response);
 }
 
+export async function deleteDocumentUnit(documentUnitId: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/knowledge/document-units/${documentUnitId}`, {
+    method: 'DELETE',
+  });
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(error || `HTTP ${response.status}`);
+  }
+}
+
 export async function getDocumentVersions(documentId: string): Promise<DocumentVersion[]> {
   const response = await fetch(`${API_BASE}/documents/${documentId}/versions`);
   return handleResponse<DocumentVersion[]>(response);

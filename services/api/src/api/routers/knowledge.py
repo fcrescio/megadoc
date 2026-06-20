@@ -8,7 +8,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse, PlainTextResponse
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from common.application.knowledge import (
@@ -1083,6 +1083,39 @@ def delete_document_unit_topic_assignment(
     db.commit()
     db.refresh(doc_unit)
     return DocumentUnitResponse(**_serialize_document_unit(doc_unit))
+
+
+@router.delete("/document-units/{document_unit_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_document_unit(
+    document_unit_id: str,
+    db: Session = Depends(get_db_session),
+):
+    """Delete a document unit and all its derived data (assignments, entities, assertions, specialist results, etc.)."""
+    try:
+        parsed_id = uuid.UUID(document_unit_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid document unit ID") from exc
+
+    doc_unit = db.get(DocumentUnit, parsed_id)
+    if doc_unit is None:
+        raise HTTPException(status_code=404, detail="Document unit not found")
+
+    # Delete linked data explicitly before the document unit to ensure clean cascade
+    db.execute(delete(DocumentUnitTopicAssignment).where(DocumentUnitTopicAssignment.document_unit_id == parsed_id))
+    db.execute(delete(DocumentUnitEntity).where(DocumentUnitEntity.document_unit_id == parsed_id))
+    db.execute(delete(DocumentUnitMention).where(DocumentUnitMention.document_unit_id == parsed_id))
+    db.execute(delete(KnowledgeAssertion).where(KnowledgeAssertion.document_unit_id == parsed_id))
+    db.execute(delete(DocumentUnitLink).where(DocumentUnitLink.source_document_unit_id == parsed_id))
+    db.execute(delete(DocumentUnitLink).where(DocumentUnitLink.target_document_unit_id == parsed_id))
+    db.execute(delete(SpecialistJob).where(SpecialistJob.document_unit_id == parsed_id))
+    db.execute(delete(SpecialistResult).where(SpecialistResult.document_unit_id == parsed_id))
+    db.execute(delete(KnowledgeContextMembership).where(KnowledgeContextMembership.document_unit_id == parsed_id))
+    db.execute(delete(TopicProposal).where(TopicProposal.source_document_unit_id == parsed_id))
+
+    db.delete(doc_unit)
+    db.commit()
+
+    return None
 
 
 # Topics
