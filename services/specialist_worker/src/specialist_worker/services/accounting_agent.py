@@ -131,53 +131,56 @@ def _tool_get_context(
 ) -> str:
     """Return OCR text context around a table.
 
-    Uses unique row values (amounts) to locate the table in the text,
-    since headers like "Cod" appear many times and would match the
-    wrong occurrence.
+    Uses the table header to locate the table in the text. Since multiple
+    tables share the same header (e.g. "Cod | Nominativo | quota mill. | TOTALE"),
+    we find the N-th occurrence where N is this table's position among tables
+    of the same type.
+
+    The category name is typically on the line immediately before the header,
+    so returning context *before* the header captures it reliably.
     """
     if index < 0 or index >= len(tables):
         return f"Errore: indice tabella {index} non valido."
     t = tables[index]
-    rows = t.get("rows", [])
 
-    # Strategy 1: search for a unique amount value from the first data row
-    for row in rows[:5]:
-        amounts = row.get("normalized_amounts") or {}
-        for col, val in amounts.items():
-            if isinstance(val, (int, float)) and val > 0:
-                # Try both dot and comma as decimal separator
-                val_str_dot = f"{val:.2f}"
-                val_str_comma = f"{val:.2f}".replace(".", ",")
-                for val_str in (val_str_dot, val_str_comma):
-                    pos = text.find(val_str)
-                    if pos >= 0:
-                        start = max(0, pos - before)
-                        end = min(len(text), pos + after)
-                        ctx = text[start:end]
-                        return (
-                            f"Contesto attorno alla tabella [{index}] "
-                            f"(valore '{val_str}' a posizione {pos}):\n"
-                            f"...{ctx}..."
-                        )
+    # Determine this table's position among same-type tables
+    table_type = t.get("table_type", "unknown")
+    same_type_indices = [
+        i for i, t2 in enumerate(tables)
+        if t2.get("table_type") == table_type
+    ]
+    try:
+        type_position = same_type_indices.index(index)
+    except ValueError:
+        type_position = 0
 
-    # Strategy 2: search for a unique text value from the first column
-    for row in rows[:5]:
-        cells = row.get("cells") or {}
-        for col, val in cells.items():
-            if isinstance(val, str) and len(val) > 3 and not val.replace(".", "").replace(",", "").isdigit():
-                pos = text.find(val)
-                if pos >= 0:
-                    start = max(0, pos - before)
-                    end = min(len(text), pos + after)
-                    ctx = text[start:end]
-                    return (
-                        f"Contesto attorno alla tabella [{index}] "
-                        f"(valore '{val[:40]}' a posizione {pos}):\n"
-                        f"...{ctx}..."
-                    )
-
-    # Strategy 3: fallback to header search
+    # Build a header pattern to search for
     headers = t.get("headers", [])
+    if not headers:
+        return f"Errore: tabella [{index}] senza intestazioni."
+
+    # Use the first 2-3 headers as a search pattern (enough to be unique)
+    header_parts = [str(h) for h in headers[:3]]
+    header_pattern = " | ".join(header_parts)
+
+    # Find the N-th occurrence of this header pattern
+    pos = -1
+    for _ in range(type_position + 1):
+        pos = text.find(header_pattern, pos + 1)
+        if pos < 0:
+            break
+
+    if pos >= 0:
+        start = max(0, pos - before)
+        end = min(len(text), pos + after)
+        ctx = text[start:end]
+        return (
+            f"Contesto attorno alla tabella [{index}] "
+            f"(header '{header_pattern[:60]}', occorrenza {type_position + 1} a posizione {pos}):\n"
+            f"...{ctx}..."
+        )
+
+    # Fallback: search for any header
     for header in headers:
         pos = text.find(str(header))
         if pos >= 0:
