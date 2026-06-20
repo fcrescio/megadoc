@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import re
-from collections import Counter
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from difflib import SequenceMatcher
 from typing import Any
 
 from sqlalchemy import func, select
@@ -1215,3 +1216,250 @@ class KnowledgeBaseConsolidationService:
         for proposal in matched_proposals:
             proposal.proposal_status = "merged_into_existing"
             proposal.reviewed_at = proposal.reviewed_at or _utcnow()
+
+    # ── Cleanup report ──────────────────────────────────────────────
+
+    def generate_cleanup_report(self, min_similarity: float = 0.90) -> dict[str, Any]:
+        """Generate a read-only cleanup report for topic backlog.
+
+        Returns candidate groups for merge/review in the same format as
+        scripts/topic_cleanup_report.py.
+        """
+        topics = self.db.execute(
+            select(Topic).where(Topic.is_active.is_(True)).order_by(Topic.title.asc())
+        ).scalars().all()
+        topic_ids = [t.id for t in topics]
+        topic_map = {str(t.id): t for t in topics}
+
+        total_assignments = self.db.execute(
+            select(func.count(DocumentUnitTopicAssignment.id))
+        ).scalar() or 0
+
+        # ── Pre-load: assignment counts per topic (single query) ─────
+        count_rows = self.db.execute(
+            select(
+                DocumentUnitTopicAssignment.topic_id,
+                func.count(DocumentUnitTopicAssignment.id).label("cnt"),
+            )
+            .where(DocumentUnitTopicAssignment.topic_id.in_(topic_ids))
+            .group_by(DocumentUnitTopicAssignment.topic_id)
+        ).all()
+        assignment_counts: dict[str, int] = {
+            str(row.topic_id): row.cnt for row in count_rows
+        }
+
+        # ── Pre-load: archive identities per topic (single query) ────
+        identity_rows = self.db.execute(
+            select(
+                DocumentUnitTopicAssignment.topic_id,
+                DocumentUnit.archive_identity_json,
+            )
+            .join(DocumentUnit, DocumentUnitTopicAssignment.document_unit_id == DocumentUnit.id)
+            .where(DocumentUnitTopicAssignment.topic_id.in_(topic_ids))
+            .where(DocumentUnit.archive_identity_json.isnot(None))
+        ).all()
+        topic_identity_jsons: dict[str, list[dict]] = defaultdict(list)
+        for row in identity_rows:
+            if row.archive_identity_json and isinstance(row.archive_identity_json, dict):
+                topic_identity_jsons[str(row.topic_id)].append(row.archive_identity_json)
+
+        # Derive dominant axes and families per topic (in memory)
+        # Use deterministic tie-break: (count DESC, value ASC) so results
+        # match scripts/topic_cleanup_report.py regardless of row order.
+        def _most_common_det(vals: list[str]) -> str | None:
+            if not vals:
+                return None
+            counts = Counter(vals)
+            # Sort by (-count, value) for deterministic tie-break
+            return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
+
+        topic_dominant_axes: dict[str, dict[str, str | None]] = {}
+        topic_dominant_family: dict[str, str | None] = {}
+        for tid in topic_ids:
+            sid = str(tid)
+            identities = topic_identity_jsons.get(sid, [])
+            axes: dict[str, list[str | None]] = defaultdict(list)
+            families: list[str] = []
+            for ident in identities:
+                f = ident.get("document_family")
+                if f:
+                    families.append(f)
+                for key in ("context_key", "primary_party_key", "subject_key", "matter_key"):
+                    val = ident.get(key)
+                    if val:
+                        axes[key].append(val)
+            dominant = {}
+            for key, vals in axes.items():
+                dominant[key] = _most_common_det(vals)
+            topic_dominant_axes[sid] = dominant
+            topic_dominant_family[sid] = _most_common_det(families)
+
+        categories: dict[str, list[dict[str, Any]]] = {
+            "near_orphans": [],
+            "duplicate_titles": [],
+            "shared_identity_axis": [],
+            "probable_typos": [],
+            "kind_mismatches": [],
+        }
+
+        # --- Near orphans ---
+        for topic in topics:
+            count = assignment_counts.get(str(topic.id), 0)
+            if count <= 1:
+                categories["near_orphans"].append({
+                    "category": "near_orphan",
+                    "topic_id": str(topic.id),
+                    "title": topic.title,
+                    "slug": topic.slug,
+                    "topic_kind": topic.topic_kind,
+                    "topic_class": topic.topic_class,
+                    "assignment_count": count,
+                    "note": f"Solo {count} assegnazione(i)" if count == 1 else "Nessuna assegnazione",
+                })
+
+        # --- Duplicate titles ---
+        def _normalize(t: str) -> str:
+            t = t.lower()
+            t = re.sub(r"[^\w\s]", "", t)
+            return re.sub(r"\s+", " ", t).strip()
+
+        groups: list[list[Topic]] = []
+        used: set[str] = set()
+        for a in topics:
+            if str(a.id) in used:
+                continue
+            group = [a]
+            used.add(str(a.id))
+            for b in topics:
+                if str(b.id) in used:
+                    continue
+                if SequenceMatcher(None, _normalize(a.title), _normalize(b.title)).ratio() >= min_similarity:
+                    group.append(b)
+                    used.add(str(b.id))
+            if len(group) > 1:
+                groups.append(group)
+
+        for group in groups:
+            categories["duplicate_titles"].append({
+                "category": "duplicate_title",
+                "similarity_threshold": min_similarity,
+                "candidates": [
+                    {"topic_id": str(t.id), "title": t.title, "slug": t.slug, "topic_kind": t.topic_kind}
+                    for t in group
+                ],
+                "note": f"{len(group)} topic con titoli simili",
+            })
+
+        # --- Shared identity axis ---
+        axis_groups: dict[str, list[tuple[str, str]]] = defaultdict(list)
+        for tid, axes in topic_dominant_axes.items():
+            for key in ("context_key", "primary_party_key"):
+                val = axes.get(key)
+                if val:
+                    axis_groups[f"{key}:{val}"].append((tid, val))
+
+        for axis_key, members in axis_groups.items():
+            if len(members) < 2:
+                continue
+            candidates = []
+            for tid, _ in members:
+                t = topic_map.get(tid)
+                if t:
+                    candidates.append({
+                        "topic_id": tid,
+                        "title": t.title,
+                        "slug": t.slug,
+                        "topic_kind": t.topic_kind,
+                    })
+            if len(candidates) >= 2:
+                categories["shared_identity_axis"].append({
+                    "category": "shared_identity_axis",
+                    "axis": axis_key,
+                    "candidates": candidates,
+                    "note": f"{len(candidates)} topic condividono {axis_key}",
+                })
+
+        # --- Probable typos ---
+        typo_used: set[str] = set()
+        for a in topics:
+            if str(a.id) in typo_used:
+                continue
+            best_match = None
+            best_score = 0.0
+            for b in topics:
+                if a.id == b.id or str(b.id) in typo_used:
+                    continue
+                score = SequenceMatcher(None, _normalize(a.title), _normalize(b.title)).ratio()
+                if 0.70 <= score < 0.95 and score > best_score:
+                    a_cnt = assignment_counts.get(str(a.id), 0)
+                    b_cnt = assignment_counts.get(str(b.id), 0)
+                    if a_cnt < b_cnt:
+                        best_match = b
+                        best_score = score
+                    elif b_cnt < a_cnt:
+                        best_match = a
+                        best_score = score
+                        a, b = b, a
+
+            if best_match and best_score >= 0.70:
+                typo_used.add(str(a.id))
+                typo_used.add(str(best_match.id))
+                categories["probable_typos"].append({
+                    "category": "probable_typo",
+                    "similarity": round(best_score, 3),
+                    "typo_candidate": {
+                        "topic_id": str(a.id),
+                        "title": a.title,
+                        "slug": a.slug,
+                        "assignment_count": assignment_counts.get(str(a.id), 0),
+                    },
+                    "canonical_candidate": {
+                        "topic_id": str(best_match.id),
+                        "title": best_match.title,
+                        "slug": best_match.slug,
+                        "assignment_count": assignment_counts.get(str(best_match.id), 0),
+                    },
+                    "note": f"'{a.title}' potrebbe essere un typo di '{best_match.title}' (sim={best_score:.2f})",
+                })
+
+        # --- Kind mismatches ---
+        FAMILY_KIND_MAP: dict[str, str] = {
+            "utility_bill": "entity",
+            "accounting_statement": "context",
+            "meeting_minutes": "family",
+            "meeting_agenda": "family",
+            "legal_document": "issue",
+            "regolamento": "context",
+            "comunicazione": "context",
+            "generic": "context",
+        }
+
+        for topic in topics:
+            dominant_family = topic_dominant_family.get(str(topic.id))
+            if not dominant_family:
+                continue
+            expected_kind = FAMILY_KIND_MAP.get(dominant_family)
+            if expected_kind and topic.topic_kind != expected_kind:
+                categories["kind_mismatches"].append({
+                    "category": "kind_mismatch",
+                    "topic_id": str(topic.id),
+                    "title": topic.title,
+                    "slug": topic.slug,
+                    "current_kind": topic.topic_kind,
+                    "dominant_family": dominant_family,
+                    "expected_kind": expected_kind,
+                    "note": f"topic_kind='{topic.topic_kind}' ma document_family dominante='{dominant_family}' (atteso '{expected_kind}')",
+                })
+
+        return {
+            "categories": categories,
+            "summary": {
+                "total_active_topics": len(topics),
+                "total_assignments": total_assignments,
+                "near_orphans_count": len(categories["near_orphans"]),
+                "duplicate_title_groups": len(categories["duplicate_titles"]),
+                "shared_axis_groups": len(categories["shared_identity_axis"]),
+                "probable_typo_pairs": len(categories["probable_typos"]),
+                "kind_mismatches_count": len(categories["kind_mismatches"]),
+            },
+        }

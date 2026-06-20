@@ -92,6 +92,9 @@ from knowledge_classifier.schemas import (
     GraphConsolidationReviewRequest,
     GraphConsolidationReviewResponse,
     GraphSuggestionTopicSummaryResponse,
+    TopicMergeRequest,
+    TopicMergeResponse,
+    CleanupReportResponse,
     KnowledgeJobResponse,
     ReviewUpdate,
     ReviewStatus,
@@ -2341,4 +2344,87 @@ def review_graph_consolidation_suggestion(
         source_topic_id=payload.source_topic_id,
         target_topic_id=payload.target_topic_id,
         affected_assignments=affected_assignments,
+    )
+
+
+@router.post("/topics/{source_id}/merge", response_model=TopicMergeResponse)
+def merge_topic(
+    source_id: str,
+    payload: TopicMergeRequest,
+    db: Session = Depends(get_db_session),
+):
+    """Merge source topic into target topic.
+
+    Moves assignments, retargets proposals, creates aliases from source
+    title/slug, marks source as inactive, and records an audit entry.
+    """
+    source_topic = db.get(Topic, source_id)
+    target_topic = db.get(Topic, payload.target_topic_id)
+
+    if source_topic is None:
+        raise HTTPException(status_code=404, detail="Source topic not found")
+    if target_topic is None:
+        raise HTTPException(status_code=404, detail="Target topic not found")
+    if str(source_topic.id) == str(target_topic.id):
+        raise HTTPException(status_code=400, detail="Cannot merge a topic into itself")
+    if not source_topic.is_active:
+        raise HTTPException(status_code=400, detail="Source topic is already inactive")
+
+    from knowledge_classifier.services.consolidation import ConsolidationStats
+
+    service = KnowledgeBaseConsolidationService(db)
+    stats = ConsolidationStats()
+
+    # Reuse the existing merge logic
+    service._merge_topic_into(target_topic, source_topic, stats)
+
+    # Record audit
+    review = GraphConsolidationReview(
+        axis="manual_merge",
+        source_topic_id=source_topic.id,
+        target_topic_id=target_topic.id,
+        action="merge_into_target",
+        note=payload.note,
+        acted_by=payload.acted_by,
+    )
+    db.add(review)
+
+    # Rebuild derived projections so graph/contexts reflect the merge.
+    # Commit after rebuilds so both merge and projections are persisted together.
+    try:
+        rebuild_knowledge_graph(db)
+        rebuild_knowledge_contexts(db)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    return TopicMergeResponse(
+        status="ok",
+        source_topic_id=str(source_topic.id),
+        target_topic_id=str(target_topic.id),
+        source_topic_title=source_topic.title,
+        target_topic_title=target_topic.title,
+        affected_assignments=stats.assignments_retargeted,
+        aliases_created=stats.aliases_created,
+    )
+
+
+@router.get("/cleanup/report", response_model=CleanupReportResponse)
+def get_cleanup_report(
+    min_similarity: float = Query(0.90, description="Minimum title similarity for duplicate detection"),
+    db: Session = Depends(get_db_session),
+):
+    """Generate a read-only cleanup report for topic backlog.
+
+    Returns candidate groups for merge/review, same categories as the
+    scripts/topic_cleanup_report.py script.
+    """
+    from knowledge_classifier.services.consolidation import KnowledgeBaseConsolidationService
+
+    service = KnowledgeBaseConsolidationService(db)
+    report = service.generate_cleanup_report(min_similarity=min_similarity)
+    return CleanupReportResponse(
+        categories=report.get("categories", {}),
+        summary=report.get("summary", {}),
     )

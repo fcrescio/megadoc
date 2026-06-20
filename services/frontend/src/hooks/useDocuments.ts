@@ -34,6 +34,9 @@ import type {
   GraphConsolidationSuggestions,
   GraphConsolidationReviewPayload,
   GraphConsolidationReviewResult,
+  TopicMergePayload,
+  TopicMergeResult,
+  CleanupReport,
   KnowledgeTopicProposal,
   TopicAssignmentUpsertPayload,
   TopicCreatePayload,
@@ -72,6 +75,8 @@ import {
   runKnowledgeConsolidation,
   getGraphConsolidationSuggestions,
   reviewGraphConsolidationSuggestion,
+  mergeTopic,
+  getCleanupReport,
   uploadDocument,
   getTopicProposals,
   rejectTopicProposal,
@@ -427,6 +432,31 @@ export function useReviewGraphConsolidationSuggestion() {
       queryClient.invalidateQueries({ queryKey: ['knowledge-search'] });
       queryClient.invalidateQueries({ queryKey: ['knowledge'] });
     },
+  });
+}
+
+export function useMergeTopic() {
+  const queryClient = useQueryClient();
+
+  return useMutation<TopicMergeResult, Error, { sourceId: string; payload: TopicMergePayload }>({
+    mutationFn: ({ sourceId, payload }) => mergeTopic(sourceId, payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['knowledge-topics'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-topic'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-search'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge'] });
+      queryClient.invalidateQueries({ queryKey: ['graph-consolidation-suggestions'] });
+      queryClient.invalidateQueries({ queryKey: ['cleanup-report'] });
+    },
+  });
+}
+
+export function useCleanupReport(minSimilarity = 0.9, enabled = true) {
+  return useQuery<CleanupReport>({
+    queryKey: ['cleanup-report', minSimilarity],
+    queryFn: () => getCleanupReport(minSimilarity),
+    enabled,
+    staleTime: 30_000,
   });
 }
 

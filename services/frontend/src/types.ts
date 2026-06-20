@@ -638,6 +638,69 @@ export interface GraphConsolidationReviewResult {
   affected_assignments: number;
 }
 
+export interface TopicMergePayload {
+  target_topic_id: string;
+  acted_by?: string | null;
+  note?: string | null;
+}
+
+export interface TopicMergeResult {
+  status: string;
+  source_topic_id: string;
+  target_topic_id: string;
+  source_topic_title: string;
+  target_topic_title: string;
+  affected_assignments: number;
+  aliases_created: number;
+}
+
+export interface CleanupReportItem {
+  category: string;
+  note: string;
+  topic_id?: string | null;
+  title?: string | null;
+  slug?: string | null;
+  topic_kind?: string | null;
+  topic_class?: string | null;
+  assignment_count?: number | null;
+  candidates?: Array<{
+    topic_id: string;
+    title: string;
+    slug: string;
+    topic_kind: string;
+  }> | null;
+  typo_candidate?: {
+    topic_id: string;
+    title: string;
+    slug: string;
+    assignment_count: number;
+  } | null;
+  canonical_candidate?: {
+    topic_id: string;
+    title: string;
+    slug: string;
+    assignment_count: number;
+  } | null;
+  current_kind?: string | null;
+  dominant_family?: string | null;
+  expected_kind?: string | null;
+  axis?: string | null;
+  similarity?: number | null;
+}
+
+export interface CleanupReport {
+  categories: Record<string, CleanupReportItem[]>;
+  summary: {
+    total_active_topics: number;
+    total_assignments: number;
+    near_orphans_count: number;
+    duplicate_title_groups: number;
+    shared_axis_groups: number;
+    probable_typo_pairs: number;
+    kind_mismatches_count: number;
+  };
+}
+
 export interface TopicCreatePayload {
   slug: string;
   title: string;

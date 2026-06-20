@@ -118,6 +118,7 @@ def test_create_topic_proposal_reuses_existing_provisional_topic_in_same_scan(db
                 "topic_class": "case_file",
                 "description": "Documenti del condominio",
             },
+            "proposal_action": "create_topic",
             "confidence": 0.92,
             "rationale": "First proposal",
         },
@@ -132,6 +133,7 @@ def test_create_topic_proposal_reuses_existing_provisional_topic_in_same_scan(db
                 "topic_class": "financial_period",
                 "description": "Budget documents",
             },
+            "proposal_action": "create_topic",
             "confidence": 0.91,
             "rationale": "Second proposal",
         },
@@ -385,6 +387,7 @@ def test_consolidate_financial_topics_merges_same_vendor_proposals(db_session):
                 "topic_class": "vendor_relationship",
                 "description": "Invoices from Elettrosat",
             },
+            "proposal_action": "create_topic",
             "confidence": 0.91,
             "rationale": "First invoice",
         },
@@ -399,6 +402,7 @@ def test_consolidate_financial_topics_merges_same_vendor_proposals(db_session):
                 "topic_class": "vendor_relationship",
                 "description": "Another invoice from same vendor",
             },
+            "proposal_action": "create_topic",
             "confidence": 0.9,
             "rationale": "Second invoice",
         },
@@ -428,3 +432,159 @@ def test_consolidate_financial_topics_merges_same_vendor_proposals(db_session):
     assert len(proposals) == 1
     assert len(assignments) == 2
     assert assignments[0].topic_id == assignments[1].topic_id
+
+
+def test_attach_to_context_proposal_creates_reviewable_proposal(db_session):
+    """attach_to_context must produce a TopicProposal with recommended_action and a non-null matched_existing_topic_id."""
+    scan_unit = ScanUnit(
+        source_document_id=uuid.uuid4(),
+        source_ocr_result_id=uuid.uuid4(),
+        page_count=2,
+        status="processing",
+    )
+    doc_unit = DocumentUnit(
+        scan_unit=scan_unit,
+        ordinal=1,
+        start_page=1,
+        end_page=2,
+        review_status="auto_accepted",
+        title="Fattura Elettrosat marzo 2007",
+    )
+    db_session.add_all([scan_unit, doc_unit])
+    db_session.flush()
+
+    service = KnowledgePipelineService(MockDeterministicProvider(), db_session)
+
+    # Simulate the decision that _assign_topics builds when proposal_action == "attach_to_context"
+    # and decision.proposed_topic is None (the inline fallback at pipeline.py:646-655).
+    decision = type(
+        "Decision",
+        (),
+        {
+            "proposed_topic": {
+                "proposed_slug": f"attach-to-context-{doc_unit.id.hex[:8]}",
+                "proposed_title": f"Allega a contesto: {doc_unit.title[:80]}",
+                "topic_class": "other",
+                "topic_kind": "context",
+                "description": "Documento ripetitivo/routine da agganciare a contesto esistente senza creare topic canonico.",
+            },
+            "proposal_action": "attach_to_context",
+            "confidence": 0.85,
+            "rationale": "Documento ripetitivo dello stesso fornitore, da agganciare al contesto esistente.",
+        },
+    )()
+    entities = [
+        ExtractedEntity(
+            entity_type="organizzazione",
+            entity_value="Elettrosat snc",
+            normalized_value="elettrosat_snc",
+            confidence=0.95,
+            page_from=1,
+            page_to=1,
+        )
+    ]
+
+    service._create_topic_proposal(scan_unit, doc_unit, decision, entities)
+    db_session.flush()
+
+    proposals = db_session.query(TopicProposal).all()
+    assert len(proposals) == 1
+
+    proposal = proposals[0]
+    assert proposal.proposed_title.startswith("Allega a contesto:")
+    assert proposal.matched_existing_topic_id is not None
+    assert proposal.review_payload_json is not None
+    assert proposal.review_payload_json.get("recommended_action") == "attach_to_context"
+    assert proposal.proposal_status == "proposed"
+
+    # Verify the provisional topic was created
+    topic = db_session.query(Topic).filter(Topic.id == proposal.matched_existing_topic_id).one()
+    assert topic.canonical is False
+    assert topic.is_active is False
+    assert topic.topic_kind == "context"
+
+    # Verify the assignment was created
+    assignment = (
+        db_session.query(DocumentUnitTopicAssignment)
+        .filter(DocumentUnitTopicAssignment.document_unit_id == doc_unit.id)
+        .one()
+    )
+    assert assignment.topic_id == topic.id
+    assert assignment.assignment_role == "person_or_org_context"
+
+    # Verify doc_unit is marked for review
+    assert doc_unit.review_status == "needs_review"
+
+
+def test_ensure_attach_context_proposed_topic_fallback_when_missing(db_session):
+    """_ensure_attach_context_proposed_topic must build a minimal proposed_topic when it is None."""
+    doc_unit = DocumentUnit(
+        scan_unit=ScanUnit(
+            source_document_id=uuid.uuid4(),
+            source_ocr_result_id=uuid.uuid4(),
+            page_count=1,
+            status="processing",
+        ),
+        ordinal=1,
+        start_page=1,
+        end_page=1,
+        review_status="auto_accepted",
+        title="Fattura Elettrosat marzo 2007",
+    )
+    db_session.add(doc_unit)
+    db_session.flush()
+
+    decision = type(
+        "Decision",
+        (),
+        {
+            "proposed_topic": None,
+            "proposal_action": "attach_to_context",
+            "confidence": 0.85,
+            "rationale": "Documento ripetitivo.",
+        },
+    )()
+
+    KnowledgePipelineService._ensure_attach_context_proposed_topic(decision, doc_unit)
+
+    assert decision.proposed_topic is not None
+    assert decision.proposed_topic["proposed_slug"] == f"attach-to-context-{doc_unit.id.hex[:8]}"
+    assert decision.proposed_topic["proposed_title"] == "Allega a contesto: Fattura Elettrosat marzo 2007"
+    assert decision.proposed_topic["topic_class"] == "other"
+    assert decision.proposed_topic["topic_kind"] == "context"
+
+
+def test_ensure_attach_context_proposed_topic_does_not_overwrite_existing(db_session):
+    """_ensure_attach_context_proposed_topic must not overwrite an existing proposed_topic."""
+    doc_unit = DocumentUnit(
+        scan_unit=ScanUnit(
+            source_document_id=uuid.uuid4(),
+            source_ocr_result_id=uuid.uuid4(),
+            page_count=1,
+            status="processing",
+        ),
+        ordinal=1,
+        start_page=1,
+        end_page=1,
+        review_status="auto_accepted",
+        title="Fattura Elettrosat marzo 2007",
+    )
+    db_session.add(doc_unit)
+    db_session.flush()
+
+    existing_topic = {"proposed_slug": "custom-slug", "proposed_title": "Custom Title", "topic_class": "vendor_relationship"}
+    decision = type(
+        "Decision",
+        (),
+        {
+            "proposed_topic": existing_topic,
+            "proposal_action": "attach_to_context",
+            "confidence": 0.85,
+            "rationale": "Documento ripetitivo.",
+        },
+    )()
+
+    KnowledgePipelineService._ensure_attach_context_proposed_topic(decision, doc_unit)
+
+    assert decision.proposed_topic is existing_topic
+    assert decision.proposed_topic["proposed_slug"] == "custom-slug"

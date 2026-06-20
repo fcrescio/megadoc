@@ -193,6 +193,10 @@ class KnowledgePipelineService:
             for doc_unit in document_units
         }
 
+        # Derive archive identity before topic assignment so proposal payloads
+        # have access to matched/missing axes from the start.
+        self._derive_archive_identities(document_units)
+
         self._assign_topics(scan_unit, document_units, entity_results, ocr_result)
         self.db.flush()
         for doc_unit in document_units:
@@ -206,7 +210,7 @@ class KnowledgePipelineService:
             ocr_result,
         )
         self._consolidate_scan_semantics(scan_unit, document_units, entity_results, ocr_result)
-        self._derive_archive_identities(document_units)
+        # Archive identities are already derived above; no need to call again.
 
         needs_review = any(
             du.review_status == ReviewStatus.NEEDS_REVIEW.value
@@ -628,10 +632,21 @@ class KnowledgePipelineService:
             elif decision.action == "propose_new":
                 proposal_action = (decision.proposal_action or "create_topic").lower()
                 if proposal_action == "attach_to_context":
-                    # Routine/repetitive document: no topic needed, findable via entities/context
-                    doc_unit.review_status = ReviewStatus.NEEDS_REVIEW.value
+                    # Routine/repetitive document: no topic needed, findable via entities/context.
+                    # Create a proposal so the decision is visible and actionable in the UI.
+                    #
+                    # NOTE: This creates a provisional topic and assignment via _create_topic_proposal(),
+                    # which is not ideal — the ideal model would be a dedicated context-review action
+                    # (e.g. a context_membership proposal) that doesn't create a topic at all.
+                    # The current approach is a pragmatic middle ground: the proposal appears in the
+                    # review list, the user can see the recommended_action=attach_to_context, and
+                    # on approval the document can be attached to a context without creating a
+                    # canonical topic. A future refactor should introduce a dedicated review table
+                    # for context attachments.
+                    self._ensure_attach_context_proposed_topic(decision, doc_unit)
+                    self._create_topic_proposal(scan_unit, doc_unit, decision, entities, candidates_result.candidates)
                     logger.info(
-                        "Document unit %s marked as attach_to_context (no topic created)",
+                        "Document unit %s: created attach_to_context proposal",
                         doc_unit.id,
                     )
                 else:
@@ -739,6 +754,24 @@ class KnowledgePipelineService:
             return uuid.UUID(candidates[0].topic_id)
         return None
 
+    @staticmethod
+    def _ensure_attach_context_proposed_topic(decision: Any, doc_unit: DBDocumentUnit) -> None:
+        """Ensure decision.proposed_topic is set for attach_to_context proposals.
+
+        When the LLM returns propose_new with proposal_action=attach_to_context but
+        without a proposed_topic, build a minimal one so _create_topic_proposal can proceed.
+        This is a defensive fallback — the LLM should normally provide a proposed_topic.
+        """
+        if not decision.proposed_topic:
+            doc_title = doc_unit.title or f"Document unit {doc_unit.id}"
+            decision.proposed_topic = {
+                "proposed_slug": f"attach-to-context-{doc_unit.id.hex[:8]}",
+                "proposed_title": f"Allega a contesto: {doc_title[:80]}",
+                "topic_class": "other",
+                "topic_kind": "context",
+                "description": "Documento ripetitivo/routine da agganciare a contesto esistente senza creare topic canonico.",
+            }
+
     def _create_topic_proposal(
         self,
         scan_unit: DBScanUnit,
@@ -843,7 +876,7 @@ class KnowledgePipelineService:
                 confidence_factors.append(keyword)
 
         payload: dict[str, Any] = {
-            "recommended_action": (decision.proposal_action or "create_topic").lower(),
+            "recommended_action": (getattr(decision, "proposal_action", None) or "create_topic").lower(),
             "matched_axes": matched_axes,
             "conflicting_axes": [],
             "missing_axes": missing_axes,

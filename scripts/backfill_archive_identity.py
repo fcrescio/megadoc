@@ -62,6 +62,7 @@ def main():
         logger.info("Found %d document units", len(units))
 
         updated_count = 0
+        applied_count = 0
         skipped_count = 0
 
         for doc_unit in units:
@@ -80,6 +81,7 @@ def main():
                 skipped_count += 1
                 continue
 
+            updated_count += 1
             family = identity.get("document_family") if identity else "None"
             context = identity.get("context_key") if identity else "None"
             confidence = identity.get("confidence") if identity else 0.0
@@ -87,12 +89,12 @@ def main():
 
             if args.apply:
                 doc_unit.archive_identity_json = identity
-                updated_count += 1
+                applied_count += 1
 
         if args.apply:
             session.flush()
             session.commit()
-            logger.info("Updated %d identities, skipped %d", updated_count, skipped_count)
+            logger.info("Applied %d identities, skipped %d", applied_count, skipped_count)
         else:
             logger.info(
                 "Dry-run: %d would be updated, %d skipped. Use --apply to persist.",

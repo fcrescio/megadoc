@@ -8,6 +8,27 @@ def ensure_knowledge_schema(engine) -> None:
         "ALTER TABLE document_unit_topic_assignments ALTER COLUMN assignment_role TYPE VARCHAR(32)",
         "UPDATE document_unit_topic_assignments SET assignment_role = 'subject' WHERE assignment_role = 'primary'",
         "UPDATE document_unit_topic_assignments SET assignment_role = 'document_family' WHERE assignment_role = 'secondary'",
+        """DELETE FROM document_unit_topic_assignments a
+        USING document_unit_topic_assignments b
+        WHERE a.id < b.id
+          AND a.document_unit_id = b.document_unit_id
+          AND a.topic_id = b.topic_id
+          AND a.assignment_role = b.assignment_role
+          AND (
+            a.confidence < b.confidence
+            OR (a.confidence IS NULL AND b.confidence IS NOT NULL)
+            OR (a.confidence IS NOT DISTINCT FROM b.confidence
+                AND a.created_at < b.created_at)
+            OR (a.confidence IS NOT DISTINCT FROM b.confidence
+                AND a.created_at IS NOT DISTINCT FROM b.created_at
+                AND a.rationale IS NULL AND b.rationale IS NOT NULL)
+          )""",
+        """DELETE FROM document_unit_topic_assignments a
+        USING document_unit_topic_assignments b
+        WHERE a.id > b.id
+          AND a.document_unit_id = b.document_unit_id
+          AND a.topic_id = b.topic_id
+          AND a.assignment_role = b.assignment_role""",
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_document_unit_topic_assignments_unit_topic_role ON document_unit_topic_assignments(document_unit_id, topic_id, assignment_role)",
         """UPDATE topics
         SET topic_kind = CASE topic_class
