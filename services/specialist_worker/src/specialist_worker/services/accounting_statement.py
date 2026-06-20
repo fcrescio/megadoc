@@ -73,34 +73,34 @@ LLM_ACCOUNT_EXTRACTION_PROMPT = """Sei un contabile specializzato in estratti co
 Analizza il testo OCR che segue ed estrai l'elenco completo delle unità immobiliari
 con i relativi importi per OGNI categoria di spesa.
 
-Il testo contiene due sezioni:
-1. Un **sommario** iniziale con tabelle riassuntive di poche righe — IGNORALO.
-2. Una sezione **RIPARTO delle SPESE** (cerca "RIPARTO delle SPESE" o simili)
-   con le tabelle di allocazione dettagliate — estrai SOLO da qui.
+Il testo contiene tabelle HTML. Cerca le tabelle di RIPARTO SPESE che hanno
+queste intestazioni: "Cod", "Nominativo", "quota mill.", "TOTALE".
+Queste tabelle contengono UNA RIGA per ogni unità immobiliare più una riga
+di totale. Il nome della categoria (es. GENERALI, SCALA N.10, ASCENSORE N.6, ...)
+è scritto come testo subito prima della tabella.
 
-Ogni tabella di allocazione nel RIPARTO ha intestazioni come "Cod", "Nominativo",
-"quota mill.", "TOTALE" e contiene UNA RIGA per ogni unità immobiliare + una riga
-di totale. Il nome della categoria è scritto subito prima della tabella.
+IGNORA le tabelle riassuntive che hanno intestazioni diverse (es. "Voce", "Importo",
+"Entrate", "Uscite", "Descrizione", "Preventivo", "Consuntivo", ecc.) — quelle
+non contengono dati per unità.
 
-Per OGNI categoria di spesa che trovi nella sezione RIPARTO, estrai TUTTE le unità:
+Per OGNI tabella di riparto che trovi, estrai TUTTE le unità, RAGGRUPPANDOLE
+in un unico account per unità con un fact per ogni categoria:
 
 - unit_code: il codice unità (es. "1", "2", "3", "B11", "A1")
 - subject_label: il nome del proprietario/condomino
-- facts: un fatto per OGNI categoria di spesa, ciascuno con:
+- facts: un fact per OGNI categoria di spesa, ciascuno con:
   - fact_type: "allocated_expense"
   - amount: l'importo numerico (normalizzato: "1.234,56" → 1234.56)
-  - category_label: il nome della categoria (es. "GENERALI", "SCALA N.10", ecc.)
+  - category_label: il nome della categoria (es. "GENERALI", "SCALA N.10")
   - is_total: false
 
-REGOLE FONDAMENTALI:
-- Estrai SOLO dalla sezione RIPARTO, NON dalle tabelle riassuntive iniziali.
-- Elenca OGNI unità UNA SOLA VOLTA, con un fact per ogni categoria di spesa.
-- Se un'unità non compare in una tabella (perché non usa quel servizio),
-  NON includere quel fact per quell'unità.
-- Includi TUTTE le categorie che hanno tabelle di allocazione nel RIPARTO.
-- I codici unità sono in genere numeri semplici (1, 2, 3...) in questo documento.
+REGOLE:
+- Estrai SOLO dalle tabelle con intestazioni "Cod", "Nominativo", "quota mill.", "TOTALE".
+- RAGGRUPPA: ogni unità appare UNA SOLA volta con un fact per ogni categoria.
+- Se un'unità non compare in una tabella, non aggiungere quel fact.
+- Includi TUTTE le categorie di riparto che trovi.
 - Presta attenzione ai separatori decimali italiani (virgola) e delle migliaia (punto).
-- Se non trovi la sezione RIPARTO o non trovi NESSUNA unità, restituisci lista vuota.
+- Se non trovi NESSUNA tabella di riparto valida, restituisci lista vuota.
 
 TABELLE ESTRATTE DAL PARSER (come riferimento):
 {table_summary}
@@ -136,25 +136,14 @@ def _extract_accounts_via_llm(
         table_lines.append(f"  [{tid}] type={ttype}, headers={headers}, rows={row_count}")
     table_summary = "\n".join(table_lines) if table_lines else "(nessuna tabella estratta)"
 
-    # Truncate text to avoid exceeding token limits.
-    # Try to start from the RIPARTO section if present (avoids summary confusion).
+    # Truncate text to avoid exceeding token limits
     max_chars = 45_000
-    riparto_pos = text.find("RIPARTO delle SPESE")
-    if riparto_pos > 0 and riparto_pos < len(text) // 2:
-        # Start from RIPARTO section, but include some context before it
-        start = max(0, riparto_pos - 200)
-        truncated = text[start:start + max_chars]
+    truncated = text[:max_chars]
+    if len(text) > max_chars:
         logger.info(
-            "LLM account extraction: using RIPARTO section (offset=%d, len=%d)",
-            start, len(truncated),
+            "LLM account extraction text truncated from %d to %d chars",
+            len(text), max_chars,
         )
-    else:
-        truncated = text[:max_chars]
-        if len(text) > max_chars:
-            logger.info(
-                "LLM account extraction text truncated from %d to %d chars",
-                len(text), max_chars,
-            )
 
     messages = [
         ChatMessage(
