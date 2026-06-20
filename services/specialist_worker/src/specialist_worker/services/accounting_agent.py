@@ -35,6 +35,7 @@ class AgentAction(BaseModel):
         "list_tables",
         "get_table",
         "get_context",
+        "get_all_contexts",
         "search",
         "extract_accounts",
         "llm_extract_table",
@@ -190,6 +191,35 @@ def _tool_get_context(
             )
 
     return f"Impossibile localizzare la tabella [{index}] nel testo OCR."
+
+
+def _tool_get_all_contexts(
+    text: str,
+    tables: list[dict[str, Any]],
+    *,
+    before: int = 600,
+    after: int = 300,
+) -> str:
+    """Return OCR context for ALL expense_allocation tables in one call.
+
+    This is more efficient than calling get_context for each table individually.
+    The LLM can use this to find category names for all tables at once.
+    """
+    allocation_indices = [
+        i for i, t in enumerate(tables)
+        if t.get("table_type") == "expense_allocation"
+    ]
+    if not allocation_indices:
+        return "Nessuna tabella expense_allocation trovata."
+
+    lines: list[str] = [
+        f"Contesto per {len(allocation_indices)} tabelle expense_allocation:\n"
+    ]
+    for idx in allocation_indices:
+        ctx = _tool_get_context(text, tables, idx, before=before, after=after)
+        lines.append(f"--- Tabella [{idx}] ---\n{ctx}\n")
+
+    return "\n".join(lines)
 
 
 def _tool_search(text: str, pattern: str) -> str:
@@ -546,10 +576,14 @@ Lavori in modo ITERATIVO: analizzi una tabella alla volta, estrai i dati, e cost
 2. **get_table** — Mostra i dettagli completi di una tabella (intestazioni, righe, totali).
    Parametri: table_index (int).
 
-3. **get_context** — Mostra il testo OCR circostante una tabella per capire il contesto e trovare il nome della categoria.
+3. **get_context** — Mostra il testo OCR circostante una SINGOLA tabella per capire il contesto e trovare il nome della categoria.
    Parametri: table_index (int), before_chars (int, default 600), after_chars (int, default 300).
 
-4. **search** — Cerca un pattern nel testo OCR.
+4. **get_all_contexts** — Mostra il testo OCR circostante TUTTE le tabelle expense_allocation in UNA SOLA chiamata.
+   Molto piu' efficiente che chiamare get_context per ogni tabella.
+   Parametri: before_chars (int, default 600), after_chars (int, default 300).
+
+5. **search** — Cerca un pattern nel testo OCR.
    Parametri: pattern (stringa).
 
 5. **extract_accounts** — Estrae le unita immobiliari da UNA O PIU tabelle usando il parser strutturale.
@@ -572,20 +606,18 @@ Lavori in modo ITERATIVO: analizzi una tabella alla volta, estrai i dati, e cost
 9. **finalize** — Finalizza l'estrazione. Gli account accumulati verranno restituiti.
    Parametri: confidence (float, opzionale).
 
-## Strategia consigliata (ITERATIVA, tabella per tabella)
+## Strategia consigliata (ITERATIVA, efficiente)
 
 1. Chiama **list_tables** per vedere la struttura del documento.
 2. Identifica le tabelle di **tipo expense_allocation**. Hanno intestazioni come "Cod", "Nominativo", "quota mill.", "TOTALE".
-3. Per OGNI tabella expense_allocation, procedi in questo ordine:
-   a. Chiama **get_context** per trovare il nome della categoria nel testo circostante.
-      Il nome della categoria (es. GENERALI, SCALA N.6, ASCENSORE N.10, RISCALDAMENTO, ...)
-      si trova di solito nella riga di testo subito PRIMA della tabella.
-   b. Chiama **extract_accounts** con UN SOLO indice tabella e il nome della categoria.
-      Esempio: extract_accounts(table_indices=[3], category_name="GENERALI")
-   c. Se extract_accounts non produce risultati, prova **llm_extract_table** per quella tabella.
-4. Dopo aver processato TUTTE le tabelle, chiama **review_accounts** per vedere il risultato complessivo.
-5. Se le categorie non sono corrette, chiama **label_categories** per correggerle.
-6. Alla fine chiama **finalize** con un confidence score.
+3. Chiama **get_all_contexts** UNA SOLA VOLTA per vedere il contesto di TUTTE le tabelle expense_allocation.
+   Questo ti permette di trovare i nomi delle categorie per tutte le tabelle in un colpo solo.
+4. Per OGNI tabella expense_allocation, chiama **extract_accounts** con UN SOLO indice tabella e il nome della categoria.
+   Esempio: extract_accounts(table_indices=[3], category_name="GENERALI")
+5. Se extract_accounts non produce risultati per una tabella, prova **llm_extract_table** per quella specifica tabella.
+6. Dopo aver processato TUTTE le tabelle, chiama **review_accounts** per vedere il risultato complessivo.
+7. Se le categorie non sono corrette, chiama **label_categories** per correggerle.
+8. Alla fine chiama **finalize** con un confidence score.
 
 ## Regole importanti
 
@@ -707,7 +739,7 @@ def agentic_account_extraction(
     period_to: str | None,
     *,
     provider: LLMProvider | None,
-    max_steps: int = 40,
+    max_steps: int = 80,
 ) -> list[dict[str, Any]]:
     """Extract accounts using an agentic loop with tool use.
 
@@ -853,6 +885,13 @@ def _execute_tool(
         return _tool_get_context(
             text, tables,
             action.table_index or 0,
+            before=action.before_chars or 600,
+            after=action.after_chars or 300,
+        )
+
+    if action.action == "get_all_contexts":
+        return _tool_get_all_contexts(
+            text, tables,
             before=action.before_chars or 600,
             after=action.after_chars or 300,
         )
