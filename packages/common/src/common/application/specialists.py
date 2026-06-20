@@ -116,6 +116,7 @@ def ensure_specialist_jobs_for_scan_unit(session: Session, scan_unit_id: str | u
                     SpecialistJob.specialist_type == specialist_type,
                 )
                 .order_by(SpecialistJob.created_at.desc())
+                .limit(1)
             ).scalar_one_or_none()
             if latest_job and latest_job.status in {"queued", "pending", "processing", "succeeded"}:
                 continue

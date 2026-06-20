@@ -12,6 +12,7 @@ from common.db.models import DocumentUnit
 from knowledge_classifier.llm.base import ChatMessage, LLMProvider
 from pydantic import BaseModel, Field
 
+from specialist_worker.services.accounting_agent import agentic_account_extraction
 from specialist_worker.services.accounting_reconciliation import (
     AccountingReconciliationProposal,
     propose_accounting_reconciliation,
@@ -92,7 +93,7 @@ i dati in un unico account per unità con un dizionario piatto categoria→impor
 - unit_code: il codice unità (es. "1", "2", "3")
 - subject_label: il nome del proprietario/condomino
 - amounts: UN SOLO DIZIONARIO con chiave=nome categoria, valore=importo
-  Esempio: {"GENERALI": 375.65, "SCALA N.10": 130.28, ...}
+  Esempio: {{"GENERALI": 375.65, "SCALA N.10": 130.28, ...}}
 
 REGOLE:
 - Estrai SOLO dalle tabelle con intestazioni "Cod", "Nominativo", "quota mill.", "TOTALE".
@@ -246,8 +247,8 @@ def process_accounting_statement(
     ) or _extract_markdown_tables(text, period_from=period_from, period_to=period_to)
     validation_checks = _build_validation_checks(tables)
 
-    # --- Account extraction: try LLM first, fall back to rule-based ---
-    accounts = _extract_accounts_via_llm(
+    # --- Account extraction: try agentic LLM first, fall back to rule-based ---
+    accounts = agentic_account_extraction(
         text, tables, period_from, period_to, provider=reconciliation_provider
     )
     if not accounts:
@@ -1072,9 +1073,25 @@ def _parse_amount(value: str | None) -> float | None:
     if not value:
         return None
     compact = value.replace("€", "").replace(" ", "")
-    if not re.fullmatch(r"-?\d{1,3}(?:\.\d{3})*(?:,\d+)?|-?\d+(?:,\d+)?", compact):
+    # Italian format: 1.234,56 (dots=thousands, comma=decimal)
+    # Simple format: 1234,56 (comma=decimal)
+    # OCR error: 1234.56 (dot used instead of comma for decimal)
+    italian_pattern = r"-?\d{1,3}(?:\.\d{3})*(?:,\d+)?"
+    simple_pattern = r"-?\d+(?:,\d+)?"
+    dot_decimal_pattern = r"-?\d+\.\d{1,2}"
+
+    if re.fullmatch(italian_pattern, compact):
+        # Remove thousands separators (dots), replace decimal comma with dot
+        normalized = compact.replace(".", "").replace(",", ".")
+    elif re.fullmatch(simple_pattern, compact):
+        # Replace decimal comma with dot
+        normalized = compact.replace(",", ".")
+    elif re.fullmatch(dot_decimal_pattern, compact):
+        # Dot IS the decimal separator — keep it
+        normalized = compact
+    else:
         return None
-    normalized = compact.replace(".", "").replace(",", ".")
+
     try:
         return float(normalized)
     except ValueError:
@@ -1378,6 +1395,26 @@ def _is_payment_ledger(table: dict[str, Any]) -> bool:
     return {"nominativo", "importo"}.issubset(headers) and any("data pag" in header for header in headers)
 
 
+def _derive_table_category(table: dict[str, Any]) -> str | None:
+    """Derive a category label from the table headers or context.
+
+    For expense_allocation tables, the category name may be embedded in the
+    first header (e.g. "ASCENSORE N.6 / Cod") or in the section label.
+    """
+    headers = table.get("headers", [])
+    if headers:
+        first = str(headers[0])
+        # Check if category is embedded: "CATEGORY / Cod" or "CATEGORY / codice"
+        match = re.match(r"^(.+?)\s*/\s*(?:cod|codice|nominativo)$", first, re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+    # Fallback: use section label if it contains useful info
+    section_label = table.get("section_label", "")
+    if section_label and section_label != "Riparto consuntivo":
+        return section_label
+    return None
+
+
 def _extract_row_facts(
     table: dict[str, Any],
     row: dict[str, Any],
@@ -1398,17 +1435,23 @@ def _extract_row_facts(
     context_source = accounting_context.get("source") or "document_unit"
     context_review_status = accounting_context.get("review_status") or "unverified"
     facts: list[dict[str, Any]] = []
+    # Derive category label from table context for allocation tables
+    table_type = str(table.get("table_type") or "unknown")
+    table_category = _derive_table_category(table)
     for column, raw_amount in amounts.items():
         if not isinstance(raw_amount, (int, float)):
             continue
         fact_type, category_label, is_total = _classify_fact_column(
             str(column),
-            table_type=str(table.get("table_type") or "unknown"),
+            table_type=table_type,
             payment_ledger=payment_ledger,
             raw_value=str(cells.get(column) or ""),
         )
         if fact_type is None:
             continue
+        # Override category label for allocation tables with derived name
+        if table_type == "expense_allocation" and table_category:
+            category_label = table_category
         accounting_role = accounting_context.get("role")
         if accounting_role is None and fact_type == "personal_charge":
             accounting_role = "actual_personal_charge"
