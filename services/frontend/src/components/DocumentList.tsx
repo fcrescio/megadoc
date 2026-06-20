@@ -16,7 +16,10 @@ const DocumentRow = memo(function DocumentRow({ doc, onSelect }: { doc: Document
     tags.push({ label: 'Ordine invertito', color: 'bg-orange-500/20 text-orange-300 border-orange-600/30' });
   }
   if (doc.document_unit_count > 0) {
-    tags.push({ label: `${doc.document_unit_count} doc unit`, color: 'bg-sky-500/20 text-sky-300 border-sky-600/30' });
+    tags.push({ label: `${doc.document_unit_count} documenti`, color: 'bg-sky-500/20 text-sky-300 border-sky-600/30' });
+  }
+  if (doc.scan_unit_count > 1) {
+    tags.push({ label: `${doc.scan_unit_count} scansioni`, color: 'bg-indigo-500/20 text-indigo-300 border-indigo-600/30' });
   }
   if (doc.ingestion_status === 'failed') {
     tags.push({ label: 'OCR fallito', color: 'bg-red-500/20 text-red-300 border-red-600/30' });

@@ -729,8 +729,11 @@ function DocumentDetail({ documentId, onBack, initialTab = 'info' }: Props) {
                     {knowledge.scan_units.map((su) => (
                       <div key={su.id} className="text-sm bg-slate-50 rounded-lg p-3 border border-slate-200">
                         <div className="flex items-center gap-2 mb-1.5">
-                          <span className="font-medium text-slate-700">Scan unit</span>
-                          <span className="text-xs text-slate-400">({su.page_count} pagine)</span>
+                          <span className="font-medium text-slate-700">Scansione fisica</span>
+                          <span className="text-xs text-slate-400">
+                            {su.page_count} pagine
+                            {su.document_units.length > 0 && ` · ${su.document_units.length} documenti`}
+                          </span>
                           {su.preflight && (
                             <div className="flex flex-wrap gap-1 ml-auto">
                               {su.preflight.rotation_applied != null && su.preflight.rotation_applied !== 0 && (
