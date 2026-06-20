@@ -415,7 +415,7 @@ def _tool_label_categories(
     if not result.labels:
         return "Nessuna etichetta generata."
 
-    # Apply labels to accumulated accounts
+    # Apply labels to accumulated accounts — only relabel facts from the matching table
     from specialist_worker.services.accounting_statement import _normalize_key
     label_map = {str(lbl["table_index"]): lbl for lbl in result.labels}
 
@@ -425,13 +425,16 @@ def _tool_label_categories(
         if lbl:
             cat_label = lbl.get("category_label", "")
             cat_key = lbl.get("category_key", _normalize_key(cat_label))
-            lines.append(f"  Tabella [{i}] → {cat_label} ({cat_key})")
-            # Relabel facts that came from this table
+            table_id = t.get("table_id")
+            lines.append(f"  Tabella [{i}] (id={table_id}) → {cat_label} ({cat_key})")
+            # Relabel only facts whose evidence points to this table
             for acc in accumulated_accounts.values():
                 for fact in acc.get("facts", []):
                     if fact.get("category_label") in ("Totale gestione", None, "unknown"):
-                        fact["category_label"] = cat_label
-                        fact["category_key"] = cat_key
+                        fact_table_id = (fact.get("evidence") or {}).get("table_id")
+                        if fact_table_id is None or fact_table_id == table_id:
+                            fact["category_label"] = cat_label
+                            fact["category_key"] = cat_key
         else:
             lines.append(f"  Tabella [{i}] → nessuna etichetta")
 
@@ -460,27 +463,28 @@ Hai a disposizione i seguenti strumenti. Usali UNO ALLA VOLTA per analizzare il 
 4. **search** — Cerca un pattern nel testo OCR.
    Parametri: pattern (stringa).
 
-5. **extract_accounts** — Estrae le unita immobiliari da UNA O PIU tabelle usando il parser strutturale (funziona bene con tabelle ben formate).
+5. **extract_accounts** — Estrae le unita immobiliari da UNA O PIU tabelle usando il parser strutturale (funziona bene con tabelle ben formate con intestazioni "Cod", "Nominativo", "quota mill.", "TOTALE").
    Parametri: table_indices (list[int]), category_name (stringa, opzionale).
 
-6. **llm_extract_table** — Estrae le unita immobiliari da UNA SINGOLA tabella usando l'LLM. Usalo quando il parser strutturale non funziona (tabelle complesse, intestazioni ambigue).
+6. **llm_extract_table** — Estrae le unita immobiliari da UNA SINGOLA tabella usando l'LLM. USALO SOLO COME ULTIMA RISORSA quando extract_accounts non produce risultati.
    Parametri: llm_table_index (int), llm_category_name (stringa, opzionale).
 
-7. **label_categories** — Usa l'LLM per assegnare i nomi corretti delle categorie di spesa alle tabelle di riparto. Chiamalo DOPO extract_accounts per correggere le etichette.
+7. **label_categories** — Usa l'LLM per assegnare i nomi corretti delle categorie di spesa. Chiamalo DOPO extract_accounts per correggere le etichette.
    Parametri: label_table_indices (list[int]).
 
 8. **finalize** — Finalizza l'estrazione. Le unita accumulate automaticamente verranno restituite.
 
-## Strategia consigliata
+## Strategia consigliata (SEGUI RIGOROSAMENTE)
 
 1. Chiama **list_tables** per vedere la struttura del documento.
-2. Identifica le tabelle di **riparto spese**. Hanno intestazioni come "Cod", "Nominativo", "quota mill.", "TOTALE".
-3. Per ogni tabella di riparto:
-   a. Usa **get_table** per vederne i dettagli.
-   b. Usa **get_context** per trovare il nome della categoria (es. GENERALI, SCALA N.10) nel testo prima della tabella.
-   c. Usa **extract_accounts** con gli indici delle tabelle di riparto.
-4. Se extract_accounts non produce risultati per una tabella, prova **llm_extract_table**.
-5. Accumula mentalmente gli account. Alla fine chiama **finalize** con TUTTI gli account raccolti.
+2. Identifica le tabelle di **tipo expense_allocation**. Hanno intestazioni come "Cod", "Nominativo", "quota mill.", "TOTALE".
+3. Raccogli TUTTI gli indici delle tabelle expense_allocation in un'unica lista.
+4. Chiama **extract_accounts** UNA SOLA VOLTA con TUTTI gli indici delle tabelle di riparto.
+   - extract_accounts gestisce automaticamente piu tabelle e restituisce tutti gli account.
+   - NON chiamare extract_accounts separatamente per ogni tabella.
+5. Se extract_accounts restituisce account, chiama **label_categories** con gli stessi indici per correggere le etichette delle categorie.
+6. Se extract_accounts NON restituisce account per qualche tabella, prova **llm_extract_table** per QUELLA SPECIFICA tabella.
+7. Alla fine chiama **finalize**.
 
 ## Regole importanti
 
@@ -491,6 +495,8 @@ Hai a disposizione i seguenti strumenti. Usali UNO ALLA VOLTA per analizzare il 
 - Raccogli TUTTE le categorie di riparto che trovi.
 - Se una categoria non e presente per una unita, l'importo e 0.
 - Quando chiami finalize, verranno restituiti tutti gli account accumulati automaticamente.
+- NON usare llm_extract_table se extract_accounts ha gia funzionato.
+- llm_extract_table e LENTO e COSTOSO. Usalo solo come ultima risorsa.
 """
 
 

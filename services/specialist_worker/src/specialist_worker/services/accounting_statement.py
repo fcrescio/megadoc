@@ -12,7 +12,11 @@ from common.db.models import DocumentUnit
 from knowledge_classifier.llm.base import ChatMessage, LLMProvider
 from pydantic import BaseModel, Field
 
-from specialist_worker.services.accounting_agent import agentic_account_extraction
+from specialist_worker.services.accounting_agent import (
+    _merge_accounts,
+    _tool_label_categories,
+    agentic_account_extraction,
+)
 from specialist_worker.services.accounting_reconciliation import (
     AccountingReconciliationProposal,
     propose_accounting_reconciliation,
@@ -247,12 +251,42 @@ def process_accounting_statement(
     ) or _extract_markdown_tables(text, period_from=period_from, period_to=period_to)
     validation_checks = _build_validation_checks(tables)
 
-    # --- Account extraction: try agentic LLM first, fall back to rule-based ---
-    accounts = agentic_account_extraction(
-        text, tables, period_from, period_to, provider=reconciliation_provider
-    )
-    if not accounts:
-        accounts = _extract_accounts(tables, period_from, period_to)
+    # --- Account extraction: rule-based first, then label_categories, agent as fallback ---
+    accounts = _extract_accounts(tables, period_from, period_to)
+    if accounts and reconciliation_provider is not None:
+        # Rule-based extraction succeeded — fix category labels via LLM
+        allocation_indices = [
+            i for i, t in enumerate(tables)
+            if t.get("table_type") == "expense_allocation"
+        ]
+        if allocation_indices:
+            # Convert list-of-dicts to accumulated dict format
+            accumulated: dict[str, dict[str, Any]] = {}
+            for acc in accounts:
+                key = acc.get("account_key", _normalize_key(acc.get("unit_code", "")))
+                accumulated[key] = dict(acc)
+            try:
+                _tool_label_categories(
+                    text, tables, allocation_indices,
+                    accumulated, provider=reconciliation_provider,
+                )
+                # Convert back to list preserving order
+                seen = set()
+                relabeled: list[dict[str, Any]] = []
+                for acc in accounts:
+                    key = acc.get("account_key", _normalize_key(acc.get("unit_code", "")))
+                    if key in accumulated and key not in seen:
+                        relabeled.append(accumulated[key])
+                        seen.add(key)
+                if relabeled:
+                    accounts = relabeled
+            except Exception as exc:
+                logger.warning("Category labeling failed (non-fatal): %s", exc)
+    elif not accounts:
+        # Rule-based returned nothing — try agentic extraction as fallback
+        accounts = agentic_account_extraction(
+            text, tables, period_from, period_to, provider=reconciliation_provider
+        )
 
     tables, validation_checks, accounts, reconciliation = _reconcile_with_llm(
         tables,
