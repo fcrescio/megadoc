@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 
 from sqlalchemy import create_engine, select
@@ -27,7 +28,10 @@ from knowledge_classifier.services.title_generation import derive_document_unit_
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-DATABASE_URL = "postgresql+psycopg://megadoc:megadoc@postgres:5432/megadoc"
+DATABASE_URL = os.environ.get("DATABASE_URL")
+if not DATABASE_URL:
+    logger.error("DATABASE_URL environment variable is required.")
+    sys.exit(1)
 
 
 def get_document_units_without_titles(session: Session) -> list:

@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 
 from sqlalchemy import create_engine, select
@@ -27,7 +28,10 @@ from knowledge_classifier.services.archive_identity import derive_archive_identi
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-DATABASE_URL = "postgresql+psycopg://megadoc:megadoc@postgres:5432/megadoc"
+DATABASE_URL = os.environ.get("DATABASE_URL")
+if not DATABASE_URL:
+    logger.error("DATABASE_URL environment variable is required.")
+    sys.exit(1)
 
 
 def get_all_document_units(session: Session) -> list:
