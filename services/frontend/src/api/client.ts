@@ -69,6 +69,14 @@ export async function getDocument(id: string): Promise<Document> {
   return handleResponse<Document>(response);
 }
 
+export async function reingestDocument(documentId: string, ocrBackend?: string): Promise<Document> {
+  const params = ocrBackend ? `?ocr_backend=${encodeURIComponent(ocrBackend)}` : '';
+  const response = await fetch(`${API_BASE}/documents/${documentId}/reingest${params}`, {
+    method: 'POST',
+  });
+  return handleResponse<Document>(response);
+}
+
 export async function getDocumentVersions(documentId: string): Promise<DocumentVersion[]> {
   const response = await fetch(`${API_BASE}/documents/${documentId}/versions`);
   return handleResponse<DocumentVersion[]>(response);

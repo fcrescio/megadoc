@@ -18,6 +18,9 @@ const DocumentRow = memo(function DocumentRow({ doc, onSelect }: { doc: Document
   if (doc.document_unit_count > 0) {
     tags.push({ label: `${doc.document_unit_count} doc unit`, color: 'bg-sky-500/20 text-sky-300 border-sky-600/30' });
   }
+  if (doc.ingestion_status === 'failed') {
+    tags.push({ label: 'OCR fallito', color: 'bg-red-500/20 text-red-300 border-red-600/30' });
+  }
 
   return (
     <button

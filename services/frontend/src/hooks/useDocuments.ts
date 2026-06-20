@@ -84,6 +84,7 @@ import {
   createKnowledgeTopic,
   addDocumentUnitTopicAssignment,
   deleteDocumentUnitTopicAssignment,
+  reingestDocument,
 } from '../api/client';
 
 export function useDocuments(limit = 100) {
@@ -468,6 +469,20 @@ export function useUploadDocument() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['documents'] });
       queryClient.invalidateQueries({ queryKey: ['jobs'] });
+    },
+  });
+}
+
+export function useReingestDocument() {
+  const queryClient = useQueryClient();
+
+  return useMutation<Document, Error, { documentId: string; ocrBackend?: string }>({
+    mutationFn: ({ documentId, ocrBackend }) => reingestDocument(documentId, ocrBackend),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['documents'] });
+      queryClient.invalidateQueries({ queryKey: ['document'] });
+      queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge'] });
     },
   });
 }

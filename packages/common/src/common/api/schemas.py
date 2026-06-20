@@ -48,6 +48,8 @@ class DocumentResponse(BaseModel):
     document_unit_count: int = 0
     rotation_applied: int | None = None
     page_order_reversed: bool | None = None
+    ingestion_status: str | None = None
+    ingestion_error: str | None = None
 
 
 class DocumentVersionResponse(BaseModel):

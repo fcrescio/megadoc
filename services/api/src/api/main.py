@@ -10,7 +10,7 @@ from urllib.request import Request as UrlRequest, urlopen
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile
 from redis import Redis
-from sqlalchemy import func, select, text
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.orm import Session
 
 from api.middleware import RequestContextMiddleware
@@ -40,10 +40,10 @@ from common.application.repositories import (
 )
 from common.application.services import DocumentService, JobService, persist_upload_to_temp
 from common.config import Settings, get_settings
-from common.db.models import DocumentUnit, ManualComment, OCRResult, ScanUnit
+from common.db.models import DocumentAsset, DocumentUnit, IngestionJob, ManualComment, OCRResult, ScanUnit
 from common.db.schema import ensure_knowledge_schema
 from common.db.session import engine, get_db_session
-from common.domain.enums import SourceType
+from common.domain.enums import AssetType, SourceType
 from common.domain.exceptions import NotFoundError, ValidationError
 from common.logging import configure_logging
 from common.storage.backends import StorageBackend, get_storage_backend
@@ -264,6 +264,19 @@ def list_documents(
     ).scalars().all()
     ocr_map: dict[uuid.UUID, OCRResult] = {r.document_id: r for r in ocr_rows}
 
+    # Batch: latest ingestion job per document
+    latest_job_subq = (
+        select(IngestionJob.id)
+        .where(IngestionJob.document_id.in_(doc_ids))
+        .order_by(IngestionJob.document_id, IngestionJob.created_at.desc())
+        .distinct(IngestionJob.document_id)
+        .subquery()
+    )
+    job_rows = session.execute(
+        select(IngestionJob).where(IngestionJob.id.in_(latest_job_subq))
+    ).scalars().all()
+    job_map: dict[uuid.UUID, IngestionJob] = {r.document_id: r for r in job_rows}
+
     result: list[DocumentResponse] = []
     for row in rows:
         su_count, du_count = counts_map.get(row.id, (0, 0))
@@ -276,6 +289,10 @@ def list_documents(
             if isinstance(orientation, dict):
                 rotation_applied = orientation.get("rotation_applied")
                 page_order_reversed = orientation.get("page_order_reversed", False)
+
+        job = job_map.get(row.id)
+        ingestion_status = job.status if job else None
+        ingestion_error = job.error_message if job else None
 
         result.append(
             DocumentResponse(
@@ -291,6 +308,8 @@ def list_documents(
                 document_unit_count=du_count,
                 rotation_applied=rotation_applied,
                 page_order_reversed=page_order_reversed,
+                ingestion_status=ingestion_status,
+                ingestion_error=ingestion_error,
             )
         )
 
@@ -329,6 +348,14 @@ def get_document(document_id: uuid.UUID, session: Session = Depends(db_session_d
             rotation_applied = orientation.get("rotation_applied")
             page_order_reversed = orientation.get("page_order_reversed", False)
 
+    # Latest ingestion job
+    latest_job = session.execute(
+        select(IngestionJob)
+        .where(IngestionJob.document_id == document.id)
+        .order_by(IngestionJob.created_at.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+
     return DocumentResponse(
         id=document.id,
         external_id=document.external_id,
@@ -342,7 +369,48 @@ def get_document(document_id: uuid.UUID, session: Session = Depends(db_session_d
         document_unit_count=count_result.du_count,
         rotation_applied=rotation_applied,
         page_order_reversed=page_order_reversed,
+        ingestion_status=latest_job.status if latest_job else None,
+        ingestion_error=latest_job.error_message if latest_job else None,
     )
+
+
+OCR_ASSET_TYPES = {AssetType.MARKDOWN, AssetType.TEXT, AssetType.OCR_JSON, AssetType.PREFLIGHT_JSON, AssetType.OCR_REFINEMENT_JSON}
+
+
+@app.post("/documents/{document_id}/reingest")
+def reingest_document(
+    document_id: uuid.UUID,
+    ocr_backend: str | None = Query(default=None),
+    session: Session = Depends(db_session_dep),
+) -> DocumentResponse:
+    """Delete all OCR artifacts and ingestion jobs for a document, then re-queue ingestion."""
+    document = DocumentRepository(session).get(document_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail="Document not found.")
+
+    # Delete OCR-related document assets (S3 artifacts remain orphaned — acceptable for dev)
+    session.execute(
+        delete(DocumentAsset).where(
+            DocumentAsset.document_id == document.id,
+            DocumentAsset.asset_type.in_(OCR_ASSET_TYPES),
+        )
+    )
+
+    # Delete OCR results (cascade deletes scan_units → document_units, knowledge_jobs, etc.)
+    session.execute(delete(OCRResult).where(OCRResult.document_id == document.id))
+
+    # Delete ingestion jobs
+    session.execute(delete(IngestionJob).where(IngestionJob.document_id == document.id))
+
+    session.commit()
+
+    # Create a new ingestion job
+    job_service = JobService(session)
+    job = job_service.create_ingest_job(document.id)
+    dispatch_ingestion_job(job.id, ocr_backend=ocr_backend)
+
+    # Return updated document info
+    return get_document(document_id, session)
 
 
 @app.get("/documents/{document_id}/versions", response_model=list[DocumentVersionResponse])

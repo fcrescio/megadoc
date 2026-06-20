@@ -11,6 +11,8 @@ export interface Document {
   document_unit_count: number;
   rotation_applied: number | null;
   page_order_reversed: boolean | null;
+  ingestion_status: string | null;
+  ingestion_error: string | null;
 }
 
 export interface PreflightInfo {

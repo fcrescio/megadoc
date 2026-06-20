@@ -13,6 +13,7 @@ import {
   useKnowledgeTopics,
   useAddDocumentUnitTopicAssignment,
   useDeleteDocumentUnitTopicAssignment,
+  useReingestDocument,
 } from '../hooks/useDocuments';
 import { downloadAsset, getDocumentDownloadUrl, getSpecialistResultExportUrl } from '../api/client';
 
@@ -593,6 +594,7 @@ function DocumentDetail({ documentId, onBack, initialTab = 'info' }: Props) {
   const { data: knowledgeTopics = [] } = useKnowledgeTopics(true);
   const ensureKnowledge = useEnsureDocumentKnowledge();
   const ensureSpecialists = useEnsureDocumentSpecialists();
+  const reingest = useReingestDocument();
 
   useEffect(() => {
     setActiveTab(initialTab);
@@ -684,6 +686,40 @@ function DocumentDetail({ documentId, onBack, initialTab = 'info' }: Props) {
                   <p>{selectedVersion ? `Versione ${selectedVersion.version_number}` : 'Ultima versione'}</p>
                 </div>
               </div>
+
+              {/* Ingestion status */}
+              {docData.ingestion_status && (
+                <div className="border-t border-slate-200 pt-4">
+                  <h3 className="text-sm font-semibold text-gray-700 mb-2">Stato ingestione</h3>
+                  <div className="flex items-center gap-3">
+                    <span className={`inline-flex items-center px-2.5 py-1 text-xs font-medium rounded-full border ${
+                      docData.ingestion_status === 'succeeded'
+                        ? 'bg-green-100 text-green-700 border-green-200'
+                        : docData.ingestion_status === 'failed'
+                        ? 'bg-red-100 text-red-700 border-red-200'
+                        : docData.ingestion_status === 'running'
+                        ? 'bg-blue-100 text-blue-700 border-blue-200'
+                        : 'bg-slate-100 text-slate-600 border-slate-200'
+                    }`}>
+                      {docData.ingestion_status}
+                    </span>
+                    {docData.ingestion_status === 'failed' && (
+                      <button
+                        onClick={() => reingest.mutate({ documentId })}
+                        disabled={reingest.isPending}
+                        className="px-3 py-1.5 text-xs font-medium rounded-md bg-red-600 text-white hover:bg-red-700 disabled:opacity-60"
+                      >
+                        {reingest.isPending ? 'Reinserimento...' : 'Riprova ingestione'}
+                      </button>
+                    )}
+                  </div>
+                  {docData.ingestion_error && (
+                    <p className="mt-1.5 text-xs text-red-600 font-mono bg-red-50 rounded p-2 border border-red-100">
+                      {docData.ingestion_error}
+                    </p>
+                  )}
+                </div>
+              )}
 
               {/* Preflight / orientation info */}
               {knowledge && knowledge.scan_units.length > 0 && (
