@@ -48,10 +48,14 @@ class LLMFact(BaseModel):
 
 
 class LLMAccount(BaseModel):
-    """A single account (condominium unit) extracted by the LLM."""
+    """A single account (condominium unit) extracted by the LLM.
+    
+    Uses a compact flat dict (category→amount) instead of a list of fact objects
+    to keep the LLM response small enough to fit within token limits.
+    """
     unit_code: str
     subject_label: str
-    facts: list[LLMFact] = Field(default_factory=list)
+    amounts: dict[str, float] = Field(default_factory=dict)
 
 
 class LLMExtractionResult(BaseModel):
@@ -79,27 +83,23 @@ Queste tabelle contengono UNA RIGA per ogni unità immobiliare più una riga
 di totale. Il nome della categoria (es. GENERALI, SCALA N.10, ASCENSORE N.6, ...)
 è scritto come testo subito prima della tabella.
 
-IGNORA le tabelle riassuntive che hanno intestazioni diverse (es. "Voce", "Importo",
-"Entrate", "Uscite", "Descrizione", "Preventivo", "Consuntivo", ecc.) — quelle
-non contengono dati per unità.
+IGNORA le tabelle riassuntive con intestazioni diverse (es. "Voce", "Importo",
+"Entrate", "Uscite", "Descrizione", "Preventivo", "Consuntivo").
 
-Per OGNI tabella di riparto che trovi, estrai TUTTE le unità, RAGGRUPPANDOLE
-in un unico account per unità con un fact per ogni categoria:
+Per OGNI tabella di riparto che trovi, estrai TUTTE le unità. RAGGRUPPA
+i dati in un unico account per unità con un dizionario piatto categoria→importo:
 
-- unit_code: il codice unità (es. "1", "2", "3", "B11", "A1")
+- unit_code: il codice unità (es. "1", "2", "3")
 - subject_label: il nome del proprietario/condomino
-- facts: un fact per OGNI categoria di spesa, ciascuno con:
-  - fact_type: "allocated_expense"
-  - amount: l'importo numerico (normalizzato: "1.234,56" → 1234.56)
-  - category_label: il nome della categoria (es. "GENERALI", "SCALA N.10")
-  - is_total: false
+- amounts: UN SOLO DIZIONARIO con chiave=nome categoria, valore=importo
+  Esempio: {"GENERALI": 375.65, "SCALA N.10": 130.28, ...}
 
 REGOLE:
 - Estrai SOLO dalle tabelle con intestazioni "Cod", "Nominativo", "quota mill.", "TOTALE".
-- RAGGRUPPA: ogni unità appare UNA SOLA volta con un fact per ogni categoria.
-- Se un'unità non compare in una tabella, non aggiungere quel fact.
+- RAGGRUPPA: ogni unità appare UNA SOLA volta con un unico dizionario amounts.
+- amounts contiene SOLO le categorie in cui l'unità compare.
 - Includi TUTTE le categorie di riparto che trovi.
-- Presta attenzione ai separatori decimali italiani (virgola) e delle migliaia (punto).
+- Importi normalizzati: "1.234,56" → 1234.56
 - Se non trovi NESSUNA tabella di riparto valida, restituisci lista vuota.
 
 TABELLE ESTRATTE DAL PARSER (come riferimento):
@@ -179,18 +179,18 @@ def _extract_accounts_via_llm(
         result.confidence,
     )
 
-    # Convert LLM accounts to pipeline format
+    # Convert LLM accounts (compact format) to pipeline format
     pipeline_accounts: list[dict[str, Any]] = []
     for llm_acc in result.accounts:
         facts: list[dict[str, Any]] = []
-        for llm_fact in llm_acc.facts:
+        for category_label, amount in llm_acc.amounts.items():
             facts.append({
-                "fact_type": llm_fact.fact_type,
-                "amount": abs(llm_fact.amount),
-                "raw_amount": llm_fact.amount,
-                "category_key": _normalize_key(llm_fact.category_label) if llm_fact.category_label else None,
-                "category_label": llm_fact.category_label,
-                "is_total": llm_fact.is_total,
+                "fact_type": "allocated_expense",
+                "amount": abs(amount),
+                "raw_amount": amount,
+                "category_key": _normalize_key(category_label),
+                "category_label": category_label,
+                "is_total": False,
                 "currency": "EUR",
                 "period_context": {
                     "from": period_from,
