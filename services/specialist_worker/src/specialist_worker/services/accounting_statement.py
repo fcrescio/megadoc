@@ -735,6 +735,8 @@ def _extract_structured_tables(
         if table_position >= 0:
             prefix = text[:table_position]
             search_offset = table_position + len(html)
+            parsed_table["_text_position"] = table_position
+            parsed_table["_text_end_position"] = search_offset
         parsed_table["accounting_context"] = _accounting_context(
             parsed_table,
             prefix,

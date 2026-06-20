@@ -21,6 +21,57 @@ from pydantic import BaseModel, Field
 logger = logging.getLogger(__name__)
 
 
+def _textual_tail_before_table(value: str, *, max_lines: int = 10) -> str:
+    """Return the last meaningful non-table text lines before a table anchor."""
+    last_table_end = value.lower().rfind("</table>")
+    if last_table_end >= 0:
+        value = value[last_table_end + len("</table>"):]
+    without_tables = re.sub(r"<table\b.*?</table>", "\n", value, flags=re.IGNORECASE | re.DOTALL)
+    without_tags = re.sub(r"<[^>]+>", " ", without_tables)
+    lines: list[str] = []
+    for raw_line in without_tags.splitlines():
+        line = re.sub(r"\s+", " ", raw_line).strip(" |")
+        if not line:
+            continue
+        lines.append(line)
+    return "\n".join(lines[-max_lines:])
+
+
+def _category_label_from_context(headers: list[Any], context: str) -> str | None:
+    """Infer an expense category from structured headers or nearby textual headings."""
+    if headers:
+        first = str(headers[0]).strip()
+        match = re.match(r"^(.+?)\s*/\s*(?:cod|codice|nominativo)$", first, re.IGNORECASE)
+        if match:
+            label = match.group(1).strip()
+            if label:
+                return label
+
+    match = re.search(
+        r"Righe testuali immediatamente prima della tabella:\n(?P<body>.*?)(?:\n\n|$)",
+        context,
+        re.DOTALL,
+    )
+    body = match.group("body") if match else context
+    candidates: list[str] = []
+    for raw_line in body.splitlines():
+        line = re.sub(r"^\s*#+\s*", "", raw_line).strip(" |")
+        line = re.sub(r"\s+", " ", line).strip()
+        lowered = line.lower()
+        if not line or line.startswith("("):
+            continue
+        if len(line) > 80:
+            continue
+        if re.fullmatch(r"[\d\s.,€%-]+", line):
+            continue
+        if lowered.startswith("pag."):
+            continue
+        if any(token in lowered for token in ("riparto delle spese", "totale delle spese", "esercizio")):
+            continue
+        candidates.append(line)
+    return candidates[-1] if candidates else None
+
+
 # ---------------------------------------------------------------------------
 # Agent action model — flat discriminated union
 # ---------------------------------------------------------------------------
@@ -143,6 +194,32 @@ def _tool_get_context(
         return f"Errore: indice tabella {index} non valido."
     t = tables[index]
 
+    text_position = t.get("_text_position")
+    if isinstance(text_position, int) and 0 <= text_position < len(text):
+        text_end_position = t.get("_text_end_position")
+        end_anchor = (
+            text_end_position
+            if isinstance(text_end_position, int) and text_end_position > text_position
+            else text_position
+        )
+        start = max(0, text_position - before)
+        end = min(len(text), end_anchor + after)
+        before_ctx = text[start:text_position]
+        textual_tail = _textual_tail_before_table(before_ctx)
+        table_excerpt = text[text_position:min(end_anchor, text_position + 500)]
+        after_ctx = text[end_anchor:end]
+        return (
+            f"Contesto attorno alla tabella [{index}] "
+            f"(ancora HTML strutturata a posizione {text_position}):\n"
+            f"Righe testuali immediatamente prima della tabella:\n"
+            f"{textual_tail or '(nessuna riga testuale)'}\n\n"
+            f"Testo immediatamente prima della tabella:\n"
+            f"...{before_ctx[-700:]}...\n\n"
+            f"Inizio tabella:\n{table_excerpt}"
+            f"{'...' if end_anchor > text_position + 500 else ''}\n\n"
+            f"Testo subito dopo la tabella:\n{after_ctx[:300]}"
+        )
+
     # Determine this table's position among same-type tables
     table_type = t.get("table_type", "unknown")
     same_type_indices = [
@@ -223,6 +300,34 @@ def _tool_get_all_contexts(
         lines.append(f"--- Tabella [{idx}] ---\n{ctx}\n")
 
     return "\n".join(lines)
+
+
+def _normalize_allocation_indices(
+    tables: list[dict[str, Any]],
+    indices: list[int] | None,
+) -> list[int]:
+    """Accept either global table indices or ordinal expense-allocation indices."""
+    allocation_indices = [
+        i for i, table in enumerate(tables)
+        if table.get("table_type") == "expense_allocation"
+    ]
+    if not indices:
+        return allocation_indices
+
+    valid_global = [i for i in indices if 0 <= i < len(tables)]
+    valid_allocation_globals = [
+        i for i in valid_global
+        if tables[i].get("table_type") == "expense_allocation"
+    ]
+    if valid_allocation_globals:
+        return valid_global
+
+    ordinal_mapped = [
+        allocation_indices[i]
+        for i in indices
+        if 0 <= i < len(allocation_indices)
+    ]
+    return ordinal_mapped or valid_global
 
 
 def _tool_search(text: str, pattern: str) -> str:
@@ -425,12 +530,23 @@ def _tool_label_categories(
         return "Nessuna tabella valida selezionata."
 
     # Build a summary of tables and their current labels
+    from specialist_worker.services.accounting_statement import _normalize_key
+
+    deterministic_labels: dict[str, dict[str, Any]] = {}
     table_info = []
     for i, t in zip(indices, selected):
         headers = t.get("headers", [])
         page = t.get("page_number", "?")
         # Get context to find category name — use generous window
         ctx = _tool_get_context(text, tables, i, before=1200, after=300)
+        deterministic_label = _category_label_from_context(headers, ctx)
+        if deterministic_label:
+            deterministic_labels[str(i)] = {
+                "table_index": i,
+                "category_label": deterministic_label,
+                "category_key": _normalize_key(deterministic_label),
+                "source": "deterministic_context",
+            }
         # Include first 2 data rows as sample
         rows = t.get("rows", [])
         sample_rows = []
@@ -442,6 +558,7 @@ def _tool_label_categories(
             "index": i,
             "page": page,
             "headers": headers,
+            "deterministic_category": deterministic_label,
             "context_snippet": ctx[:500],
             "sample_rows": "\n".join(sample_rows),
         })
@@ -463,6 +580,7 @@ def _tool_label_categories(
         + "\n".join(
             f"Tabella [{t['index']}] (pagina {t['page']}):\n"
             f"  Headers: {t['headers']}\n"
+            f"  Categoria deterministica candidata: {t['deterministic_category'] or '(nessuna)'}\n"
             f"  Contesto: {t['context_snippet']}\n"
             f"  Righe campione:\n{t['sample_rows']}\n"
             for t in table_info
@@ -479,6 +597,7 @@ def _tool_label_categories(
             description="Lista di {table_index, category_label, category_key}",
         )
 
+    result = CategoryLabeling(labels=[])
     try:
         parsed, raw = provider.chat_with_json(
             [
@@ -493,14 +612,18 @@ def _tool_label_categories(
         result = CategoryLabeling.model_validate(parsed)
     except Exception as exc:
         logger.warning("Category labeling failed: %s", exc)
-        return f"Etichettatura categorie fallita: {exc}"
-
-    if not result.labels:
-        return "Nessuna etichetta generata."
+        if not deterministic_labels:
+            return f"Etichettatura categorie fallita: {exc}"
 
     # Apply labels to accumulated accounts — only relabel facts from the matching table
-    from specialist_worker.services.accounting_statement import _normalize_key
-    label_map = {str(lbl["table_index"]): lbl for lbl in result.labels}
+    label_map: dict[str, dict[str, Any]] = dict(deterministic_labels)
+    for lbl in result.labels:
+        key = str(lbl.get("table_index"))
+        if key not in label_map:
+            label_map[key] = lbl
+
+    if not label_map:
+        return "Nessuna etichetta generata."
 
     lines = ["Etichette categorie assegnate:"]
     for i, t in zip(indices, selected):
@@ -931,9 +1054,10 @@ def _execute_tool(
     if action.action == "label_categories":
         if provider is None:
             return "LLM non disponibile per l'etichettatura."
+        label_indices = _normalize_allocation_indices(tables, action.label_table_indices)
         return _tool_label_categories(
             text, tables,
-            action.label_table_indices or [],
+            label_indices,
             accumulated_accounts,
             provider=provider,
         )

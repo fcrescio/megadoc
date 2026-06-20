@@ -5,7 +5,12 @@ from specialist_worker.services.accounting_reconciliation import (
     AccountingReconciliationProposal,
     AccountingTableInterpretation,
 )
-from specialist_worker.services.accounting_statement import process_accounting_statement
+from specialist_worker.services.accounting_agent import (
+    _normalize_allocation_indices,
+    _tool_get_context,
+    _tool_label_categories,
+)
+from specialist_worker.services.accounting_statement import _extract_structured_tables, process_accounting_statement
 
 
 def _document_unit() -> DocumentUnit:
@@ -21,6 +26,21 @@ class _ReconciliationProvider:
 
     def chat_with_json(self, messages, schema, temperature=0.1, max_retries=3):
         return self.proposal, self.proposal.model_dump_json()
+
+
+class _CategoryLabelProvider:
+    model_name = "fixture-category-model"
+    provider_name = "fixture"
+
+    def chat_with_json(self, messages, schema, temperature=0.1, max_retries=3):
+        prompt = messages[-1].content
+        labels = []
+        if "### GENERALI" in prompt:
+            labels.append({"table_index": 0, "category_label": "GENERALI", "category_key": "generali"})
+        if "### SCALA N. 6" in prompt:
+            labels.append({"table_index": 1, "category_label": "SCALA N. 6", "category_key": "scala_n_6"})
+        payload = {"labels": labels}
+        return payload, str(payload)
 
 
 def test_accounting_statement_extracts_account_facts_with_evidence():
@@ -203,6 +223,127 @@ def test_accounting_statement_locates_context_for_structured_table():
     )
     assert fact["accounting_role"] == "actual_allocation"
     assert fact["period_context"]["review_status"] == "inferred"
+
+
+def test_structured_table_context_uses_html_position_for_repeated_headers():
+    first_html = (
+        "<table><thead><tr><th>Cod</th><th>Nominativo</th><th>quota mill.</th>"
+        "<th>TOTALE</th></tr></thead><tbody><tr><td>1</td><td>ROSSI Mario</td>"
+        "<td>100.000</td><td>10,00</td></tr></tbody></table>"
+    )
+    second_html = (
+        "<table><thead><tr><th>Cod</th><th>Nominativo</th><th>quota mill.</th>"
+        "<th>TOTALE</th></tr></thead><tbody><tr><td>1</td><td>ROSSI Mario</td>"
+        "<td>100.000</td><td>20,00</td></tr></tbody></table>"
+    )
+    text = (
+        "## RIPARTO\n\n"
+        "### GENERALI\n\n"
+        f"{first_html}\n\n"
+        "### SCALA N. 6\n\n"
+        f"{second_html}\n"
+    )
+    structured_json = {
+        "tables": [
+            {"self_ref": "#/tables/table_1", "cells": [{"html": first_html}], "page_number": 1},
+            {"self_ref": "#/tables/table_2", "cells": [{"html": second_html}], "page_number": 1},
+        ]
+    }
+
+    tables = _extract_structured_tables(
+        _document_unit(),
+        structured_json,
+        text,
+        period_from=None,
+        period_to=None,
+    )
+
+    assert len(tables) == 2
+    assert tables[0]["_text_position"] < tables[1]["_text_position"]
+
+    first_context = _tool_get_context(text, tables, 0, before=80, after=0)
+    second_context = _tool_get_context(text, tables, 1, before=80, after=0)
+
+    assert "### GENERALI" in first_context
+    assert "### SCALA N. 6" not in first_context
+    assert "### SCALA N. 6" in second_context
+
+
+def test_label_categories_uses_structured_context_to_relabel_by_table_id():
+    first_html = (
+        "<table><thead><tr><th>Cod</th><th>Nominativo</th><th>quota mill.</th>"
+        "<th>TOTALE</th></tr></thead><tbody><tr><td>1</td><td>ROSSI Mario</td>"
+        "<td>100.000</td><td>10,00</td></tr></tbody></table>"
+    )
+    second_html = (
+        "<table><thead><tr><th>Cod</th><th>Nominativo</th><th>quota mill.</th>"
+        "<th>TOTALE</th></tr></thead><tbody><tr><td>1</td><td>ROSSI Mario</td>"
+        "<td>100.000</td><td>20,00</td></tr></tbody></table>"
+    )
+    text = (
+        "## RIPARTO\n\n"
+        "### GENERALI\n\n"
+        f"{first_html}\n\n"
+        "### SCALA N. 6\n\n"
+        f"{second_html}\n"
+    )
+    structured_json = {
+        "tables": [
+            {"self_ref": "#/tables/table_1", "cells": [{"html": first_html}], "page_number": 1},
+            {"self_ref": "#/tables/table_2", "cells": [{"html": second_html}], "page_number": 1},
+        ]
+    }
+    tables = _extract_structured_tables(
+        _document_unit(),
+        structured_json,
+        text,
+        period_from=None,
+        period_to=None,
+    )
+    accumulated = {
+        "1": {
+            "account_key": "1",
+            "unit_code": "1",
+            "subject_label": "ROSSI Mario",
+            "facts": [
+                {
+                    "category_label": "Totale gestione",
+                    "category_key": "totale_gestione",
+                    "evidence": {"table_id": "table_1"},
+                },
+                {
+                    "category_label": "Totale gestione",
+                    "category_key": "totale_gestione",
+                    "evidence": {"table_id": "table_2"},
+                },
+            ],
+        }
+    }
+
+    result = _tool_label_categories(
+        text,
+        tables,
+        [0, 1],
+        accumulated,
+        provider=_CategoryLabelProvider(),
+    )
+
+    assert "GENERALI" in result
+    assert "SCALA N. 6" in result
+    assert [fact["category_label"] for fact in accumulated["1"]["facts"]] == ["GENERALI", "SCALA N. 6"]
+
+
+def test_label_category_indices_can_be_expense_allocation_ordinals():
+    tables = [
+        {"table_type": "summary"},
+        {"table_type": "balance"},
+        {"table_type": "expense_allocation"},
+        {"table_type": "payment_schedule"},
+        {"table_type": "expense_allocation"},
+    ]
+
+    assert _normalize_allocation_indices(tables, [0, 1]) == [2, 4]
+    assert _normalize_allocation_indices(tables, [2, 4]) == [2, 4]
 
 
 def test_accounting_statement_classifies_booked_personal_charges_as_actual():
