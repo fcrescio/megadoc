@@ -1367,7 +1367,7 @@ def _extract_account_identity(row: dict[str, Any]) -> tuple[str, str] | None:
             for value in textual_cells.values()
             if (
                 match := re.fullmatch(
-                    r"\s*([A-Z]{1,2}\s*\d{1,3})(?:\s*\([^)]*\))?\s*",
+                    r"\s*([A-Z]{0,2}\s*\d{1,3})(?:\s*\([^)]*\))?\s*",
                     value,
                     re.IGNORECASE,
                 )
@@ -1391,7 +1391,7 @@ def _extract_account_identity(row: dict[str, Any]) -> tuple[str, str] | None:
 
 
 def _parse_name_and_unit(value: str) -> tuple[str, str] | None:
-    parenthesized = re.match(r"^\s*(.+?)\s*\(([A-Z]{1,2}\s*\d{1,3})\)\s*$", value, re.IGNORECASE)
+    parenthesized = re.match(r"^\s*(.+?)\s*\(([A-Z]{0,2}\s*\d{1,3})\)\s*$", value, re.IGNORECASE)
     if parenthesized and _looks_like_subject(parenthesized.group(1)):
         return parenthesized.group(2).upper().replace(" ", ""), parenthesized.group(1).strip()
     return _parse_prefixed_account(value)
@@ -1399,7 +1399,7 @@ def _parse_name_and_unit(value: str) -> tuple[str, str] | None:
 
 def _parse_prefixed_account(value: str) -> tuple[str, str] | None:
     match = re.match(
-        r"^\s*-?\s*([A-Z]{1,2}\s*\d{1,3})\s+([A-ZÀ-ÖØ-Ý' ]{3,60}?)(?:\s+-|$)",
+        r"^\s*-?\s*([A-Z]{0,2}\s*\d{1,3})\s+([A-ZÀ-ÖØ-Ý' ]{3,60}?)(?:\s+-|$)",
         value,
         re.IGNORECASE,
     )
