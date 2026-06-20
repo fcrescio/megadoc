@@ -381,13 +381,21 @@ def _tool_label_categories(
     for i, t in zip(indices, selected):
         headers = t.get("headers", [])
         page = t.get("page_number", "?")
-        # Get context to find category name
-        ctx = _tool_get_context(text, tables, i, before=400, after=100)
+        # Get context to find category name — use generous window
+        ctx = _tool_get_context(text, tables, i, before=1200, after=300)
+        # Include first 2 data rows as sample
+        rows = t.get("rows", [])
+        sample_rows = []
+        for row in rows[:2]:
+            cells = row.get("cells", {})
+            amounts = row.get("normalized_amounts", {})
+            sample_rows.append(f"    cells={dict(cells)}, amounts={dict(amounts)}")
         table_info.append({
             "index": i,
             "page": page,
             "headers": headers,
-            "context_snippet": ctx[:300],
+            "context_snippet": ctx[:500],
+            "sample_rows": "\n".join(sample_rows),
         })
 
     # Get current categories from accumulated accounts
@@ -401,13 +409,14 @@ def _tool_label_categories(
     prompt = (
         f"Ho {len(selected)} tabelle di riparto spese. Per ogni tabella, "
         f"determina il nome della categoria di spesa (es. GENERALI, SCALA N.10, "
-        f"ASCENSORE N.6, RISCALDAMENTO, ecc.) basandoti sul contesto OCR.\n\n"
+        f"ASCENSORE N.6, RISCALDAMENTO, ecc.) basandoti sul contesto OCR e sui dati campione.\n\n"
         f"Categorie attuali: {sorted(current_categories) or 'nessuna'}\n\n"
         f"Dettaglio tabelle:\n"
         + "\n".join(
             f"Tabella [{t['index']}] (pagina {t['page']}):\n"
             f"  Headers: {t['headers']}\n"
             f"  Contesto: {t['context_snippet']}\n"
+            f"  Righe campione:\n{t['sample_rows']}\n"
             for t in table_info
         )
         + "\n\nRestituisci un array JSON di oggetti con:\n"
