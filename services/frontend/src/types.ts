@@ -9,12 +9,12 @@ export interface Document {
   created_at: string;
   scan_unit_count: number;
   document_unit_count: number;
-  rotation_applied: boolean | null;
+  rotation_applied: number | null;
   page_order_reversed: boolean | null;
 }
 
 export interface PreflightInfo {
-  rotation_applied: boolean | null;
+  rotation_applied: number | null;
   rotation_confidence: number | null;
   page_order_reversed: boolean;
   orientation_backend: string | null;

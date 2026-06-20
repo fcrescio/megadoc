@@ -10,7 +10,7 @@ from urllib.request import Request as UrlRequest, urlopen
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile
 from redis import Redis
-from sqlalchemy import func, text
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from api.middleware import RequestContextMiddleware
@@ -268,7 +268,7 @@ def list_documents(
     for row in rows:
         su_count, du_count = counts_map.get(row.id, (0, 0))
 
-        rotation_applied: bool | None = None
+        rotation_applied: int | None = None
         page_order_reversed: bool | None = None
         ocr = ocr_map.get(row.id)
         if ocr and ocr.confidence_summary:
@@ -321,7 +321,7 @@ def get_document(document_id: uuid.UUID, session: Session = Depends(db_session_d
         .limit(1)
     ).scalar_one_or_none()
 
-    rotation_applied: bool | None = None
+    rotation_applied: int | None = None
     page_order_reversed: bool | None = None
     if ocr_result and ocr_result.confidence_summary:
         orientation = ocr_result.confidence_summary.get("orientation_preprocess", {})

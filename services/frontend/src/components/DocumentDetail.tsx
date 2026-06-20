@@ -697,9 +697,9 @@ function DocumentDetail({ documentId, onBack, initialTab = 'info' }: Props) {
                           <span className="text-xs text-slate-400">({su.page_count} pagine)</span>
                           {su.preflight && (
                             <div className="flex flex-wrap gap-1 ml-auto">
-                              {su.preflight.rotation_applied && (
+                              {su.preflight.rotation_applied != null && su.preflight.rotation_applied !== 0 && (
                                 <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full bg-amber-100 text-amber-700 border border-amber-200">
-                                  Ruotato
+                                  Ruotato {su.preflight.rotation_applied}°
                                 </span>
                               )}
                               {su.preflight.page_order_reversed && (

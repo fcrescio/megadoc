@@ -9,8 +9,8 @@ interface Props {
 
 const DocumentRow = memo(function DocumentRow({ doc, onSelect }: { doc: Document; onSelect: (id: string) => void }) {
   const tags: { label: string; color: string }[] = [];
-  if (doc.rotation_applied) {
-    tags.push({ label: 'Ruotato', color: 'bg-amber-500/20 text-amber-300 border-amber-600/30' });
+  if (doc.rotation_applied != null && doc.rotation_applied !== 0) {
+    tags.push({ label: `Ruotato ${doc.rotation_applied}°`, color: 'bg-amber-500/20 text-amber-300 border-amber-600/30' });
   }
   if (doc.page_order_reversed) {
     tags.push({ label: 'Ordine invertito', color: 'bg-orange-500/20 text-orange-300 border-orange-600/30' });
