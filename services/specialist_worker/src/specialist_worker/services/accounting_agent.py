@@ -143,17 +143,20 @@ def _tool_get_context(
         amounts = row.get("normalized_amounts") or {}
         for col, val in amounts.items():
             if isinstance(val, (int, float)) and val > 0:
-                val_str = f"{val:.2f}"
-                pos = text.find(val_str)
-                if pos >= 0:
-                    start = max(0, pos - before)
-                    end = min(len(text), pos + after)
-                    ctx = text[start:end]
-                    return (
-                        f"Contesto attorno alla tabella [{index}] "
-                        f"(valore '{val_str}' a posizione {pos}):\n"
-                        f"...{ctx}..."
-                    )
+                # Try both dot and comma as decimal separator
+                val_str_dot = f"{val:.2f}"
+                val_str_comma = f"{val:.2f}".replace(".", ",")
+                for val_str in (val_str_dot, val_str_comma):
+                    pos = text.find(val_str)
+                    if pos >= 0:
+                        start = max(0, pos - before)
+                        end = min(len(text), pos + after)
+                        ctx = text[start:end]
+                        return (
+                            f"Contesto attorno alla tabella [{index}] "
+                            f"(valore '{val_str}' a posizione {pos}):\n"
+                            f"...{ctx}..."
+                        )
 
     # Strategy 2: search for a unique text value from the first column
     for row in rows[:5]:
