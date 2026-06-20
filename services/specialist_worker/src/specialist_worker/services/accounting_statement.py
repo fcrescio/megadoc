@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import logging
 import re
 import unicodedata
@@ -8,7 +9,8 @@ from html.parser import HTMLParser
 from typing import Any
 
 from common.db.models import DocumentUnit
-from knowledge_classifier.llm.base import LLMProvider
+from knowledge_classifier.llm.base import ChatMessage, LLMProvider
+from pydantic import BaseModel, Field
 
 from specialist_worker.services.accounting_reconciliation import (
     AccountingReconciliationProposal,
@@ -16,6 +18,223 @@ from specialist_worker.services.accounting_reconciliation import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# LLM-based primary extraction schema
+# ---------------------------------------------------------------------------
+
+class LLMTableRow(BaseModel):
+    """A single row inside an LLM-extracted table."""
+    cells: dict[str, str]
+    normalized_amounts: dict[str, float] = Field(default_factory=dict)
+
+
+class LLMTable(BaseModel):
+    """A single table extracted by the LLM."""
+    table_id: str
+    table_type: str = "unknown"  # expense_allocation, payment_schedule, summary, balance, unknown
+    headers: list[str]
+    rows: list[LLMTableRow]
+    totals: dict[str, float] = Field(default_factory=dict)
+
+
+class LLMFact(BaseModel):
+    """A single accounting fact extracted by the LLM."""
+    fact_type: str
+    amount: float
+    category_label: str | None = None
+    is_total: bool = False
+
+
+class LLMAccount(BaseModel):
+    """A single account (condominium unit) extracted by the LLM."""
+    unit_code: str
+    subject_label: str
+    facts: list[LLMFact] = Field(default_factory=list)
+
+
+class LLMExtractionResult(BaseModel):
+    """Top-level structured output from the LLM extraction pass."""
+    statement_type: str = "unknown"
+    accounting_period_from: str | None = None
+    accounting_period_to: str | None = None
+    tables: list[LLMTable] = Field(default_factory=list)
+    accounts: list[LLMAccount] = Field(default_factory=list)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    notes: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# LLM-based primary extraction
+# ---------------------------------------------------------------------------
+
+LLM_EXTRACTION_PROMPT = """Sei un contabile specializzato in estratti conto condominiali.
+Analizza il testo OCR che segue ed estrai le informazioni contabili strutturate.
+
+Il testo proviene dalla scansione OCR di documenti condominiali (rendiconti, riparti spese,
+piani di rateizzazione, bilanci preventivi/consuntivi).
+
+ESTRAI:
+1. **Tipo documento**: rendiconto, riparto_spese, bilancio_preventivo, estratto_contabile, unknown
+2. **Periodo contabile**: date di inizio e fine nel formato YYYY-MM-DD
+3. **Tabelle**: ogni tabella con intestazioni, righe e importi normalizzati
+   - Identifica il tipo tabella: expense_allocation (riparto spese per unità),
+     payment_schedule (rate da versare), summary (totali gestione), balance (saldi)
+   - Per ogni riga, estrai le celle come coppie chiave-valore
+   - Normalizza gli importi: "1.234,56" → 1234.56
+4. **Conti/unità**: per ogni unità immobiliare (codice come A1, B12, ecc.):
+   - unit_code: il codice unità (es. "A1", "B12", "C3")
+   - subject_label: il nome del proprietario/condomino
+   - facts: gli importi associati con tipo (allocated_expense, personal_charge,
+     amount_due, installment_due, payment_received, ecc.)
+5. **Confidenza**: auto-valuta l'affidabilità dell'estrazione (0.0-1.0)
+
+REGOLE:
+- Estrai SOLO dati chiaramente leggibili nel testo. Non inventare numeri o intestazioni.
+- Se una tabella non è chiaramente leggibile, non estrarla.
+- Se non trovi tabelle contabili valide, imposta confidence ≤ 0.3.
+- Presta attenzione ai separatori decimali italiani (virgola) e delle migliaia (punto).
+- I codici unità seguono tipicamente il formato: 1-2 lettere + 1-3 cifre (es. A1, B12, SC1).
+- Raggruppa i fatti per unità contabile quando possibile.
+
+TESTO OCR:
+{text}
+"""
+
+
+def _extract_via_llm(
+    text: str,
+    provider: LLMProvider,
+) -> tuple[dict[str, Any] | None, float]:
+    """Try to extract structured accounting data via LLM.
+
+    Returns (result_dict, confidence) on success, or (None, 0.0) on failure.
+    """
+    if not text.strip():
+        return None, 0.0
+
+    # Truncate text to avoid exceeding token limits (rough heuristic)
+    max_chars = 12_000
+    truncated = text[:max_chars]
+    if len(text) > max_chars:
+        logger.info("LLM extraction text truncated from %d to %d chars", len(text), max_chars)
+
+    messages = [
+        ChatMessage(
+            role="system",
+            content=(
+                "Sei un contabile specializzato in estratti conto condominiali. "
+                "Estrai dati contabili strutturati dal testo OCR fornito. "
+                "Rispondi SOLO con JSON valido corrispondente allo schema richiesto."
+            ),
+        ),
+        ChatMessage(
+            role="user",
+            content=LLM_EXTRACTION_PROMPT.format(text=truncated),
+        ),
+    ]
+    try:
+        parsed, raw = provider.chat_with_json(messages, LLMExtractionResult)
+        result = LLMExtractionResult.model_validate(parsed)
+    except Exception as exc:
+        logger.warning("LLM extraction call failed: %s", exc, exc_info=True)
+        return None, 0.0
+
+    if result.confidence < 0.3:
+        logger.info(
+            "LLM extraction confidence too low (%.2f), falling back",
+            result.confidence,
+        )
+        return None, 0.0
+
+    # Convert LLM output to pipeline format
+    provider_name = getattr(provider, "model_name", "unknown")
+    pipeline_result = _llm_result_to_pipeline_format(result, provider_name=provider_name)
+    return pipeline_result, result.confidence
+
+
+def _llm_result_to_pipeline_format(
+    result: LLMExtractionResult,
+    provider_name: str = "unknown",
+) -> dict[str, Any]:
+    """Convert an LLMExtractionResult into the pipeline's native dict format."""
+    tables: list[dict[str, Any]] = []
+    for llm_table in result.tables:
+        rows: list[dict[str, Any]] = []
+        for row_idx, llm_row in enumerate(llm_table.rows):
+            rows.append({
+                "row_id": f"row_{row_idx + 1}",
+                "cells": dict(llm_row.cells),
+                "normalized_amounts": dict(llm_row.normalized_amounts),
+            })
+        tables.append({
+            "table_id": llm_table.table_id,
+            "table_type": llm_table.table_type,
+            "headers": list(llm_table.headers),
+            "rows": rows,
+            "totals": dict(llm_table.totals),
+            "source": "llm_extraction",
+        })
+
+    accounts: list[dict[str, Any]] = []
+    for llm_account in result.accounts:
+        facts: list[dict[str, Any]] = []
+        for llm_fact in llm_account.facts:
+            facts.append({
+                "fact_type": llm_fact.fact_type,
+                "amount": llm_fact.amount,
+                "category_label": llm_fact.category_label,
+                "is_total": llm_fact.is_total,
+                "currency": "EUR",
+                "period_context": {
+                    "from": result.accounting_period_from,
+                    "to": result.accounting_period_to,
+                    "source": "llm_extraction",
+                    "review_status": "unverified",
+                },
+                "evidence": {
+                    "table_id": None,
+                    "table_type": None,
+                    "accounting_context": None,
+                    "row_id": None,
+                    "column": None,
+                    "raw_value": None,
+                },
+            })
+        account_key = _normalize_key(llm_account.unit_code)
+        accounts.append({
+            "account_key": account_key,
+            "unit_code": llm_account.unit_code,
+            "subject_label": llm_account.subject_label,
+            "subject_aliases": [llm_account.subject_label],
+            "facts": facts,
+        })
+
+    # Build validation checks from extracted tables
+    validation_checks = _build_validation_checks(tables)
+
+    # Build sections
+    sections = _build_table_sections(tables)
+
+    return {
+        "document_kind": "accounting_statement",
+        "input_version": "",
+        "statement_type": result.statement_type,
+        "accounting_period_from": result.accounting_period_from,
+        "accounting_period_to": result.accounting_period_to,
+        "currency": "EUR",
+        "sections": sections,
+        "tables": tables,
+        "validation_checks": validation_checks,
+        "accounts": accounts,
+        "reconciliation": {
+            "status": "llm_primary_extraction",
+            "provider": provider_name,
+            "confidence": result.confidence,
+            "notes": result.notes,
+        },
+    }
 
 
 def process_accounting_statement(
@@ -26,6 +245,24 @@ def process_accounting_statement(
     reconciliation_provider: LLMProvider | None = None,
 ) -> tuple[dict[str, Any], float]:
     text = segment_text or ""
+
+    # --- LLM primary extraction path ---
+    if reconciliation_provider is not None:
+        try:
+            llm_result, llm_confidence = _extract_via_llm(text, reconciliation_provider)
+            if llm_result is not None and llm_confidence >= 0.5:
+                llm_result["input_version"] = input_version
+                logger.info(
+                    "LLM primary extraction succeeded (confidence=%.2f, tables=%d, accounts=%d)",
+                    llm_confidence,
+                    len(llm_result.get("tables", [])),
+                    len(llm_result.get("accounts", [])),
+                )
+                return llm_result, llm_confidence
+        except Exception as exc:
+            logger.warning("LLM primary extraction error, falling back: %s", exc, exc_info=True)
+
+    # --- Rule-based fallback ---
     statement_type = _statement_type(text)
     period_from, period_to = _extract_period(text)
     tables = _extract_structured_tables(
