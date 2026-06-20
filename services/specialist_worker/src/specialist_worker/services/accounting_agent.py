@@ -39,6 +39,7 @@ class AgentAction(BaseModel):
         "extract_accounts",
         "llm_extract_table",
         "label_categories",
+        "review_accounts",
         "finalize",
     ]
     reasoning: str = ""
@@ -218,11 +219,22 @@ def _tool_extract_accounts(
     indices: list[int],
     period_from: str | None,
     period_to: str | None,
+    category_name: str | None = None,
 ) -> str:
-    """Extract accounts from selected tables using the rule-based parser."""
+    """Extract accounts from selected tables using the rule-based parser.
+
+    If *category_name* is provided, it is set as ``_category_label`` on each
+    selected table so that ``_derive_table_category`` returns it and the
+    extracted facts carry the correct category label.
+    """
     selected = [tables[i] for i in indices if 0 <= i < len(tables)]
     if not selected:
         return "Nessuna tabella valida selezionata."
+
+    # Apply category override so _derive_table_category picks it up
+    if category_name:
+        for t in selected:
+            t["_category_label"] = category_name
 
     from specialist_worker.services.accounting_statement import _extract_accounts
     accounts = _extract_accounts(selected, period_from, period_to)
@@ -479,13 +491,52 @@ def _tool_label_categories(
     return "\n".join(lines)
 
 
+def _tool_review_accounts(
+    accumulated_accounts: dict[str, dict[str, Any]],
+) -> str:
+    """Show the current state of accumulated accounts for the agent to review."""
+    if not accumulated_accounts:
+        return "Nessun account accumulato finora."
+
+    lines: list[str] = [
+        f"Account accumulati: {len(accumulated_accounts)} unita immobiliari\n"
+    ]
+    # Sort by unit_code for stable output
+    sorted_keys = sorted(
+        accumulated_accounts.keys(),
+        key=lambda k: (accumulated_accounts[k].get("unit_code", k), k),
+    )
+    for key in sorted_keys:
+        acc = accumulated_accounts[key]
+        unit_code = acc.get("unit_code", "?")
+        subject = acc.get("subject_label", "?")
+        facts = acc.get("facts", [])
+        lines.append(f"  Unita {unit_code}: {subject}")
+
+        # Group facts by category
+        by_category: dict[str, list[dict[str, Any]]] = {}
+        for f in facts:
+            cat = f.get("category_label") or f.get("category_key", "unknown")
+            by_category.setdefault(cat, []).append(f)
+
+        for cat, cat_facts in sorted(by_category.items()):
+            total = sum(f.get("amount", 0) for f in cat_facts)
+            is_total = any(f.get("is_total") for f in cat_facts)
+            tag = " [TOTALE]" if is_total else ""
+            lines.append(f"    {cat}: {total:.2f}{tag}")
+
+    return "\n".join(lines)
+
+
 # ---------------------------------------------------------------------------
 # Agent prompt
 # ---------------------------------------------------------------------------
 
 AGENT_SYSTEM_PROMPT = """Sei un contabile specializzato nell'estrazione di tabelle di riparto spese condominiali da documenti OCR.
 
-Hai a disposizione i seguenti strumenti. Usali UNO ALLA VOLTA per analizzare il documento e costruire gradualmente il risultato.
+Il tuo obiettivo e' estrarre TUTTE le unita immobiliari con i relativi importi per OGNI categoria di spesa.
+
+Lavori in modo ITERATIVO: analizzi una tabella alla volta, estrai i dati, e costruisci gradualmente il risultato completo.
 
 ## Strumenti
 
@@ -501,40 +552,53 @@ Hai a disposizione i seguenti strumenti. Usali UNO ALLA VOLTA per analizzare il 
 4. **search** — Cerca un pattern nel testo OCR.
    Parametri: pattern (stringa).
 
-5. **extract_accounts** — Estrae le unita immobiliari da UNA O PIU tabelle usando il parser strutturale (funziona bene con tabelle ben formate con intestazioni "Cod", "Nominativo", "quota mill.", "TOTALE").
+5. **extract_accounts** — Estrae le unita immobiliari da UNA O PIU tabelle usando il parser strutturale.
+   Il parser funziona bene con tabelle ben formate con intestazioni "Cod", "Nominativo", "quota mill.", "TOTALE".
+   Se fornisci category_name, le categorie verranno etichettate correttamente.
    Parametri: table_indices (list[int]), category_name (stringa, opzionale).
 
-6. **llm_extract_table** — Estrae le unita immobiliari da UNA SINGOLA tabella usando l'LLM. USALO SOLO COME ULTIMA RISORSA quando extract_accounts non produce risultati.
+6. **llm_extract_table** — Estrae le unita immobiliari da UNA SINGOLA tabella usando l'LLM.
+   USALO SOLO COME ULTIMA RISORSA quando extract_accounts non produce risultati.
    Parametri: llm_table_index (int), llm_category_name (stringa, opzionale).
 
-7. **label_categories** — Usa l'LLM per assegnare i nomi corretti delle categorie di spesa. Chiamalo DOPO extract_accounts per correggere le etichette.
+7. **label_categories** — Usa l'LLM per assegnare i nomi corretti delle categorie di spesa a piu tabelle.
+   Chiamalo DOPO extract_accounts se le etichette delle categorie sono sbagliate o mancanti.
    Parametri: label_table_indices (list[int]).
 
-8. **finalize** — Finalizza l'estrazione. Le unita accumulate automaticamente verranno restituite.
+8. **review_accounts** — Mostra lo stato corrente degli account accumulati, raggruppati per categoria.
+   Usalo per verificare che tutti i dati siano corretti prima di finalizzare.
+   Parametri: nessuno.
 
-## Strategia consigliata (SEGUI RIGOROSAMENTE)
+9. **finalize** — Finalizza l'estrazione. Gli account accumulati verranno restituiti.
+   Parametri: confidence (float, opzionale).
+
+## Strategia consigliata (ITERATIVA, tabella per tabella)
 
 1. Chiama **list_tables** per vedere la struttura del documento.
 2. Identifica le tabelle di **tipo expense_allocation**. Hanno intestazioni come "Cod", "Nominativo", "quota mill.", "TOTALE".
-3. Raccogli TUTTI gli indici delle tabelle expense_allocation in un'unica lista.
-4. Chiama **extract_accounts** UNA SOLA VOLTA con TUTTI gli indici delle tabelle di riparto.
-   - extract_accounts gestisce automaticamente piu tabelle e restituisce tutti gli account.
-   - NON chiamare extract_accounts separatamente per ogni tabella.
-5. Se extract_accounts restituisce account, chiama **label_categories** con gli stessi indici per correggere le etichette delle categorie.
-6. Se extract_accounts NON restituisce account per qualche tabella, prova **llm_extract_table** per QUELLA SPECIFICA tabella.
-7. Alla fine chiama **finalize**.
+3. Per OGNI tabella expense_allocation, procedi in questo ordine:
+   a. Chiama **get_context** per trovare il nome della categoria nel testo circostante.
+      Il nome della categoria (es. GENERALI, SCALA N.6, ASCENSORE N.10, RISCALDAMENTO, ...)
+      si trova di solito nella riga di testo subito PRIMA della tabella.
+   b. Chiama **extract_accounts** con UN SOLO indice tabella e il nome della categoria.
+      Esempio: extract_accounts(table_indices=[3], category_name="GENERALI")
+   c. Se extract_accounts non produce risultati, prova **llm_extract_table** per quella tabella.
+4. Dopo aver processato TUTTE le tabelle, chiama **review_accounts** per vedere il risultato complessivo.
+5. Se le categorie non sono corrette, chiama **label_categories** per correggerle.
+6. Alla fine chiama **finalize** con un confidence score.
 
 ## Regole importanti
 
 - Le tabelle di riparto hanno intestazioni "Cod", "Nominativo", "quota mill.", "TOTALE".
-- Il nome della categoria si trova nel testo subito prima della tabella.
+- Il nome della categoria si trova nel testo subito prima della tabella. Usa get_context per trovarlo.
 - IGNORA le tabelle riassuntive con intestazioni diverse (es. "Voce", "Importo", "Descrizione", "Preventivo", "Consuntivo").
-- Ogni unita immobiliare deve apparire UNA SOLA volta con un dizionario amounts completo.
+- Ogni unita immobiliare deve apparire UNA SOLA volta con TUTTE le categorie accumulate.
 - Raccogli TUTTE le categorie di riparto che trovi.
-- Se una categoria non e presente per una unita, l'importo e 0.
+- Se una categoria non e' presente per una unita, l'importo e' 0 (non serve inserirlo).
 - Quando chiami finalize, verranno restituiti tutti gli account accumulati automaticamente.
-- NON usare llm_extract_table se extract_accounts ha gia funzionato.
-- llm_extract_table e LENTO e COSTOSO. Usalo solo come ultima risorsa.
+- NON usare llm_extract_table se extract_accounts ha gia' funzionato per quella tabella.
+- llm_extract_table e' LENTO e COSTOSO. Usalo solo come ultima risorsa.
+- review_accounts non costa nulla — usalo liberamente per verificare i progressi.
 """
 
 
@@ -714,6 +778,10 @@ def agentic_account_extraction(
                 tables[i] for i in action.table_indices if 0 <= i < len(tables)
             ]
             if selected:
+                # Apply category override (same logic as _tool_extract_accounts)
+                if action.category_name:
+                    for t in selected:
+                        t["_category_label"] = action.category_name
                 from specialist_worker.services.accounting_statement import (
                     _extract_accounts,
                 )
@@ -799,6 +867,7 @@ def _execute_tool(
             action.table_indices or [],
             period_from,
             period_to,
+            category_name=action.category_name,
         )
 
     if action.action == "llm_extract_table":
@@ -821,5 +890,8 @@ def _execute_tool(
             accumulated_accounts,
             provider=provider,
         )
+
+    if action.action == "review_accounts":
+        return _tool_review_accounts(accumulated_accounts or {})
 
     return f"Azione sconosciuta: {action.action}"

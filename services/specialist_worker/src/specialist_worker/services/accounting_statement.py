@@ -13,8 +13,6 @@ from knowledge_classifier.llm.base import ChatMessage, LLMProvider
 from pydantic import BaseModel, Field
 
 from specialist_worker.services.accounting_agent import (
-    _merge_accounts,
-    _tool_label_categories,
     agentic_account_extraction,
 )
 from specialist_worker.services.accounting_reconciliation import (
@@ -251,42 +249,18 @@ def process_accounting_statement(
     ) or _extract_markdown_tables(text, period_from=period_from, period_to=period_to)
     validation_checks = _build_validation_checks(tables)
 
-    # --- Account extraction: rule-based first, then label_categories, agent as fallback ---
-    accounts = _extract_accounts(tables, period_from, period_to)
-    if accounts and reconciliation_provider is not None:
-        # Rule-based extraction succeeded — fix category labels via LLM
-        allocation_indices = [
-            i for i, t in enumerate(tables)
-            if t.get("table_type") == "expense_allocation"
-        ]
-        if allocation_indices:
-            # Convert list-of-dicts to accumulated dict format
-            accumulated: dict[str, dict[str, Any]] = {}
-            for acc in accounts:
-                key = acc.get("account_key", _normalize_key(acc.get("unit_code", "")))
-                accumulated[key] = dict(acc)
-            try:
-                _tool_label_categories(
-                    text, tables, allocation_indices,
-                    accumulated, provider=reconciliation_provider,
-                )
-                # Convert back to list preserving order
-                seen = set()
-                relabeled: list[dict[str, Any]] = []
-                for acc in accounts:
-                    key = acc.get("account_key", _normalize_key(acc.get("unit_code", "")))
-                    if key in accumulated and key not in seen:
-                        relabeled.append(accumulated[key])
-                        seen.add(key)
-                if relabeled:
-                    accounts = relabeled
-            except Exception as exc:
-                logger.warning("Category labeling failed (non-fatal): %s", exc)
-    elif not accounts:
-        # Rule-based returned nothing — try agentic extraction as fallback
+    # --- Account extraction: agent-driven first, rule-based as fallback ---
+    # The agent iterates table by table, using the LLM to determine category
+    # names from context and extract accounts with correct labels.
+    if reconciliation_provider is not None:
         accounts = agentic_account_extraction(
             text, tables, period_from, period_to, provider=reconciliation_provider
         )
+    else:
+        accounts = []
+    if not accounts:
+        # Agent unavailable or returned nothing — fall back to rule-based
+        accounts = _extract_accounts(tables, period_from, period_to)
 
     tables, validation_checks, accounts, reconciliation = _reconcile_with_llm(
         tables,
@@ -1434,7 +1408,14 @@ def _derive_table_category(table: dict[str, Any]) -> str | None:
 
     For expense_allocation tables, the category name may be embedded in the
     first header (e.g. "ASCENSORE N.6 / Cod") or in the section label.
+
+    An explicit ``_category_label`` key on the table dict takes precedence
+    (set by the agent tool when the LLM has determined the category from
+    surrounding OCR context).
     """
+    override = table.get("_category_label")
+    if override:
+        return override
     headers = table.get("headers", [])
     if headers:
         first = str(headers[0])
