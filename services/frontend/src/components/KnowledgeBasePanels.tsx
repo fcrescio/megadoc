@@ -53,7 +53,7 @@ interface ComparisonsPanelProps {
 
 export const ComparisonsPanel = memo(function ComparisonsPanel({ onOpenDocument: _onOpenDocument }: ComparisonsPanelProps) {
   const [selectedContextId, setSelectedContextId] = useState<string | null>(null);
-  const [comparisonSubject, setComparisonSubject] = useState('Bonacci');
+  const [comparisonSubject, setComparisonSubject] = useState('');
   const [selectedAccountKey, setSelectedAccountKey] = useState('');
   const [comparisonRole, setComparisonRole] = useState('actual_allocation');
   const [periodAFrom, setPeriodAFrom] = useState('2022-07-01');
@@ -101,7 +101,7 @@ export const ComparisonsPanel = memo(function ComparisonsPanel({ onOpenDocument:
           {contexts.length === 0 && <option value="">Nessun contesto disponibile</option>}
           {contexts.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
         </select>
-        <input value={comparisonSubject} onChange={(e) => { setComparisonSubject(e.target.value); setSelectedAccountKey(''); }} placeholder="Soggetto, es. Bonacci" className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm" />
+        <input value={comparisonSubject} onChange={(e) => { setComparisonSubject(e.target.value); setSelectedAccountKey(''); }} placeholder="Soggetto, es. Cognome" className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm" />
         <select value={selectedAccountKey} onChange={(e) => setSelectedAccountKey(e.target.value)} className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm">
           <option value="">Risoluzione automatica</option>
           {(accountingSubjects.data ?? []).map((s) => <option key={s.account_key} value={s.account_key}>{s.subject_label} {s.unit_codes.join(' / ')}</option>)}
