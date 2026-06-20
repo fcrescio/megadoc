@@ -244,6 +244,152 @@ def _llm_result_to_pipeline_format(
     }
 
 
+# ---------------------------------------------------------------------------
+# LLM-powered account extraction
+# ---------------------------------------------------------------------------
+
+LLM_ACCOUNT_EXTRACTION_PROMPT = """Sei un contabile specializzato in estratti conto condominiali.
+Analizza il testo OCR che segue ed estrai l'elenco delle unità immobiliari (conti) con i relativi importi.
+
+Il testo contiene tabelle HTML con riparti spese condominiali. Cerca le tabelle che hanno
+colonne come "Nominativo", "Unita", "Cod", "Importo", "Totale gestione", "Totale", ecc.
+
+Per ogni unità immobiliare identifica:
+- unit_code: il codice unità (es. "1", "2", "B11", "A1", "C28", "SC1", ecc.)
+- subject_label: il nome del proprietario/condomino
+- facts: gli importi associati, ciascuno con:
+  - fact_type: il tipo di fatto (allocated_expense, personal_charge, amount_due,
+    installment_due, payment_received, closing_balance, ecc.)
+  - amount: l'importo numerico (normalizzato: "1.234,56" → 1234.56)
+  - category_label: l'etichetta della categoria (es. "Spese generali", "Totale gestione")
+  - is_total: true se è un totale
+
+REGOLE:
+- Estrai TUTTE le unità che trovi, anche se alcune righe hanno dati parziali.
+- I codici unità possono essere numeri semplici (1, 2, 3...) o formato misto (A1, B12, SC1).
+- Presta attenzione ai separatori decimali italiani (virgola) e delle migliaia (punto).
+- Se un valore appare ambiguo (es. "4O,00"), estrailo comunque.
+- Raggruppa più righe della stessa unità in un unico conto con più facts.
+- Se non trovi NESSUNA unità, restituisci una lista vuota.
+
+TABELLE ESTRATTE DAL PARSER (come riferimento):
+{table_summary}
+
+TESTO OCR COMPLETO:
+{text}
+"""
+
+
+def _extract_accounts_via_llm(
+    text: str,
+    tables: list[dict[str, Any]],
+    period_from: str | None,
+    period_to: str | None,
+    *,
+    provider: LLMProvider | None,
+) -> list[dict[str, Any]]:
+    """Try to extract accounts via LLM, using the raw text and extracted tables.
+
+    Returns a list of account dicts (same format as _extract_accounts), or
+    an empty list if the LLM is unavailable, fails, or returns nothing useful.
+    """
+    if provider is None or not text.strip():
+        return []
+
+    # Build a compact summary of extracted tables for context
+    table_lines: list[str] = []
+    for t in tables:
+        tid = t.get("table_id", "?")
+        ttype = t.get("table_type", "?")
+        headers = t.get("headers", [])
+        row_count = len(t.get("rows", []))
+        table_lines.append(f"  [{tid}] type={ttype}, headers={headers}, rows={row_count}")
+    table_summary = "\n".join(table_lines) if table_lines else "(nessuna tabella estratta)"
+
+    # Truncate text to avoid exceeding token limits
+    max_chars = 30_000
+    truncated = text[:max_chars]
+
+    messages = [
+        ChatMessage(
+            role="system",
+            content=(
+                "Sei un contabile specializzato in estratti conto condominiali. "
+                "Estrai l'elenco delle unità immobiliari con i relativi importi "
+                "dal testo OCR fornito. Rispondi SOLO con JSON valido."
+            ),
+        ),
+        ChatMessage(
+            role="user",
+            content=LLM_ACCOUNT_EXTRACTION_PROMPT.format(
+                text=truncated,
+                table_summary=table_summary,
+            ),
+        ),
+    ]
+    try:
+        parsed, raw = provider.chat_with_json(messages, LLMAccountExtractionResult)
+        result = LLMAccountExtractionResult.model_validate(parsed)
+    except Exception as exc:
+        logger.warning("LLM account extraction failed: %s", exc, exc_info=True)
+        return []
+
+    if not result.accounts:
+        logger.info("LLM account extraction returned no accounts")
+        return []
+
+    logger.info(
+        "LLM account extraction succeeded: %d accounts, confidence=%.2f",
+        len(result.accounts),
+        result.confidence,
+    )
+
+    # Convert LLM accounts to pipeline format
+    pipeline_accounts: list[dict[str, Any]] = []
+    for llm_acc in result.accounts:
+        facts: list[dict[str, Any]] = []
+        for llm_fact in llm_acc.facts:
+            facts.append({
+                "fact_type": llm_fact.fact_type,
+                "amount": abs(llm_fact.amount),
+                "raw_amount": llm_fact.amount,
+                "category_key": _normalize_key(llm_fact.category_label) if llm_fact.category_label else None,
+                "category_label": llm_fact.category_label,
+                "is_total": llm_fact.is_total,
+                "currency": "EUR",
+                "period_context": {
+                    "from": period_from,
+                    "to": period_to,
+                    "source": "llm_extraction",
+                    "review_status": "unverified",
+                },
+                "evidence": {
+                    "table_id": None,
+                    "table_type": None,
+                    "accounting_context": None,
+                    "row_id": None,
+                    "column": None,
+                    "raw_value": None,
+                },
+            })
+        account_key = _normalize_key(llm_acc.unit_code)
+        pipeline_accounts.append({
+            "account_key": account_key,
+            "unit_code": llm_acc.unit_code,
+            "subject_label": llm_acc.subject_label,
+            "subject_aliases": [llm_acc.subject_label],
+            "facts": facts,
+        })
+
+    return pipeline_accounts
+
+
+class LLMAccountExtractionResult(BaseModel):
+    """Result from LLM-based account extraction."""
+    accounts: list[LLMAccount] = Field(default_factory=list)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
 def process_accounting_statement(
     document_unit: DocumentUnit,
     segment_text: str,
@@ -253,23 +399,7 @@ def process_accounting_statement(
 ) -> tuple[dict[str, Any], float]:
     text = segment_text or ""
 
-    # --- LLM primary extraction path ---
-    if reconciliation_provider is not None:
-        try:
-            llm_result, llm_confidence = _extract_via_llm(text, reconciliation_provider)
-            if llm_result is not None and llm_confidence >= 0.5:
-                llm_result["input_version"] = input_version
-                logger.info(
-                    "LLM primary extraction succeeded (confidence=%.2f, tables=%d, accounts=%d)",
-                    llm_confidence,
-                    len(llm_result.get("tables", [])),
-                    len(llm_result.get("accounts", [])),
-                )
-                return llm_result, llm_confidence
-        except Exception as exc:
-            logger.warning("LLM primary extraction error, falling back: %s", exc, exc_info=True)
-
-    # --- Rule-based fallback ---
+    # --- Rule-based pipeline (always runs) ---
     statement_type = _statement_type(text)
     period_from, period_to = _extract_period(text)
     tables = _extract_structured_tables(
@@ -280,7 +410,14 @@ def process_accounting_statement(
         period_to=period_to,
     ) or _extract_markdown_tables(text, period_from=period_from, period_to=period_to)
     validation_checks = _build_validation_checks(tables)
-    accounts = _extract_accounts(tables, period_from, period_to)
+
+    # --- Account extraction: try LLM first, fall back to rule-based ---
+    accounts = _extract_accounts_via_llm(
+        text, tables, period_from, period_to, provider=reconciliation_provider
+    )
+    if not accounts:
+        accounts = _extract_accounts(tables, period_from, period_to)
+
     tables, validation_checks, accounts, reconciliation = _reconcile_with_llm(
         tables,
         validation_checks,
