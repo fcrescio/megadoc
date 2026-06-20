@@ -73,7 +73,8 @@ LLM_EXTRACTION_PROMPT = """Sei un contabile specializzato in estratti conto cond
 Analizza il testo OCR che segue ed estrai le informazioni contabili strutturate.
 
 Il testo proviene dalla scansione OCR di documenti condominiali (rendiconti, riparti spese,
-piani di rateizzazione, bilanci preventivi/consuntivi).
+piani di rateizzazione, bilanci preventivi/consuntivi). L'OCR può contenere imperfezioni,
+allineamenti erratici o caratteri mal riconosciuti — è normale, lavora con quello che c'è.
 
 ESTRAI:
 1. **Tipo documento**: rendiconto, riparto_spese, bilancio_preventivo, estratto_contabile, unknown
@@ -83,20 +84,26 @@ ESTRAI:
      payment_schedule (rate da versare), summary (totali gestione), balance (saldi)
    - Per ogni riga, estrai le celle come coppie chiave-valore
    - Normalizza gli importi: "1.234,56" → 1234.56
+   - Se una riga ha dati parziali o allineamento incerto, estraila comunque
+     con i valori disponibili; non saltare l'intera tabella
 4. **Conti/unità**: per ogni unità immobiliare (codice come A1, B12, ecc.):
    - unit_code: il codice unità (es. "A1", "B12", "C3")
    - subject_label: il nome del proprietario/condomino
    - facts: gli importi associati con tipo (allocated_expense, personal_charge,
      amount_due, installment_due, payment_received, ecc.)
-5. **Confidenza**: auto-valuta l'affidabilità dell'estrazione (0.0-1.0)
+5. **Confidenza**: auto-valuta l'affidabilità complessiva dell'estrazione (0.0-1.0)
 
 REGOLE:
-- Estrai SOLO dati chiaramente leggibili nel testo. Non inventare numeri o intestazioni.
-- Se una tabella non è chiaramente leggibile, non estrarla.
-- Se non trovi tabelle contabili valide, imposta confidence ≤ 0.3.
+- Estrai TUTTE le tabelle contabili che trovi, anche se alcune colonne hanno
+  intestazioni poco chiare o allineamento imperfetto. È meglio estrarre dati
+  imperfetti che nessun dato.
+- Se una cella ha un valore ambiguo (es. "4O,00" invece di "40,00"), estrailo
+  comunque come valore originale; la normalizzazione può essere rivista dopo.
 - Presta attenzione ai separatori decimali italiani (virgola) e delle migliaia (punto).
 - I codici unità seguono tipicamente il formato: 1-2 lettere + 1-3 cifre (es. A1, B12, SC1).
+  Ma possono anche essere solo numeri (es. "1", "2", "3") se il documento li usa così.
 - Raggruppa i fatti per unità contabile quando possibile.
+- Se non trovi NESSUNA tabella contabile valida, imposta confidence ≤ 0.3.
 
 TESTO OCR:
 {text}
@@ -115,7 +122,7 @@ def _extract_via_llm(
         return None, 0.0
 
     # Truncate text to avoid exceeding token limits (rough heuristic)
-    max_chars = 12_000
+    max_chars = 30_000
     truncated = text[:max_chars]
     if len(text) > max_chars:
         logger.info("LLM extraction text truncated from %d to %d chars", len(text), max_chars)
