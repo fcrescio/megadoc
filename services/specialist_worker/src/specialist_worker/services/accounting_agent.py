@@ -588,7 +588,8 @@ Lavori in modo ITERATIVO: analizzi una tabella alla volta, estrai i dati, e cost
 
 5. **extract_accounts** — Estrae le unita immobiliari da UNA O PIU tabelle usando il parser strutturale.
    Il parser funziona bene con tabelle ben formate con intestazioni "Cod", "Nominativo", "quota mill.", "TOTALE".
-   Se fornisci category_name, le categorie verranno etichettate correttamente.
+   Puoi passare TUTTI gli indici in una volta sola: extract_accounts gestisce automaticamente piu tabelle.
+   category_name e' opzionale: se non lo fornisci, le etichette verranno corrette dopo con label_categories.
    Parametri: table_indices (list[int]), category_name (stringa, opzionale).
 
 6. **llm_extract_table** — Estrae le unita immobiliari da UNA SINGOLA tabella usando l'LLM.
@@ -606,18 +607,22 @@ Lavori in modo ITERATIVO: analizzi una tabella alla volta, estrai i dati, e cost
 9. **finalize** — Finalizza l'estrazione. Gli account accumulati verranno restituiti.
    Parametri: confidence (float, opzionale).
 
-## Strategia consigliata (ITERATIVA, efficiente)
+## Strategia consigliata (efficiente)
 
 1. Chiama **list_tables** per vedere la struttura del documento.
 2. Identifica le tabelle di **tipo expense_allocation**. Hanno intestazioni come "Cod", "Nominativo", "quota mill.", "TOTALE".
-3. Chiama **get_all_contexts** UNA SOLA VOLTA per vedere il contesto di TUTTE le tabelle expense_allocation.
-   Questo ti permette di trovare i nomi delle categorie per tutte le tabelle in un colpo solo.
-4. Per OGNI tabella expense_allocation, chiama **extract_accounts** con UN SOLO indice tabella e il nome della categoria.
-   Esempio: extract_accounts(table_indices=[3], category_name="GENERALI")
-5. Se extract_accounts non produce risultati per una tabella, prova **llm_extract_table** per quella specifica tabella.
-6. Dopo aver processato TUTTE le tabelle, chiama **review_accounts** per vedere il risultato complessivo.
-7. Se le categorie non sono corrette, chiama **label_categories** per correggerle.
-8. Alla fine chiama **finalize** con un confidence score.
+3. Raccogli TUTTI gli indici delle tabelle expense_allocation.
+4. Chiama **extract_accounts** UNA SOLA VOLTA con TUTTI gli indici delle tabelle di riparto.
+   - extract_accounts gestisce automaticamente piu tabelle e restituisce tutti gli account.
+   - NON serve category_name in questa fase: le etichette verranno corrette dopo.
+5. Chiama **review_accounts** per vedere il risultato dell'estrazione.
+6. Chiama **label_categories** con gli stessi indici per correggere le etichette delle categorie.
+   label_categories usa l'LLM per determinare il nome corretto di ogni categoria
+   basandosi sul contesto OCR di ogni tabella.
+7. Chiama **review_accounts** di nuovo per verificare che le etichette siano corrette.
+8. Se qualche tabella non e' stata estratta (extract_accounts non ha prodotto risultati),
+   prova **llm_extract_table** per QUELLA SPECIFICA tabella.
+9. Alla fine chiama **finalize** con un confidence score.
 
 ## Regole importanti
 
