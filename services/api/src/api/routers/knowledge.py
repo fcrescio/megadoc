@@ -2483,6 +2483,8 @@ def get_document_accounting_table(
 
     Rows = accounts (units), Columns = categories, Cells = {amount, evidence}.
     The response includes page_number in each cell's evidence for PDF drill-down.
+    Page numbers are transformed to original PDF coordinates when the scan
+    had page_order_reversed or rotation applied.
     """
     try:
         parsed_id = uuid.UUID(document_id)
@@ -2503,6 +2505,19 @@ def get_document_accounting_table(
     if not doc_units:
         raise HTTPException(status_code=404, detail="No accounting data found for this document")
 
+    # Load preflight info for page number transformation
+    # Group document units by scan unit to load preflight once per scan unit
+    scan_unit_ids = set(du.scan_unit_id for du in doc_units)
+    preflight_map: dict[uuid.UUID, dict] = {}
+    scan_unit_page_counts: dict[uuid.UUID, int] = {}
+    for su_id in scan_unit_ids:
+        scan_unit = db.get(ScanUnit, su_id)
+        if scan_unit is not None:
+            preflight = _load_preflight(scan_unit, db)
+            if preflight is not None:
+                preflight_map[su_id] = preflight
+            scan_unit_page_counts[su_id] = scan_unit.page_count
+
     tables = []
     for du in doc_units:
         table = get_accounting_table(db, du.id)
@@ -2512,6 +2527,20 @@ def get_document_accounting_table(
             table["ordinal"] = du.ordinal
             table["start_page"] = du.start_page
             table["end_page"] = du.end_page
+
+            # Transform page numbers if page order was reversed
+            # The evidence page_number is in corrected (post-preflight) coordinates.
+            # We need original PDF coordinates for the viewer.
+            preflight = preflight_map.get(du.scan_unit_id)
+            page_count = scan_unit_page_counts.get(du.scan_unit_id)
+            if preflight and preflight.get("page_order_reversed") and page_count:
+                for row in table.get("rows", []):
+                    for cell in row.get("cells", {}).values():
+                        if isinstance(cell, dict):
+                            ev = cell.get("evidence", {})
+                            if isinstance(ev, dict) and ev.get("page_number") is not None:
+                                ev["page_number"] = page_count - ev["page_number"] + 1
+
             tables.append(table)
 
     return {"document_id": document_id, "tables": tables}
@@ -2546,6 +2575,19 @@ def get_document_accounting_cell_detail(
 
     if detail is None:
         raise HTTPException(status_code=404, detail="Cell not found")
+
+    # Transform page number if page order was reversed
+    if detail.get("page_number") is not None:
+        # Find the scan unit for this document unit to get preflight info
+        du_id = detail.get("document_unit_id")
+        if du_id:
+            doc_unit = db.get(DocumentUnit, uuid.UUID(du_id))
+            if doc_unit is not None:
+                scan_unit = db.get(ScanUnit, doc_unit.scan_unit_id)
+                if scan_unit is not None:
+                    preflight = _load_preflight(scan_unit, db)
+                    if preflight and preflight.get("page_order_reversed"):
+                        detail["page_number"] = scan_unit.page_count - detail["page_number"] + 1
 
     return detail
 
