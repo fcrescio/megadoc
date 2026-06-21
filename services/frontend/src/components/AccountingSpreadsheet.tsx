@@ -167,14 +167,14 @@ const AccountingSpreadsheet = memo(function AccountingSpreadsheet({ documentId }
   if (isLoading) {
     return (
       <div className="flex h-48 items-center justify-center">
-        <div className="animate-pulse text-sm text-slate-400">Caricamento dati contabili...</div>
+        <div className="animate-pulse text-sm text-slate-500">Caricamento dati contabili...</div>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="rounded-xl border border-red-300/20 bg-red-400/10 p-4 text-sm text-red-200">
+      <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
         Errore caricamento dati contabili: {error.message}
       </div>
     );
@@ -183,7 +183,7 @@ const AccountingSpreadsheet = memo(function AccountingSpreadsheet({ documentId }
   if (tables.length === 0) {
     return (
       <div className="flex h-48 items-center justify-center">
-        <p className="text-sm text-slate-400">Nessun dato contabile disponibile per questo documento.</p>
+        <p className="text-sm text-slate-500">Nessun dato contabile disponibile per questo documento.</p>
       </div>
     );
   }
@@ -204,8 +204,8 @@ const AccountingSpreadsheet = memo(function AccountingSpreadsheet({ documentId }
               }}
               className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
                 index === stableActiveIndex
-                  ? 'border-cyan-300/35 bg-cyan-400/15 text-cyan-100'
-                  : 'border-white/10 bg-white/5 text-slate-300 hover:bg-white/10'
+                  ? 'border-cyan-600 bg-cyan-500 text-white'
+                  : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
               }`}
             >
               {table.title}
@@ -216,7 +216,7 @@ const AccountingSpreadsheet = memo(function AccountingSpreadsheet({ documentId }
 
       {/* Table info bar */}
       {activeTable && (
-        <div className="flex shrink-0 items-center justify-between text-xs text-slate-400">
+        <div className="flex shrink-0 items-center justify-between text-xs text-slate-500">
           <span>
             {activeTable.rows.length} unità · {activeTable.columns.length} categorie
             · pagine {activeTable.start_page}–{activeTable.end_page}

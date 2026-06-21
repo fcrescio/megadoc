@@ -899,12 +899,10 @@ def get_accounting_cell_detail(
 
                 # Find the specific row
                 raw_value = None
-                row_data = None
                 for r in raw_rows:
                     if isinstance(r, dict) and r.get("row_id") == row_id:
                         cells = r.get("cells", {})
                         raw_value = cells.get(column) if isinstance(cells, dict) else None
-                        row_data = r
                         break
 
                 # Build table snippet (first few rows as preview)
