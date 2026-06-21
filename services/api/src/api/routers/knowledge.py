@@ -23,6 +23,8 @@ from common.application.accounting import (
     apply_manual_accounting_correction,
     compare_context_accounting_periods,
     find_context_account_subjects,
+    get_accounting_cell_detail,
+    get_accounting_table,
 )
 from common.application.specialists import ensure_specialist_jobs_for_scan_unit
 from common.db.models import (
@@ -2470,6 +2472,124 @@ def merge_topic(
         affected_assignments=stats.assignments_retargeted,
         aliases_created=stats.aliases_created,
     )
+
+
+@router.get("/documents/{document_id}/accounting-table")
+def get_document_accounting_table(
+    document_id: str,
+    db: Session = Depends(get_db_session),
+):
+    """Return accounting data pivoted into a 2D spreadsheet for a document.
+
+    Rows = accounts (units), Columns = categories, Cells = {amount, evidence}.
+    The response includes page_number in each cell's evidence for PDF drill-down.
+    Page numbers are transformed to original PDF coordinates when the scan
+    had page_order_reversed or rotation applied.
+    """
+    try:
+        parsed_id = uuid.UUID(document_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid document ID") from exc
+
+    # Find document units with accounting results
+    doc_units = db.execute(
+        select(DocumentUnit)
+        .join(ScanUnit, ScanUnit.id == DocumentUnit.scan_unit_id)
+        .where(ScanUnit.source_document_id == parsed_id)
+        .where(DocumentUnit.specialist_results.any(
+            SpecialistResult.specialist_type == "accounting_statement"
+        ))
+        .order_by(DocumentUnit.ordinal)
+    ).scalars().all()
+
+    if not doc_units:
+        raise HTTPException(status_code=404, detail="No accounting data found for this document")
+
+    # Load preflight info for page number transformation
+    # Group document units by scan unit to load preflight once per scan unit
+    scan_unit_ids = set(du.scan_unit_id for du in doc_units)
+    preflight_map: dict[uuid.UUID, dict] = {}
+    scan_unit_page_counts: dict[uuid.UUID, int] = {}
+    for su_id in scan_unit_ids:
+        scan_unit = db.get(ScanUnit, su_id)
+        if scan_unit is not None:
+            preflight = _load_preflight(scan_unit, db)
+            if preflight is not None:
+                preflight_map[su_id] = preflight
+            scan_unit_page_counts[su_id] = scan_unit.page_count
+
+    tables = []
+    for du in doc_units:
+        table = get_accounting_table(db, du.id)
+        if table is not None:
+            table["document_unit_id"] = str(du.id)
+            table["title"] = du.title or f"Pagine {du.start_page}-{du.end_page}"
+            table["ordinal"] = du.ordinal
+            table["start_page"] = du.start_page
+            table["end_page"] = du.end_page
+
+            # Transform page numbers if page order was reversed
+            # The evidence page_number is in corrected (post-preflight) coordinates.
+            # We need original PDF coordinates for the viewer.
+            preflight = preflight_map.get(du.scan_unit_id)
+            page_count = scan_unit_page_counts.get(du.scan_unit_id)
+            if preflight and preflight.get("page_order_reversed") and page_count:
+                for row in table.get("rows", []):
+                    for cell in row.get("cells", {}).values():
+                        if isinstance(cell, dict):
+                            ev = cell.get("evidence", {})
+                            if isinstance(ev, dict) and ev.get("page_number") is not None:
+                                ev["page_number"] = page_count - ev["page_number"] + 1
+
+            tables.append(table)
+
+    return {"document_id": document_id, "tables": tables}
+
+
+@router.get("/documents/{document_id}/accounting-table/cell-detail")
+def get_document_accounting_cell_detail(
+    document_id: str,
+    table_id: str = Query(..., description="Table ID from the accounting table"),
+    row_id: str = Query(..., description="Row ID within the table"),
+    column: str = Query(..., description="Column/category name"),
+    db: Session = Depends(get_db_session),
+):
+    """Return detail for a single cell in the accounting table.
+
+    Looks up the raw specialist result to find the table, row, and column,
+    returning page_number, raw_value, and surrounding table context for
+    PDF drill-down.
+    """
+    try:
+        parsed_id = uuid.UUID(document_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid document ID") from exc
+
+    detail = get_accounting_cell_detail(
+        session=db,
+        document_id=parsed_id,
+        table_id=table_id,
+        row_id=row_id,
+        column=column,
+    )
+
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Cell not found")
+
+    # Transform page number if page order was reversed
+    if detail.get("page_number") is not None:
+        # Find the scan unit for this document unit to get preflight info
+        du_id = detail.get("document_unit_id")
+        if du_id:
+            doc_unit = db.get(DocumentUnit, uuid.UUID(du_id))
+            if doc_unit is not None:
+                scan_unit = db.get(ScanUnit, doc_unit.scan_unit_id)
+                if scan_unit is not None:
+                    preflight = _load_preflight(scan_unit, db)
+                    if preflight and preflight.get("page_order_reversed"):
+                        detail["page_number"] = scan_unit.page_count - detail["page_number"] + 1
+
+    return detail
 
 
 @router.get("/cleanup/report", response_model=CleanupReportResponse)

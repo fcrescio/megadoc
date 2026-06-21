@@ -1508,6 +1508,7 @@ def _extract_row_facts(
                 "evidence": {
                     "table_id": table.get("table_id"),
                     "table_type": table.get("table_type"),
+                    "page_number": table.get("page_number"),
                     "accounting_context": accounting_context,
                     "row_id": row.get("row_id"),
                     "column": column,

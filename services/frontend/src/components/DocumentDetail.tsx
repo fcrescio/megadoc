@@ -17,6 +17,7 @@ import {
   useReingestDocument,
 } from '../hooks/useDocuments';
 import { downloadAsset, getDocumentDownloadUrl, getSpecialistResultExportUrl } from '../api/client';
+import AccountingSpreadsheet from './AccountingSpreadsheet';
 
 interface Props {
   documentId: string;
@@ -584,7 +585,7 @@ function TopicAssignmentManager({
 const TopicAssignmentManagerMemo = memo(TopicAssignmentManager);
 
 function DocumentDetail({ documentId, onBack, initialTab = 'info' }: Props) {
-  const [activeTab, setActiveTab] = useState<'info' | 'pdf' | 'ocr' | 'knowledge' | 'versions' | 'assets'>(initialTab);
+  const [activeTab, setActiveTab] = useState<'info' | 'pdf' | 'ocr' | 'knowledge' | 'versions' | 'assets' | 'bilancio'>(initialTab);
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
 
   const { data: docData, isLoading: docLoading } = useDocument(documentId);
@@ -644,7 +645,7 @@ function DocumentDetail({ documentId, onBack, initialTab = 'info' }: Props) {
       <div className="bg-white rounded-lg shadow">
         <div className="border-b">
           <nav className="flex -mb-px">
-            {(['info', 'pdf', 'ocr', 'knowledge', 'versions', 'assets'] as const).map((tab) => (
+            {(['info', 'pdf', 'ocr', 'knowledge', 'versions', 'assets', 'bilancio'] as const).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
@@ -1154,6 +1155,12 @@ function DocumentDetail({ documentId, onBack, initialTab = 'info' }: Props) {
                   </tbody>
                 </table>
               )}
+            </div>
+          )}
+
+          {activeTab === 'bilancio' && (
+            <div className="h-[70vh]">
+              <AccountingSpreadsheet documentId={documentId} />
             </div>
           )}
         </div>
