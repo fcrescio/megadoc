@@ -1,6 +1,7 @@
 import { memo, useState } from 'react';
 import { useDocumentAccountingTable } from '../hooks/useDocuments';
-import type { AccountingTableData, AccountingTableCell } from '../types';
+import type { AccountingTableData } from '../types';
+import PdfPageViewer from './PdfPageViewer';
 
 interface Props {
   documentId: string;
@@ -12,88 +13,6 @@ function formatCurrency(value: number | null | undefined) {
     style: 'currency',
     currency: 'EUR',
   }).format(value);
-}
-
-function formatEvidenceValue(value: unknown): string {
-  if (value === null || value === undefined) return '—';
-  return String(value);
-}
-
-function CellDetailPanel({
-  cell,
-  category,
-  unitCode,
-  subjectLabel,
-  onClose,
-}: {
-  cell: AccountingTableCell;
-  category: string;
-  unitCode: string;
-  subjectLabel: string;
-  onClose: () => void;
-}) {
-  return (
-    <div className="rounded-xl border border-cyan-300/20 bg-slate-800/80 p-4">
-      <div className="mb-3 flex items-center justify-between">
-        <p className="text-sm font-semibold text-cyan-200">Dettaglio cella</p>
-        <button onClick={onClose} className="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-300 hover:bg-white/10">
-          Chiudi
-        </button>
-      </div>
-      <div className="grid gap-2 text-sm">
-        <div className="flex justify-between">
-          <span className="text-slate-400">Soggetto</span>
-          <span className="text-white">{subjectLabel}</span>
-        </div>
-        <div className="flex justify-between">
-          <span className="text-slate-400">Unità</span>
-          <span className="text-white">{unitCode}</span>
-        </div>
-        <div className="flex justify-between">
-          <span className="text-slate-400">Categoria</span>
-          <span className="text-white">{category}</span>
-        </div>
-        <div className="flex justify-between">
-          <span className="text-slate-400">Importo</span>
-          <span className="font-semibold text-cyan-200">{formatCurrency(cell.amount)}</span>
-        </div>
-        <div className="flex justify-between">
-          <span className="text-slate-400">Tipo</span>
-          <span className="text-white">{cell.fact_type}</span>
-        </div>
-        {cell.is_total && (
-          <div className="flex justify-between">
-            <span className="text-slate-400">Totale</span>
-            <span className="rounded-full bg-amber-400/15 px-2 py-0.5 text-xs text-amber-200">Si</span>
-          </div>
-        )}
-        <hr className="border-white/10" />
-        <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Evidenza</p>
-        <div className="flex justify-between">
-          <span className="text-slate-400">Tabella</span>
-          <span className="font-mono text-xs text-white">{formatEvidenceValue(cell.evidence.table_id)}</span>
-        </div>
-        <div className="flex justify-between">
-          <span className="text-slate-400">Riga</span>
-          <span className="font-mono text-xs text-white">{formatEvidenceValue(cell.evidence.row_id)}</span>
-        </div>
-        <div className="flex justify-between">
-          <span className="text-slate-400">Colonna</span>
-          <span className="text-white">{formatEvidenceValue(cell.evidence.column)}</span>
-        </div>
-        <div className="flex justify-between">
-          <span className="text-slate-400">Pagina</span>
-          <span className="font-mono text-white">
-            {cell.evidence.page_number != null ? cell.evidence.page_number : '—'}
-          </span>
-        </div>
-        <div className="flex justify-between">
-          <span className="text-slate-400">Valore originale</span>
-          <span className="text-white">{formatEvidenceValue(cell.evidence.raw_value)}</span>
-        </div>
-      </div>
-    </div>
-  );
 }
 
 function AccountingTableSpreadsheet({
@@ -194,11 +113,20 @@ const AccountingSpreadsheet = memo(function AccountingSpreadsheet({ documentId }
   const { data, isLoading, error } = useDocumentAccountingTable(documentId);
   const [activeTableIndex, setActiveTableIndex] = useState(0);
   const [selectedCellKey, setSelectedCellKey] = useState<string | null>(null);
-  const [selectedCell, setSelectedCell] = useState<{
-    cell: AccountingTableCell;
+  const [showPdfViewer, setShowPdfViewer] = useState(false);
+  const [pdfPageNumber, setPdfPageNumber] = useState<number | null>(null);
+  const [pdfMetadata, setPdfMetadata] = useState<{
     category: string;
     unitCode: string;
     subjectLabel: string;
+    amount: number;
+    tableId: string | null;
+    rowId: string | null;
+    column: string | null;
+    rawValue: string | null;
+    pageNumber: number | null;
+    factType: string;
+    isTotal: boolean;
   } | null>(null);
 
   const tables = data?.tables ?? [];
@@ -212,17 +140,28 @@ const AccountingSpreadsheet = memo(function AccountingSpreadsheet({ documentId }
     if (!cell) return;
     const cellKey = `${row.account_key}:${col}`;
     setSelectedCellKey(cellKey);
-    setSelectedCell({
-      cell,
+    setPdfPageNumber(cell.evidence.page_number);
+    setPdfMetadata({
       category: col,
       unitCode: row.unit_code,
       subjectLabel: row.subject_label,
+      amount: cell.amount,
+      tableId: cell.evidence.table_id,
+      rowId: cell.evidence.row_id,
+      column: cell.evidence.column,
+      rawValue: cell.evidence.raw_value,
+      pageNumber: cell.evidence.page_number,
+      factType: cell.fact_type,
+      isTotal: cell.is_total,
     });
+    setShowPdfViewer(true);
   };
 
-  const handleCloseDetail = () => {
+  const handleClosePdfViewer = () => {
+    setShowPdfViewer(false);
     setSelectedCellKey(null);
-    setSelectedCell(null);
+    setPdfMetadata(null);
+    setPdfPageNumber(null);
   };
 
   if (isLoading) {
@@ -261,7 +200,7 @@ const AccountingSpreadsheet = memo(function AccountingSpreadsheet({ documentId }
               key={table.document_unit_id}
               onClick={() => {
                 setActiveTableIndex(index);
-                handleCloseDetail();
+                setSelectedCellKey(null);
               }}
               className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
                 index === stableActiveIndex
@@ -296,17 +235,14 @@ const AccountingSpreadsheet = memo(function AccountingSpreadsheet({ documentId }
         </div>
       )}
 
-      {/* Cell detail panel */}
-      {selectedCell && (
-        <div className="shrink-0">
-          <CellDetailPanel
-            cell={selectedCell.cell}
-            category={selectedCell.category}
-            unitCode={selectedCell.unitCode}
-            subjectLabel={selectedCell.subjectLabel}
-            onClose={handleCloseDetail}
-          />
-        </div>
+      {/* PDF viewer overlay */}
+      {showPdfViewer && (
+        <PdfPageViewer
+          documentId={documentId}
+          pageNumber={pdfPageNumber}
+          metadata={pdfMetadata}
+          onClose={handleClosePdfViewer}
+        />
       )}
     </div>
   );
