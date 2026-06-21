@@ -852,3 +852,81 @@ def get_accounting_table(
         "rows": rows,
         "totals": totals,
     }
+
+
+def get_accounting_cell_detail(
+    session: Session,
+    document_id: uuid.UUID | str,
+    table_id: str,
+    row_id: str,
+    column: str,
+) -> dict[str, Any] | None:
+    """Look up a single cell's detail from the raw specialist result.
+
+    Searches all document units for the given document that have
+    accounting_statement specialist results containing the specified table_id.
+    Returns page_number, raw_value, and surrounding table context.
+    """
+    parsed_doc_id = uuid.UUID(str(document_id))
+
+    # Find document units with accounting results
+    doc_units = session.execute(
+        select(DocumentUnit)
+        .join(ScanUnit, ScanUnit.id == DocumentUnit.scan_unit_id)
+        .where(ScanUnit.source_document_id == parsed_doc_id)
+        .where(DocumentUnit.specialist_results.any(
+            SpecialistResult.specialist_type == "accounting_statement"
+        ))
+        .options(selectinload(DocumentUnit.specialist_results))
+        .order_by(DocumentUnit.ordinal)
+    ).scalars().all()
+
+    for du in doc_units:
+        for sr in du.specialist_results:
+            if sr.specialist_type != "accounting_statement":
+                continue
+            tables = sr.result_json.get("tables", []) if isinstance(sr.result_json, dict) else []
+            for table in tables:
+                if not isinstance(table, dict):
+                    continue
+                if table.get("table_id") != table_id:
+                    continue
+
+                # Found the table — extract cell context
+                page_number = table.get("page_number")
+                headers = table.get("headers", [])
+                raw_rows = table.get("rows", [])
+
+                # Find the specific row
+                raw_value = None
+                row_data = None
+                for r in raw_rows:
+                    if isinstance(r, dict) and r.get("row_id") == row_id:
+                        cells = r.get("cells", {})
+                        raw_value = cells.get(column) if isinstance(cells, dict) else None
+                        row_data = r
+                        break
+
+                # Build table snippet (first few rows as preview)
+                table_snippet_rows = []
+                for r in raw_rows[:6]:
+                    if isinstance(r, dict):
+                        table_snippet_rows.append(r.get("cells", {}))
+
+                return {
+                    "page_number": page_number,
+                    "table_id": table_id,
+                    "row_id": row_id,
+                    "column": column,
+                    "raw_value": raw_value,
+                    "amount": None,  # resolved from accounting fact if needed
+                    "category_label": column,
+                    "unit_code": None,
+                    "subject_label": None,
+                    "table_headers": headers,
+                    "table_snippet_rows": table_snippet_rows,
+                    "document_unit_id": str(du.id),
+                    "document_unit_title": du.title or f"Pagine {du.start_page}-{du.end_page}",
+                }
+
+    return None

@@ -23,6 +23,7 @@ from common.application.accounting import (
     apply_manual_accounting_correction,
     compare_context_accounting_periods,
     find_context_account_subjects,
+    get_accounting_cell_detail,
     get_accounting_table,
 )
 from common.application.specialists import ensure_specialist_jobs_for_scan_unit
@@ -2514,6 +2515,39 @@ def get_document_accounting_table(
             tables.append(table)
 
     return {"document_id": document_id, "tables": tables}
+
+
+@router.get("/documents/{document_id}/accounting-table/cell-detail")
+def get_document_accounting_cell_detail(
+    document_id: str,
+    table_id: str = Query(..., description="Table ID from the accounting table"),
+    row_id: str = Query(..., description="Row ID within the table"),
+    column: str = Query(..., description="Column/category name"),
+    db: Session = Depends(get_db_session),
+):
+    """Return detail for a single cell in the accounting table.
+
+    Looks up the raw specialist result to find the table, row, and column,
+    returning page_number, raw_value, and surrounding table context for
+    PDF drill-down.
+    """
+    try:
+        parsed_id = uuid.UUID(document_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid document ID") from exc
+
+    detail = get_accounting_cell_detail(
+        session=db,
+        document_id=parsed_id,
+        table_id=table_id,
+        row_id=row_id,
+        column=column,
+    )
+
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Cell not found")
+
+    return detail
 
 
 @router.get("/cleanup/report", response_model=CleanupReportResponse)
