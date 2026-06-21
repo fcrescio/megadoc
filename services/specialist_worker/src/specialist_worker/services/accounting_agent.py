@@ -849,6 +849,7 @@ def _llm_accounts_to_pipeline(
             "evidence": {
                 "table_id": None,
                 "table_type": None,
+                "page_number": None,
                 "accounting_context": None,
                 "row_id": None,
                 "column": None,
