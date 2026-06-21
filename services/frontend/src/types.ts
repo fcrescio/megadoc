@@ -759,6 +759,14 @@ export interface AccountingTableCell {
   fact_type: string;
   is_total: boolean;
   evidence: AccountingTableCellEvidence;
+  fact_count: number;
+  facts: Array<{
+    amount: number;
+    fact_id: string;
+    fact_type: string;
+    is_total: boolean;
+    evidence: AccountingTableCellEvidence;
+  }>;
 }
 
 export interface AccountingTableRow {

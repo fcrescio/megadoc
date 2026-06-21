@@ -13,6 +13,7 @@ interface CellMetadata {
   pageNumber: number | null;
   factType: string;
   isTotal: boolean;
+  factCount?: number;
 }
 
 interface Props {
@@ -104,6 +105,14 @@ const PdfPageViewer = memo(function PdfPageViewer({ documentId, pageNumber, meta
                 <span className="text-slate-400">Tipo</span>
                 <span className="text-white">{metadata.factType}</span>
               </div>
+              {metadata.factCount && metadata.factCount > 1 && (
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Righe aggregate</span>
+                  <span className="rounded-full bg-amber-400/15 px-2 py-0.5 text-xs text-amber-200">
+                    {metadata.factCount}
+                  </span>
+                </div>
+              )}
               <div className="flex justify-between">
                 <span className="text-slate-400">Pagina</span>
                 <span className="font-mono text-white">

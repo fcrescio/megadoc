@@ -5,6 +5,7 @@ from decimal import Decimal
 from common.application.accounting import (
     accounting_stats,
     apply_manual_accounting_correction,
+    get_accounting_table,
     project_accounting_result,
     reapply_manual_accounting_corrections,
     rebuild_accounting_facts,
@@ -117,6 +118,42 @@ def test_accounting_projection_materializes_scoped_facts(db_session):
     assert fact.period_source == "document_unit"
     assert fact.period_review_status == "unverified"
     assert fact.evidence_json["row_id"] == "row_11"
+
+
+def test_accounting_table_aggregates_duplicate_account_category_facts(db_session):
+    unit, result = _make_statement_unit(db_session)
+    result.result_json["accounts"][0]["facts"].append(
+        {
+            "fact_type": "allocated_expense",
+            "accounting_role": "actual_allocation",
+            "category_key": "spese_generali",
+            "category_label": "Spese generali",
+            "amount": 10.41,
+            "raw_amount": -10.41,
+            "currency": "EUR",
+            "period_context": {
+                "from": "2022-07-01",
+                "to": "2023-06-30",
+                "source": "document_unit",
+                "review_status": "unverified",
+            },
+            "is_total": False,
+            "evidence": {"table_id": "riparto", "row_id": "row_12", "column": "Spese generali"},
+        }
+    )
+    project_document_unit(db_session, unit)
+    project_accounting_result(db_session, unit, result)
+    db_session.flush()
+
+    table = get_accounting_table(db_session, unit.id)
+
+    assert table is not None
+    cell = table["rows"][0]["cells"]["Spese generali"]
+    assert cell["amount"] == 373.0
+    assert cell["fact_count"] == 2
+    assert len(cell["facts"]) == 2
+    assert {fact["evidence"]["row_id"] for fact in cell["facts"]} == {"row_11", "row_12"}
+    assert table["totals"]["Spese generali"] == 373.0
 
 
 def test_accounting_projection_is_rebuildable_and_idempotent(db_session):

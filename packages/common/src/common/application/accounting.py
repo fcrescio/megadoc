@@ -773,7 +773,7 @@ def get_accounting_table(
 ) -> dict[str, Any] | None:
     """Return accounting data pivoted into a 2D spreadsheet structure.
 
-    Rows = accounts (units), Columns = categories, Cells = {amount, evidence}.
+    Rows = accounts (units), Columns = categories, Cells = aggregated facts.
     """
     du_id = uuid.UUID(str(document_unit_id))
 
@@ -817,21 +817,33 @@ def get_accounting_table(
             }
             row_order.append(akey)
 
-        # Build cell
+        # Build or extend cell. A single account/category can have multiple
+        # facts, for example several line items in the same allocation bucket.
         evidence = fact.evidence_json or {}
-        rows_map[akey]["cells"][cat] = {
+        fact_payload = {
             "amount": float(fact.amount),
             "fact_id": str(fact.id),
             "fact_type": fact.fact_type,
             "is_total": fact.is_total,
-            "evidence": {
-                "table_id": evidence.get("table_id"),
-                "row_id": evidence.get("row_id"),
-                "column": evidence.get("column"),
-                "page_number": evidence.get("page_number"),
-                "raw_value": evidence.get("raw_value"),
-            },
+            "evidence": _accounting_fact_evidence_payload(evidence),
         }
+        existing_cell = rows_map[akey]["cells"].get(cat)
+        if existing_cell is None:
+            rows_map[akey]["cells"][cat] = {
+                "amount": float(fact.amount),
+                "fact_id": str(fact.id),
+                "fact_type": fact.fact_type,
+                "is_total": fact.is_total,
+                "evidence": fact_payload["evidence"],
+                "fact_count": 1,
+                "facts": [fact_payload],
+            }
+        else:
+            amount = Decimal(str(existing_cell["amount"])) + fact.amount
+            existing_cell["amount"] = float(amount.quantize(Decimal("0.01")))
+            existing_cell["is_total"] = bool(existing_cell["is_total"] or fact.is_total)
+            existing_cell["fact_count"] += 1
+            existing_cell["facts"].append(fact_payload)
 
     # Build rows in order
     rows: list[dict[str, Any]] = [rows_map[akey] for akey in row_order]
@@ -851,6 +863,16 @@ def get_accounting_table(
         "columns": columns,
         "rows": rows,
         "totals": totals,
+    }
+
+
+def _accounting_fact_evidence_payload(evidence: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "table_id": evidence.get("table_id"),
+        "row_id": evidence.get("row_id"),
+        "column": evidence.get("column"),
+        "page_number": evidence.get("page_number"),
+        "raw_value": evidence.get("raw_value"),
     }
 
 

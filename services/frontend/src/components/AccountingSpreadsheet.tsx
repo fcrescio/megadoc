@@ -80,7 +80,16 @@ function AccountingTableSpreadsheet({
                             : 'text-slate-600'
                       }`}
                     >
-                      {cell ? formatCurrency(cell.amount) : '—'}
+                      {cell ? (
+                        <span className="inline-flex items-center justify-end gap-1.5">
+                          <span>{formatCurrency(cell.amount)}</span>
+                          {cell.fact_count > 1 && (
+                            <span className="rounded-full bg-amber-400/15 px-1.5 py-0.5 text-[10px] font-sans text-amber-200">
+                              {cell.fact_count}
+                            </span>
+                          )}
+                        </span>
+                      ) : '—'}
                     </td>
                   );
                 })}
@@ -127,6 +136,7 @@ const AccountingSpreadsheet = memo(function AccountingSpreadsheet({ documentId }
     pageNumber: number | null;
     factType: string;
     isTotal: boolean;
+    factCount: number;
   } | null>(null);
 
   const tables = data?.tables ?? [];
@@ -153,6 +163,7 @@ const AccountingSpreadsheet = memo(function AccountingSpreadsheet({ documentId }
       pageNumber: cell.evidence.page_number,
       factType: cell.fact_type,
       isTotal: cell.is_total,
+      factCount: cell.fact_count,
     });
     setShowPdfViewer(true);
   };
