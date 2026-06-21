@@ -1,6 +1,8 @@
 from pathlib import Path
 from types import SimpleNamespace
 
+import httpx
+
 from common.config import Settings
 from common.processing.dots_native import DotsNativeOCRService
 
@@ -144,3 +146,49 @@ def test_dots_native_service_marks_sparse_page_empty(monkeypatch, tmp_path: Path
     assert page["metadata"]["mode"] == "empty"
     assert page["blocks"] == []
     assert result.confidence_summary["dots_native"]["empty_pages"] == [1]
+
+
+def test_dots_native_request_retries_retryable_status(monkeypatch) -> None:
+    calls = []
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def post(self, path, json):
+            calls.append((path, json))
+            request = httpx.Request("POST", "http://dots.test/v1/chat/completions")
+            if len(calls) == 1:
+                return httpx.Response(500, request=request, text="model is busy")
+            return httpx.Response(
+                200,
+                request=request,
+                json={
+                    "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                },
+            )
+
+    monkeypatch.setattr("common.processing.dots_native.httpx.Client", FakeClient)
+
+    service = DotsNativeOCRService(
+        Settings(
+            OCR_DOTS_NATIVE_ENDPOINT="http://dots.test/v1",
+            OCR_DOTS_NATIVE_REQUEST_RETRIES=2,
+            OCR_DOTS_NATIVE_RETRY_BACKOFF_SECONDS=0,
+        )
+    )
+
+    result = service._request({"messages": [], "model": "dots"})
+
+    assert result == {
+        "content": "ok",
+        "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+    }
+    assert len(calls) == 2

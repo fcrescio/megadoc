@@ -1,6 +1,8 @@
 import base64
 import json
 import logging
+import random
+import time
 from pathlib import Path
 from typing import Any
 
@@ -209,7 +211,8 @@ class DotsNativeOCRService:
         if self._settings.ocr_dots_native_api_key:
             headers["Authorization"] = f"Bearer {self._settings.ocr_dots_native_api_key}"
 
-        for attempt in range(1, max(1, self._settings.ocr_dots_native_request_retries) + 1):
+        max_attempts = max(1, self._settings.ocr_dots_native_request_retries)
+        for attempt in range(1, max_attempts + 1):
             try:
                 with httpx.Client(
                     base_url=self._settings.ocr_dots_native_endpoint.rstrip("/"),
@@ -220,14 +223,33 @@ class DotsNativeOCRService:
                     response.raise_for_status()
                     data = response.json()
                 break
-            except httpx.HTTPError:
+            except httpx.HTTPStatusError as exc:
+                status_code = exc.response.status_code
+                retryable = status_code in {408, 409, 425, 429, 500, 502, 503, 504}
                 logger.warning(
-                    "dots_native_request_failed attempt=%s/%s",
+                    "dots_native_request_failed attempt=%s/%s status=%s retryable=%s body=%r",
                     attempt,
-                    self._settings.ocr_dots_native_request_retries,
+                    max_attempts,
+                    status_code,
+                    retryable,
+                    exc.response.text[:500],
                     exc_info=True,
                 )
                 data = None
+                if not retryable:
+                    return None
+                if attempt < max_attempts:
+                    self._sleep_before_retry(attempt)
+            except httpx.HTTPError:
+                logger.warning(
+                    "dots_native_request_failed attempt=%s/%s status=transport retryable=True",
+                    attempt,
+                    max_attempts,
+                    exc_info=True,
+                )
+                data = None
+                if attempt < max_attempts:
+                    self._sleep_before_retry(attempt)
         else:
             return None
 
@@ -239,6 +261,15 @@ class DotsNativeOCRService:
         except (KeyError, IndexError, TypeError):
             logger.exception("dots_native_response_invalid")
             return None
+
+    def _sleep_before_retry(self, attempt: int) -> None:
+        base = max(0.0, self._settings.ocr_dots_native_retry_backoff_seconds)
+        cap = max(base, self._settings.ocr_dots_native_retry_backoff_max_seconds)
+        if base <= 0:
+            return
+        delay = min(cap, base * (2 ** max(0, attempt - 1)))
+        delay *= 0.75 + random.random() * 0.5
+        time.sleep(delay)
 
     def _page_render_candidates(self) -> list[dict[str, Any]]:
         candidates = [
