@@ -1,6 +1,12 @@
 import { memo, useState } from 'react';
 import { useDocumentAccountingRawTables, useDocumentAccountingTable } from '../hooks/useDocuments';
-import type { AccountingRawTableData, AccountingTableCell, AccountingTableCellFact, AccountingTableData } from '../types';
+import type {
+  AccountingRawTableData,
+  AccountingTableCell,
+  AccountingTableCellFact,
+  AccountingTableData,
+  AccountingTableExplanation,
+} from '../types';
 import PdfPageViewer from './PdfPageViewer';
 
 interface Props {
@@ -144,6 +150,46 @@ function deriveRawHeaders(table: AccountingRawTableData) {
   return Array.from(headers);
 }
 
+function ExplanationCard({
+  title,
+  explanation,
+  tone = 'cyan',
+}: {
+  title: string;
+  explanation: AccountingTableExplanation | undefined;
+  tone?: 'cyan' | 'slate';
+}) {
+  if (!explanation?.summary) return null;
+  const isFallback = explanation.source === 'api_fallback' || explanation.review_status === 'fallback';
+  const classes = tone === 'cyan'
+    ? 'border-cyan-200 bg-cyan-50 text-cyan-950'
+    : 'border-slate-200 bg-slate-50 text-slate-900';
+  const pillClasses = tone === 'cyan'
+    ? 'bg-white/80 text-cyan-800'
+    : 'bg-white text-slate-700';
+  return (
+    <div className={`shrink-0 rounded-xl border px-4 py-3 text-sm ${classes}`}>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-semibold">{title}</span>
+        {explanation.role && (
+          <span className={`rounded-full px-2 py-0.5 text-xs ${pillClasses}`}>
+            {explanation.role}
+          </span>
+        )}
+        <span className={`rounded-full px-2 py-0.5 text-xs ${pillClasses}`}>
+          {isFallback ? 'fallback' : 'LLM'}
+        </span>
+        {explanation.review_status && (
+          <span className={`rounded-full px-2 py-0.5 text-xs ${pillClasses}`}>
+            {explanation.review_status}
+          </span>
+        )}
+      </div>
+      <p className="mt-1">{explanation.summary}</p>
+    </div>
+  );
+}
+
 function RawAccountingTablesView({
   documentId,
   selectedCellKey,
@@ -233,21 +279,8 @@ function RawAccountingTablesView({
         />
       </div>
 
-      <div className="shrink-0 rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm text-cyan-950">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="font-semibold">Come leggere questa tabella</span>
-          {(table.section_label || table.role || table.table_type) && (
-            <span className="rounded-full bg-white/80 px-2 py-0.5 text-xs text-cyan-800">
-              {table.section_label || table.role || table.table_type}
-            </span>
-          )}
-          {context?.review_status && (
-            <span className="rounded-full bg-white/80 px-2 py-0.5 text-xs text-cyan-800">
-              {context.review_status}
-            </span>
-          )}
-        </div>
-        <p className="mt-1 text-cyan-900">{table.explanation}</p>
+      <div>
+        <ExplanationCard title="Come leggere questa tabella" explanation={table.explanation} />
         <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-cyan-800">
           {table.table_type && <span>Tipo: {table.table_type}</span>}
           {(context?.period_from || context?.period_to) && (
@@ -561,6 +594,14 @@ const AccountingSpreadsheet = memo(function AccountingSpreadsheet({ documentId }
             · pagine {activeTable.start_page}–{activeTable.end_page}
           </span>
         </div>
+      )}
+
+      {viewMode === 'summary' && activeTable?.explanation && (
+        <ExplanationCard
+          title="Come leggere la sintesi"
+          explanation={activeTable.explanation}
+          tone="slate"
+        />
       )}
 
       {viewMode === 'summary' && selectedSummaryCell && selectedSummaryCell.fact_count > 1 && (

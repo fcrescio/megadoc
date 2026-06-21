@@ -35,11 +35,23 @@ class AccountingTableInterpretation(BaseModel):
     reason: str
 
 
+class AccountingTableExplanation(BaseModel):
+    table_id: str
+    summary: str = Field(
+        description=(
+            "Spiegazione specifica e concisa di cosa rappresenta la tabella, "
+            "come leggere righe/colonne e quali limiti o incertezze considerare."
+        )
+    )
+    role: str | None = Field(default=None, description="Ruolo semantico della tabella, se riconoscibile.")
+
+
 class AccountingReconciliationProposal(BaseModel):
     applicable: bool
     summary: str
     header_corrections: list[AccountingHeaderCorrection] = Field(default_factory=list)
     table_interpretations: list[AccountingTableInterpretation] = Field(default_factory=list)
+    table_explanations: list[AccountingTableExplanation] = Field(default_factory=list)
     suspected_cell_corrections: list[AccountingCellCorrection] = Field(default_factory=list)
 
 
@@ -64,6 +76,8 @@ def propose_accounting_reconciliation(
                 "Sei un revisore di prospetti contabili condominiali estratti da OCR. "
                 "Identifica esclusivamente interpretazioni strutturali supportate dal testo: "
                 "tipo tabella e intestazioni semanticamente equivalenti. "
+                "Per ogni tabella fornisci anche una spiegazione specifica, utile a un utente umano "
+                "per capire cosa sta leggendo e a un LLM per usarla come contesto. "
                 "Non inventare righe o importi e non modificare automaticamente numeri. "
                 "Se noti una probabile trascrizione errata in una cella, riportala soltanto in "
                 "suspected_cell_corrections con valore originale, valore proposto e motivo; "
@@ -75,7 +89,8 @@ def propose_accounting_reconciliation(
             content=(
                 "Proponi una riconciliazione strutturale per questo output di parsing. "
                 "Usa soltanto table_id, row_id e intestazioni presenti nell'input. "
-                "Se non vi sono correzioni solide imposta applicable=false.\n"
+                "Compila table_explanations per ogni tabella, anche se non proponi correzioni. "
+                "Se non vi sono correzioni solide imposta applicable=false, ma mantieni le spiegazioni.\n"
                 + json.dumps(prompt_payload, ensure_ascii=True)
             ),
         ),
@@ -95,4 +110,6 @@ def _compact_table(table: dict[str, Any]) -> dict[str, Any]:
         "rows": sample_rows,
         "totals": table.get("totals"),
         "accounting_context": table.get("accounting_context"),
+        "section_label": table.get("section_label"),
+        "section_role": table.get("section_role"),
     }

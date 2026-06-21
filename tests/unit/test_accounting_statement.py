@@ -3,6 +3,7 @@ from specialist_worker.services.accounting_reconciliation import (
     AccountingCellCorrection,
     AccountingHeaderCorrection,
     AccountingReconciliationProposal,
+    AccountingTableExplanation,
     AccountingTableInterpretation,
 )
 from specialist_worker.services.accounting_agent import (
@@ -520,6 +521,46 @@ Periodo: 01/07/2022 - 30/06/2023
 
     assert result["tables"][0]["table_type"] == "unknown"
     assert result["reconciliation"]["status"] == "rejected"
+
+
+def test_accounting_statement_keeps_llm_table_explanations_without_corrections():
+    text = """
+Consuntivo Ripartizioni per unita
+Periodo: 01/07/2022 - 30/06/2023
+| Unita | Nominativo | Totale gestione |
+| --- | --- | ---: |
+| B11 | BONACCI FABIO | -60,00 |
+"""
+    provider = _ReconciliationProvider(
+        AccountingReconciliationProposal(
+            applicable=False,
+            summary="Nessuna correzione strutturale necessaria.",
+            table_explanations=[
+                AccountingTableExplanation(
+                    table_id="table_1",
+                    role="actual_allocation",
+                    summary=(
+                        "La tabella mostra il riparto consuntivo per unita: ogni riga "
+                        "identifica un soggetto e la colonna Totale gestione riporta "
+                        "l'importo attribuito nel periodo."
+                    ),
+                )
+            ],
+        )
+    )
+
+    result, _ = process_accounting_statement(
+        _document_unit(),
+        text,
+        "fixture:v6",
+        reconciliation_provider=provider,
+    )
+
+    explanation = result["tables"][0]["llm_explanation"]
+    assert explanation["source"] == "accounting_reconciliation_llm"
+    assert explanation["role"] == "actual_allocation"
+    assert "riparto consuntivo" in explanation["summary"]
+    assert result["reconciliation"]["status"] == "no_proposal"
 
 
 def test_accounting_statement_does_not_request_reconciliation_without_provider():

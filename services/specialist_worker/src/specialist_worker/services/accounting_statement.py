@@ -340,6 +340,10 @@ def _reconcile_with_llm(
         return tables, validation_checks, accounts, audit
 
     audit["proposal"] = proposal.model_dump(mode="json")
+    explained_tables, applied_explanations = _apply_table_explanations(tables, proposal)
+    if applied_explanations:
+        audit["applied_table_explanations"] = applied_explanations
+        tables = explained_tables
     if not proposal.applicable:
         audit["status"] = "no_proposal"
         return tables, validation_checks, accounts, audit
@@ -368,6 +372,30 @@ def _reconcile_with_llm(
     return candidate_tables, candidate_checks, candidate_accounts, audit
 
 
+def _apply_table_explanations(
+    tables: list[dict[str, Any]],
+    proposal: AccountingReconciliationProposal,
+) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    if not proposal.table_explanations:
+        return tables, []
+    candidate = copy.deepcopy(tables)
+    indexed = {str(table.get("table_id")): table for table in candidate}
+    applied: list[dict[str, str]] = []
+    for explanation in proposal.table_explanations:
+        table = indexed.get(explanation.table_id)
+        summary = explanation.summary.strip()
+        if table is None or not summary:
+            continue
+        table["llm_explanation"] = {
+            "summary": summary[:2000],
+            "role": explanation.role.strip()[:128] if explanation.role else None,
+            "source": "accounting_reconciliation_llm",
+            "review_status": "unverified",
+        }
+        applied.append({"table_id": explanation.table_id, "kind": "table_explanation"})
+    return candidate, applied
+
+
 def _reconciliation_trigger_reasons(
     tables: list[dict[str, Any]],
     validation_checks: list[dict[str, Any]],
@@ -389,6 +417,11 @@ def _reconciliation_trigger_reasons(
         for header in table.get("headers", [])
     ):
         reasons.append("unnamed_columns_present")
+    if any(
+        not isinstance(table.get("llm_explanation"), dict)
+        for table in tables
+    ):
+        reasons.append("table_explanations_missing")
     return reasons
 
 

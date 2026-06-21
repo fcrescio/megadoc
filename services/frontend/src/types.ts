@@ -788,6 +788,7 @@ export interface AccountingTableData {
   columns: string[];
   rows: AccountingTableRow[];
   totals: Record<string, number>;
+  explanation?: AccountingTableExplanation;
 }
 
 export interface AccountingTableResponse {
@@ -798,6 +799,14 @@ export interface AccountingTableResponse {
 export interface AccountingRawTableRow {
   row_id: string | null;
   cells: Record<string, string | number | null>;
+}
+
+export interface AccountingTableExplanation {
+  summary: string;
+  role?: string | null;
+  source: string;
+  review_status?: string | null;
+  source_table_ids?: string[];
 }
 
 export interface AccountingRawTableData {
@@ -823,7 +832,7 @@ export interface AccountingRawTableData {
   title: string | null;
   headers: string[];
   rows: AccountingRawTableRow[];
-  explanation: string;
+  explanation: AccountingTableExplanation;
 }
 
 export interface AccountingRawTablesResponse {

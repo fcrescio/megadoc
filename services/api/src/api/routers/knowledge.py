@@ -2499,6 +2499,7 @@ def get_document_accounting_table(
         .where(DocumentUnit.specialist_results.any(
             SpecialistResult.specialist_type == "accounting_statement"
         ))
+        .options(selectinload(DocumentUnit.specialist_results))
         .order_by(DocumentUnit.ordinal)
     ).scalars().all()
 
@@ -2522,11 +2523,13 @@ def get_document_accounting_table(
     for du in doc_units:
         table = get_accounting_table(db, du.id)
         if table is not None:
+            source_explanations = _accounting_source_table_explanations(du)
             table["document_unit_id"] = str(du.id)
             table["title"] = du.title or f"Pagine {du.start_page}-{du.end_page}"
             table["ordinal"] = du.ordinal
             table["start_page"] = du.start_page
             table["end_page"] = du.end_page
+            table["explanation"] = _accounting_summary_table_explanation(table, source_explanations)
 
             # Transform page numbers if page order was reversed
             # The evidence page_number is in corrected (post-preflight) coordinates.
@@ -2592,7 +2595,7 @@ def get_document_accounting_cell_detail(
     return detail
 
 
-def _accounting_table_explanation(table: dict[str, Any]) -> str:
+def _fallback_accounting_table_explanation(table: dict[str, Any]) -> dict[str, Any]:
     role = table.get("role") or table.get("section_role")
     table_type = table.get("table_type")
     rows = table.get("rows")
@@ -2626,11 +2629,79 @@ def _accounting_table_explanation(table: dict[str, Any]) -> str:
         "unknown": "una tabella non classificata con certezza",
     }
     description = role_descriptions.get(str(role), type_descriptions.get(str(table_type), "una tabella estratta dal documento"))
-    return (
+    summary = (
         f"Questa tabella {description}{period}. "
         f"Contiene {row_count} righe e {header_count} colonne; le celle sono il testo strutturato estratto dall'OCR "
         "e possono includere importi, millesimi, descrizioni o totali non ancora promossi a fatti contabili normalizzati."
     )
+    return {
+        "summary": summary,
+        "role": role or table_type,
+        "source": "api_fallback",
+        "review_status": "fallback",
+    }
+
+
+def _accounting_source_table_explanations(doc_unit: DocumentUnit) -> dict[str, dict[str, Any]]:
+    explanations: dict[str, dict[str, Any]] = {}
+    for result in doc_unit.specialist_results:
+        if result.specialist_type != "accounting_statement" or not isinstance(result.result_json, dict):
+            continue
+        for raw_table in result.result_json.get("tables", []) or []:
+            if not isinstance(raw_table, dict):
+                continue
+            table_id = raw_table.get("table_id")
+            if table_id is None:
+                continue
+            explanation = raw_table.get("llm_explanation")
+            if isinstance(explanation, dict) and explanation.get("summary"):
+                explanations[str(table_id)] = explanation
+    return explanations
+
+
+def _accounting_summary_table_explanation(
+    table: dict[str, Any],
+    source_explanations: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    source_ids: list[str] = []
+    for row in table.get("rows", []) or []:
+        if not isinstance(row, dict):
+            continue
+        for cell in (row.get("cells") or {}).values():
+            if not isinstance(cell, dict):
+                continue
+            for fact in cell.get("facts", []) or []:
+                evidence = fact.get("evidence") if isinstance(fact, dict) else None
+                table_id = evidence.get("table_id") if isinstance(evidence, dict) else None
+                if table_id is not None and str(table_id) not in source_ids:
+                    source_ids.append(str(table_id))
+
+    selected = [source_explanations[table_id] for table_id in source_ids if table_id in source_explanations]
+    if selected:
+        joined = " ".join(str(item.get("summary", "")).strip() for item in selected[:4] if item.get("summary"))
+        if len(selected) > 4:
+            joined += f" Altre {len(selected) - 4} tabelle contribuiscono alla sintesi."
+        return {
+            "summary": (
+                "Questa vista e una sintesi normalizzata costruita aggregando fatti contabili "
+                f"estratti dalle tabelle sorgenti. {joined}"
+            ).strip(),
+            "role": "normalized_accounting_summary",
+            "source": "source_table_llm_explanations",
+            "review_status": "unverified",
+            "source_table_ids": source_ids,
+        }
+    return {
+        "summary": (
+            "Questa vista e una sintesi normalizzata costruita aggregando i fatti contabili "
+            "materializzati dalle tabelle sorgenti. Le celle possono sommare piu righe quando "
+            "piu fatti condividono la stessa unita e categoria."
+        ),
+        "role": "normalized_accounting_summary",
+        "source": "api_fallback",
+        "review_status": "fallback",
+        "source_table_ids": source_ids,
+    }
 
 
 @router.get("/documents/{document_id}/accounting-raw-tables")
@@ -2708,7 +2779,11 @@ def get_document_accounting_raw_tables(
                         "title": table.get("title"),
                         "headers": table.get("headers", []) if isinstance(table.get("headers", []), list) else [],
                         "rows": rows,
-                        "explanation": _accounting_table_explanation(table),
+                        "explanation": (
+                            table.get("llm_explanation")
+                            if isinstance(table.get("llm_explanation"), dict) and table.get("llm_explanation", {}).get("summary")
+                            else _fallback_accounting_table_explanation(table)
+                        ),
                     }
                 )
 
