@@ -761,3 +761,94 @@ def _normalize_key(value: str) -> str:
     normalized = unicodedata.normalize("NFKD", value.strip().lower())
     ascii_value = normalized.encode("ascii", "ignore").decode("ascii")
     return re.sub(r"[^a-z0-9]+", "_", ascii_value).strip("_")[:512] or "unknown"
+
+
+# ---------------------------------------------------------------------------
+# Pivot query: accounting_facts → 2D spreadsheet table
+# ---------------------------------------------------------------------------
+
+def get_accounting_table(
+    session: Session,
+    document_unit_id: uuid.UUID | str,
+) -> dict[str, Any] | None:
+    """Return accounting data pivoted into a 2D spreadsheet structure.
+
+    Rows = accounts (units), Columns = categories, Cells = {amount, evidence}.
+    """
+    du_id = uuid.UUID(str(document_unit_id))
+
+    # Load all facts for this document unit, eager-load account
+    facts = session.execute(
+        select(AccountingFact)
+        .where(AccountingFact.document_unit_id == du_id)
+        .options(selectinload(AccountingFact.account))
+        .order_by(AccountingFact.account_id, AccountingFact.category_label)
+    ).scalars().all()
+
+    if not facts:
+        return None
+
+    # Build column set (ordered categories) and row set (ordered accounts)
+    columns: list[str] = []
+    col_set: set[str] = set()
+    rows_map: dict[str, dict[str, Any]] = {}  # account_key → row data
+    row_order: list[str] = []  # preserve account order
+
+    for fact in facts:
+        account = fact.account
+        if account is None:
+            continue
+        akey = account.account_key
+
+        # Collect column
+        cat = fact.category_label or fact.category_key or "unknown"
+        if cat not in col_set:
+            col_set.add(cat)
+            columns.append(cat)
+
+        # Collect row
+        if akey not in rows_map:
+            rows_map[akey] = {
+                "account_id": str(account.id),
+                "account_key": akey,
+                "unit_code": account.unit_code or "",
+                "subject_label": account.subject_label,
+                "cells": {},
+            }
+            row_order.append(akey)
+
+        # Build cell
+        evidence = fact.evidence_json or {}
+        rows_map[akey]["cells"][cat] = {
+            "amount": float(fact.amount),
+            "fact_id": str(fact.id),
+            "fact_type": fact.fact_type,
+            "is_total": fact.is_total,
+            "evidence": {
+                "table_id": evidence.get("table_id"),
+                "row_id": evidence.get("row_id"),
+                "column": evidence.get("column"),
+                "page_number": evidence.get("page_number"),
+                "raw_value": evidence.get("raw_value"),
+            },
+        }
+
+    # Build rows in order
+    rows: list[dict[str, Any]] = [rows_map[akey] for akey in row_order]
+
+    # Column totals (sum all cells, regardless of is_total flag)
+    totals: dict[str, float] = {}
+    for col in columns:
+        total = 0.0
+        for row in rows:
+            cell = row["cells"].get(col)
+            if cell is not None:
+                total += cell["amount"]
+        totals[col] = round(total, 2)
+
+    return {
+        "document_unit_id": str(du_id),
+        "columns": columns,
+        "rows": rows,
+        "totals": totals,
+    }

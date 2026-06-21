@@ -41,6 +41,7 @@ import type {
   TopicAssignmentUpsertPayload,
   TopicCreatePayload,
   TopicProposalResolutionPayload,
+  AccountingTableResponse,
 } from '../types';
 import {
   getDocuments,
@@ -86,6 +87,7 @@ import {
   deleteDocumentUnitTopicAssignment,
   deleteDocumentUnit,
   reingestDocument,
+  getDocumentAccountingTable,
 } from '../api/client';
 
 export function useDocuments(limit = 100) {
@@ -595,5 +597,14 @@ export function useDeleteDocumentUnitTopicAssignment() {
       queryClient.invalidateQueries({ queryKey: ['knowledge-entities'] });
       queryClient.invalidateQueries({ queryKey: ['knowledge-entity-detail'] });
     },
+  });
+}
+
+export function useDocumentAccountingTable(documentId: string | undefined) {
+  return useQuery<AccountingTableResponse>({
+    queryKey: ['accounting-table', documentId],
+    queryFn: () => getDocumentAccountingTable(documentId!),
+    enabled: !!documentId,
+    staleTime: 30_000,
   });
 }

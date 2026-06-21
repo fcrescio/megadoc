@@ -42,6 +42,7 @@ import type {
   TopicAssignmentUpsertPayload,
   TopicCreatePayload,
   TopicProposalResolutionPayload,
+  AccountingTableResponse,
 } from '../types';
 
 const API_BASE = '/api';
@@ -530,4 +531,9 @@ export async function deleteDocumentUnitTopicAssignment(
     { method: 'DELETE' },
   );
   return handleResponse<KnowledgeDocumentUnit>(response);
+}
+
+export async function getDocumentAccountingTable(documentId: string): Promise<AccountingTableResponse> {
+  const response = await fetch(`${API_BASE}/knowledge/documents/${documentId}/accounting-table`);
+  return handleResponse<AccountingTableResponse>(response);
 }

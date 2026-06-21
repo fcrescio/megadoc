@@ -742,3 +742,45 @@ export interface TopicProposalResolutionPayload {
   target_topic_id?: string;
   create_topic?: TopicCreatePayload;
 }
+
+/* ── Accounting Table View ── */
+
+export interface AccountingTableCellEvidence {
+  table_id: string | null;
+  row_id: string | null;
+  column: string | null;
+  page_number: number | null;
+  raw_value: string | null;
+}
+
+export interface AccountingTableCell {
+  amount: number;
+  fact_id: string;
+  fact_type: string;
+  is_total: boolean;
+  evidence: AccountingTableCellEvidence;
+}
+
+export interface AccountingTableRow {
+  account_id: string;
+  account_key: string;
+  unit_code: string;
+  subject_label: string;
+  cells: Record<string, AccountingTableCell>;
+}
+
+export interface AccountingTableData {
+  document_unit_id: string;
+  title: string;
+  ordinal: number;
+  start_page: number;
+  end_page: number;
+  columns: string[];
+  rows: AccountingTableRow[];
+  totals: Record<string, number>;
+}
+
+export interface AccountingTableResponse {
+  document_id: string;
+  tables: AccountingTableData[];
+}

@@ -23,6 +23,7 @@ from common.application.accounting import (
     apply_manual_accounting_correction,
     compare_context_accounting_periods,
     find_context_account_subjects,
+    get_accounting_table,
 )
 from common.application.specialists import ensure_specialist_jobs_for_scan_unit
 from common.db.models import (
@@ -2470,6 +2471,49 @@ def merge_topic(
         affected_assignments=stats.assignments_retargeted,
         aliases_created=stats.aliases_created,
     )
+
+
+@router.get("/documents/{document_id}/accounting-table")
+def get_document_accounting_table(
+    document_id: str,
+    db: Session = Depends(get_db_session),
+):
+    """Return accounting data pivoted into a 2D spreadsheet for a document.
+
+    Rows = accounts (units), Columns = categories, Cells = {amount, evidence}.
+    The response includes page_number in each cell's evidence for PDF drill-down.
+    """
+    try:
+        parsed_id = uuid.UUID(document_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid document ID") from exc
+
+    # Find document units with accounting results
+    doc_units = db.execute(
+        select(DocumentUnit)
+        .join(ScanUnit, ScanUnit.id == DocumentUnit.scan_unit_id)
+        .where(ScanUnit.source_document_id == parsed_id)
+        .where(DocumentUnit.specialist_results.any(
+            SpecialistResult.specialist_type == "accounting_statement"
+        ))
+        .order_by(DocumentUnit.ordinal)
+    ).scalars().all()
+
+    if not doc_units:
+        raise HTTPException(status_code=404, detail="No accounting data found for this document")
+
+    tables = []
+    for du in doc_units:
+        table = get_accounting_table(db, du.id)
+        if table is not None:
+            table["document_unit_id"] = str(du.id)
+            table["title"] = du.title or f"Pagine {du.start_page}-{du.end_page}"
+            table["ordinal"] = du.ordinal
+            table["start_page"] = du.start_page
+            table["end_page"] = du.end_page
+            tables.append(table)
+
+    return {"document_id": document_id, "tables": tables}
 
 
 @router.get("/cleanup/report", response_model=CleanupReportResponse)
