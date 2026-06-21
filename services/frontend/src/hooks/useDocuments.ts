@@ -42,6 +42,7 @@ import type {
   TopicCreatePayload,
   TopicProposalResolutionPayload,
   AccountingTableResponse,
+  AccountingRawTablesResponse,
 } from '../types';
 import {
   getDocuments,
@@ -88,6 +89,7 @@ import {
   deleteDocumentUnit,
   reingestDocument,
   getDocumentAccountingTable,
+  getDocumentAccountingRawTables,
 } from '../api/client';
 
 export function useDocuments(limit = 100) {
@@ -604,6 +606,15 @@ export function useDocumentAccountingTable(documentId: string | undefined) {
   return useQuery<AccountingTableResponse>({
     queryKey: ['accounting-table', documentId],
     queryFn: () => getDocumentAccountingTable(documentId!),
+    enabled: !!documentId,
+    staleTime: 30_000,
+  });
+}
+
+export function useDocumentAccountingRawTables(documentId: string | undefined) {
+  return useQuery<AccountingRawTablesResponse>({
+    queryKey: ['accounting-raw-tables', documentId],
+    queryFn: () => getDocumentAccountingRawTables(documentId!),
     enabled: !!documentId,
     staleTime: 30_000,
   });

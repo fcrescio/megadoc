@@ -5,7 +5,7 @@ interface CellMetadata {
   category: string;
   unitCode: string;
   subjectLabel: string;
-  amount: number;
+  amount: number | null;
   tableId: string | null;
   rowId: string | null;
   column: string | null;

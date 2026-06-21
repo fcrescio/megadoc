@@ -2592,6 +2592,82 @@ def get_document_accounting_cell_detail(
     return detail
 
 
+@router.get("/documents/{document_id}/accounting-raw-tables")
+def get_document_accounting_raw_tables(
+    document_id: str,
+    db: Session = Depends(get_db_session),
+):
+    """Return raw accounting tables extracted by the specialist worker.
+
+    This is intentionally separate from the normalized accounting_facts pivot:
+    it exposes the original table headers and rows so humans can inspect
+    detailed allocations that are not yet promoted to queryable facts.
+    """
+    try:
+        parsed_id = uuid.UUID(document_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid document ID") from exc
+
+    doc_units = db.execute(
+        select(DocumentUnit)
+        .join(ScanUnit, ScanUnit.id == DocumentUnit.scan_unit_id)
+        .where(ScanUnit.source_document_id == parsed_id)
+        .where(DocumentUnit.specialist_results.any(
+            SpecialistResult.specialist_type == "accounting_statement"
+        ))
+        .options(selectinload(DocumentUnit.specialist_results))
+        .order_by(DocumentUnit.ordinal)
+    ).scalars().all()
+
+    tables = []
+    for du in doc_units:
+        scan_unit = db.get(ScanUnit, du.scan_unit_id)
+        preflight = _load_preflight(scan_unit, db) if scan_unit is not None else None
+        for result in du.specialist_results:
+            if result.specialist_type != "accounting_statement":
+                continue
+            result_tables = result.result_json.get("tables", []) if isinstance(result.result_json, dict) else []
+            for table in result_tables:
+                if not isinstance(table, dict):
+                    continue
+                page_number = table.get("page_number")
+                if (
+                    page_number is not None
+                    and scan_unit is not None
+                    and preflight
+                    and preflight.get("page_order_reversed")
+                ):
+                    page_number = scan_unit.page_count - page_number + 1
+                rows = []
+                for row in table.get("rows", []) or []:
+                    if not isinstance(row, dict):
+                        continue
+                    cells = row.get("cells", {})
+                    rows.append(
+                        {
+                            "row_id": row.get("row_id"),
+                            "cells": cells if isinstance(cells, dict) else {},
+                        }
+                    )
+                tables.append(
+                    {
+                        "document_unit_id": str(du.id),
+                        "document_unit_title": du.title or f"Pagine {du.start_page}-{du.end_page}",
+                        "document_unit_ordinal": du.ordinal,
+                        "start_page": du.start_page,
+                        "end_page": du.end_page,
+                        "table_id": table.get("table_id"),
+                        "page_number": page_number,
+                        "role": table.get("role"),
+                        "title": table.get("title"),
+                        "headers": table.get("headers", []) if isinstance(table.get("headers", []), list) else [],
+                        "rows": rows,
+                    }
+                )
+
+    return {"document_id": document_id, "tables": tables}
+
+
 @router.get("/cleanup/report", response_model=CleanupReportResponse)
 def get_cleanup_report(
     min_similarity: float = Query(0.90, description="Minimum title similarity for duplicate detection"),

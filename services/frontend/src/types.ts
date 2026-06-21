@@ -792,3 +792,27 @@ export interface AccountingTableResponse {
   document_id: string;
   tables: AccountingTableData[];
 }
+
+export interface AccountingRawTableRow {
+  row_id: string | null;
+  cells: Record<string, string | number | null>;
+}
+
+export interface AccountingRawTableData {
+  document_unit_id: string;
+  document_unit_title: string;
+  document_unit_ordinal: number;
+  start_page: number;
+  end_page: number;
+  table_id: string | null;
+  page_number: number | null;
+  role: string | null;
+  title: string | null;
+  headers: string[];
+  rows: AccountingRawTableRow[];
+}
+
+export interface AccountingRawTablesResponse {
+  document_id: string;
+  tables: AccountingRawTableData[];
+}
