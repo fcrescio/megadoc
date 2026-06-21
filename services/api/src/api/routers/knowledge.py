@@ -2592,6 +2592,47 @@ def get_document_accounting_cell_detail(
     return detail
 
 
+def _accounting_table_explanation(table: dict[str, Any]) -> str:
+    role = table.get("role") or table.get("section_role")
+    table_type = table.get("table_type")
+    rows = table.get("rows")
+    row_count = len(rows) if isinstance(rows, list) else 0
+    headers = table.get("headers")
+    header_count = len(headers) if isinstance(headers, list) else 0
+    context = table.get("accounting_context")
+    period = ""
+    if isinstance(context, dict):
+        period_from = context.get("period_from")
+        period_to = context.get("period_to")
+        if period_from or period_to:
+            period = f" per il periodo {period_from or '?'} - {period_to or '?'}"
+
+    role_descriptions = {
+        "actual_summary": "riassume dati di consuntivo o rendiconto",
+        "actual_allocation": "ripartisce spese consuntive tra unita e soggetti",
+        "actual_payments": "elenca pagamenti o movimenti registrati",
+        "actual_personal_charge": "raccoglie addebiti personali",
+        "budget_summary": "riassume dati di preventivo",
+        "budget_allocation": "ripartisce spese preventive tra unita e soggetti",
+        "budget_installment_schedule": "mostra rate e scadenze da versare",
+        "allocation": "ripartisce importi tra unita e soggetti",
+    }
+    type_descriptions = {
+        "expense_allocation": "una tabella di riparto spese",
+        "payment_schedule": "un piano rate o scadenze",
+        "summary": "una tabella riepilogativa",
+        "balance": "una tabella di saldi",
+        "payment_ledger": "un registro pagamenti",
+        "unknown": "una tabella non classificata con certezza",
+    }
+    description = role_descriptions.get(str(role), type_descriptions.get(str(table_type), "una tabella estratta dal documento"))
+    return (
+        f"Questa tabella {description}{period}. "
+        f"Contiene {row_count} righe e {header_count} colonne; le celle sono il testo strutturato estratto dall'OCR "
+        "e possono includere importi, millesimi, descrizioni o totali non ancora promossi a fatti contabili normalizzati."
+    )
+
+
 @router.get("/documents/{document_id}/accounting-raw-tables")
 def get_document_accounting_raw_tables(
     document_id: str,
@@ -2657,11 +2698,17 @@ def get_document_accounting_raw_tables(
                         "start_page": du.start_page,
                         "end_page": du.end_page,
                         "table_id": table.get("table_id"),
+                        "table_type": table.get("table_type"),
                         "page_number": page_number,
                         "role": table.get("role"),
+                        "section_id": table.get("section_id"),
+                        "section_label": table.get("section_label"),
+                        "section_role": table.get("section_role"),
+                        "accounting_context": table.get("accounting_context") if isinstance(table.get("accounting_context"), dict) else None,
                         "title": table.get("title"),
                         "headers": table.get("headers", []) if isinstance(table.get("headers", []), list) else [],
                         "rows": rows,
+                        "explanation": _accounting_table_explanation(table),
                     }
                 )
 

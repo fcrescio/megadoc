@@ -769,6 +769,8 @@ export interface AccountingTableCell {
   }>;
 }
 
+export type AccountingTableCellFact = AccountingTableCell['facts'][number];
+
 export interface AccountingTableRow {
   account_id: string;
   account_key: string;
@@ -805,11 +807,23 @@ export interface AccountingRawTableData {
   start_page: number;
   end_page: number;
   table_id: string | null;
+  table_type: string | null;
   page_number: number | null;
   role: string | null;
+  section_id: string | null;
+  section_label: string | null;
+  section_role: string | null;
+  accounting_context: {
+    role?: string | null;
+    period_from?: string | null;
+    period_to?: string | null;
+    source?: string | null;
+    review_status?: string | null;
+  } | null;
   title: string | null;
   headers: string[];
   rows: AccountingRawTableRow[];
+  explanation: string;
 }
 
 export interface AccountingRawTablesResponse {

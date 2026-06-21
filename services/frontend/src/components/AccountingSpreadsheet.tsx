@@ -1,6 +1,6 @@
 import { memo, useState } from 'react';
 import { useDocumentAccountingRawTables, useDocumentAccountingTable } from '../hooks/useDocuments';
-import type { AccountingRawTableData, AccountingTableData } from '../types';
+import type { AccountingRawTableData, AccountingTableCell, AccountingTableCellFact, AccountingTableData } from '../types';
 import PdfPageViewer from './PdfPageViewer';
 
 interface Props {
@@ -123,6 +123,18 @@ function cellToText(value: string | number | null | undefined) {
   return String(value);
 }
 
+function factTypeLabel(factType: string) {
+  const labels: Record<string, string> = {
+    allocated_expense: 'Riparto spesa',
+    opening_balance: 'Saldo iniziale',
+    closing_balance: 'Saldo finale',
+    amount_due: 'Importo dovuto',
+    payment: 'Pagamento',
+    raw_table_cell: 'Cella estratta',
+  };
+  return labels[factType] ?? factType;
+}
+
 function deriveRawHeaders(table: AccountingRawTableData) {
   if (table.headers.length > 0) return table.headers;
   const headers = new Set<string>();
@@ -179,6 +191,7 @@ function RawAccountingTablesView({
   const stableActiveRawIndex = activeRawTableIndex < tables.length ? activeRawTableIndex : 0;
   const table = tables[stableActiveRawIndex];
   const headers = deriveRawHeaders(table);
+  const context = table.accounting_context;
   const normalizedFilter = filter.trim().toLowerCase();
   const visibleRows = normalizedFilter
     ? table.rows.filter((row) => (
@@ -218,6 +231,31 @@ function RawAccountingTablesView({
           placeholder="Filtra righe, es. A10 o Crescioli"
           className="w-72 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-800 shadow-sm focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500"
         />
+      </div>
+
+      <div className="shrink-0 rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm text-cyan-950">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-semibold">Come leggere questa tabella</span>
+          {(table.section_label || table.role || table.table_type) && (
+            <span className="rounded-full bg-white/80 px-2 py-0.5 text-xs text-cyan-800">
+              {table.section_label || table.role || table.table_type}
+            </span>
+          )}
+          {context?.review_status && (
+            <span className="rounded-full bg-white/80 px-2 py-0.5 text-xs text-cyan-800">
+              {context.review_status}
+            </span>
+          )}
+        </div>
+        <p className="mt-1 text-cyan-900">{table.explanation}</p>
+        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-cyan-800">
+          {table.table_type && <span>Tipo: {table.table_type}</span>}
+          {(context?.period_from || context?.period_to) && (
+            <span>Periodo: {context.period_from || '?'} - {context.period_to || '?'}</span>
+          )}
+          {context?.source && <span>Origine contesto: {context.source}</span>}
+          {table.page_number != null && <span>Pagina PDF: {table.page_number}</span>}
+        </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto rounded-xl border border-white/10 bg-slate-950/60">
@@ -270,11 +308,60 @@ function RawAccountingTablesView({
   );
 }
 
+function AggregatedFactsPanel({
+  cell,
+  onFactClick,
+}: {
+  cell: AccountingTableCell;
+  onFactClick: (fact: AccountingTableCellFact, index: number) => void;
+}) {
+  return (
+    <div className="shrink-0 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <span className="font-semibold">Dettaglio cella aggregata</span>
+          <span className="ml-2 text-amber-800">
+            {cell.fact_count} righe · totale {formatCurrency(cell.amount)}
+          </span>
+        </div>
+        <span className="text-xs text-amber-700">
+          Click su una riga per aprire il PDF alla pagina di origine.
+        </span>
+      </div>
+      <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        {cell.facts.map((fact, index) => (
+          <button
+            key={fact.fact_id}
+            onClick={() => onFactClick(fact, index)}
+            className="rounded-lg border border-amber-200 bg-white px-3 py-2 text-left shadow-sm transition hover:border-amber-400 hover:bg-amber-100"
+          >
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs font-medium text-amber-800">{factTypeLabel(fact.fact_type)}</span>
+              <span className="font-mono text-sm font-semibold text-slate-900">{formatCurrency(fact.amount)}</span>
+            </div>
+            <div className="mt-1 truncate text-xs text-slate-600">
+              {fact.evidence.table_id || 'tabella ?'}
+              {fact.evidence.row_id ? ` · ${fact.evidence.row_id}` : ''}
+              {fact.evidence.column ? ` · ${fact.evidence.column}` : ''}
+            </div>
+            {fact.evidence.raw_value != null && (
+              <div className="mt-1 truncate font-mono text-xs text-slate-500">
+                Origine: {fact.evidence.raw_value}
+              </div>
+            )}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 const AccountingSpreadsheet = memo(function AccountingSpreadsheet({ documentId }: Props) {
   const { data, isLoading, error } = useDocumentAccountingTable(documentId);
   const [activeTableIndex, setActiveTableIndex] = useState(0);
   const [viewMode, setViewMode] = useState<'summary' | 'raw'>('summary');
   const [selectedCellKey, setSelectedCellKey] = useState<string | null>(null);
+  const [selectedSummaryCell, setSelectedSummaryCell] = useState<AccountingTableCell | null>(null);
   const [showPdfViewer, setShowPdfViewer] = useState(false);
   const [pdfPageNumber, setPdfPageNumber] = useState<number | null>(null);
   const [pdfMetadata, setPdfMetadata] = useState<{
@@ -303,6 +390,7 @@ const AccountingSpreadsheet = memo(function AccountingSpreadsheet({ documentId }
     if (!cell) return;
     const cellKey = `${row.account_key}:${col}`;
     setSelectedCellKey(cellKey);
+    setSelectedSummaryCell(cell);
     setPdfPageNumber(cell.evidence.page_number);
     setPdfMetadata({
       category: col,
@@ -326,6 +414,7 @@ const AccountingSpreadsheet = memo(function AccountingSpreadsheet({ documentId }
     setSelectedCellKey(null);
     setPdfMetadata(null);
     setPdfPageNumber(null);
+    setSelectedSummaryCell(null);
   };
 
   const handleRawCellClick = (
@@ -341,6 +430,7 @@ const AccountingSpreadsheet = memo(function AccountingSpreadsheet({ documentId }
     const rowLabel = cellToText(row.cells[headers[0]]) || cellToText(row.row_id) || 'Riga tabella';
     const subjectLabel = cellToText(row.cells[headers[1]]) || table.document_unit_title;
     setSelectedCellKey(cellKey);
+    setSelectedSummaryCell(null);
     setPdfPageNumber(table.page_number);
     setPdfMetadata({
       category: column,
@@ -385,6 +475,28 @@ const AccountingSpreadsheet = memo(function AccountingSpreadsheet({ documentId }
 
   const activeTable = tables[stableActiveIndex];
 
+  const handleAggregatedFactClick = (fact: AccountingTableCellFact, index: number) => {
+    if (!activeTable || !selectedSummaryCell) return;
+    const matchingRow = activeTable.rows.find((row) => Object.values(row.cells).includes(selectedSummaryCell));
+    setSelectedCellKey(`${selectedCellKey}:fact:${index}`);
+    setPdfPageNumber(fact.evidence.page_number);
+    setPdfMetadata({
+      category: fact.evidence.column || selectedSummaryCell.evidence.column || 'Fatto contabile',
+      unitCode: matchingRow?.unit_code || '',
+      subjectLabel: matchingRow?.subject_label || '',
+      amount: fact.amount,
+      tableId: fact.evidence.table_id,
+      rowId: fact.evidence.row_id,
+      column: fact.evidence.column,
+      rawValue: fact.evidence.raw_value,
+      pageNumber: fact.evidence.page_number,
+      factType: fact.fact_type,
+      isTotal: fact.is_total,
+      factCount: 1,
+    });
+    setShowPdfViewer(true);
+  };
+
   return (
     <div className="flex h-full flex-col gap-3">
       <div className="flex shrink-0 gap-2">
@@ -392,6 +504,7 @@ const AccountingSpreadsheet = memo(function AccountingSpreadsheet({ documentId }
           onClick={() => {
             setViewMode('summary');
             setSelectedCellKey(null);
+            setSelectedSummaryCell(null);
           }}
           className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
             viewMode === 'summary'
@@ -405,6 +518,7 @@ const AccountingSpreadsheet = memo(function AccountingSpreadsheet({ documentId }
           onClick={() => {
             setViewMode('raw');
             setSelectedCellKey(null);
+            setSelectedSummaryCell(null);
           }}
           className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
             viewMode === 'raw'
@@ -425,6 +539,7 @@ const AccountingSpreadsheet = memo(function AccountingSpreadsheet({ documentId }
               onClick={() => {
                 setActiveTableIndex(index);
                 setSelectedCellKey(null);
+                setSelectedSummaryCell(null);
               }}
               className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
                 index === stableActiveIndex
@@ -446,6 +561,13 @@ const AccountingSpreadsheet = memo(function AccountingSpreadsheet({ documentId }
             · pagine {activeTable.start_page}–{activeTable.end_page}
           </span>
         </div>
+      )}
+
+      {viewMode === 'summary' && selectedSummaryCell && selectedSummaryCell.fact_count > 1 && (
+        <AggregatedFactsPanel
+          cell={selectedSummaryCell}
+          onFactClick={handleAggregatedFactClick}
+        />
       )}
 
       {/* Spreadsheet */}
