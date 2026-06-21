@@ -92,6 +92,14 @@ class Settings(BaseSettings):
     ocr_dots_native_layout_max_tokens: int = Field(default=8192, alias="OCR_DOTS_NATIVE_LAYOUT_MAX_TOKENS")
     ocr_dots_native_ocr_max_tokens: int = Field(default=4096, alias="OCR_DOTS_NATIVE_OCR_MAX_TOKENS")
     ocr_dots_native_request_retries: int = Field(default=2, alias="OCR_DOTS_NATIVE_REQUEST_RETRIES")
+    ocr_dots_native_retry_backoff_seconds: float = Field(
+        default=2.0,
+        alias="OCR_DOTS_NATIVE_RETRY_BACKOFF_SECONDS",
+    )
+    ocr_dots_native_retry_backoff_max_seconds: float = Field(
+        default=30.0,
+        alias="OCR_DOTS_NATIVE_RETRY_BACKOFF_MAX_SECONDS",
+    )
     pipeline_version: str = Field(default="v1", alias="PIPELINE_VERSION")
     request_timeout_seconds: int = Field(default=30, alias="REQUEST_TIMEOUT_SECONDS")
     api_base_url: str = Field(default="http://api:8080", alias="API_BASE_URL")

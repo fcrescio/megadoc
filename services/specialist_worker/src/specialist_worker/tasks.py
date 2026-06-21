@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 import uuid
 from datetime import datetime, timezone
 
@@ -22,7 +23,7 @@ from common.db.models import (
 from common.db.schema import ensure_knowledge_schema
 from knowledge_classifier.config import get_settings as get_knowledge_settings
 from knowledge_classifier.llm.openai_compat import OpenAICompatibleProvider
-from sqlalchemy import create_engine, delete, select
+from sqlalchemy import create_engine, delete, select, text
 from sqlalchemy.orm import Session, selectinload
 
 from specialist_worker.services.accounting_statement import process_accounting_statement
@@ -30,9 +31,30 @@ from specialist_worker.services.utility_bill import process_utility_bill
 
 logger = logging.getLogger(__name__)
 
+_schema_ready = False
+_schema_ready_lock = threading.Lock()
+_SCHEMA_ADVISORY_LOCK_ID = 713915042
+
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _ensure_schema_once(engine) -> None:
+    global _schema_ready
+    if _schema_ready:
+        return
+    with _schema_ready_lock:
+        if _schema_ready:
+            return
+        with engine.connect() as conn:
+            conn.execute(text("SELECT pg_advisory_lock(:lock_id)"), {"lock_id": _SCHEMA_ADVISORY_LOCK_ID})
+            try:
+                ensure_knowledge_schema(engine)
+            finally:
+                conn.execute(text("SELECT pg_advisory_unlock(:lock_id)"), {"lock_id": _SCHEMA_ADVISORY_LOCK_ID})
+                conn.commit()
+        _schema_ready = True
 
 
 @shared_task(bind=True, max_retries=2)
@@ -43,7 +65,7 @@ def process_specialist_job(self, specialist_job_id: str):
         os.getenv("DATABASE_URL", "postgresql+psycopg://megadoc:megadoc@postgres:5432/megadoc"),
         echo=False,
     )
-    ensure_knowledge_schema(engine)
+    _ensure_schema_once(engine)
     _update_specialist_job(engine, specialist_job_id, status="processing", started_at=_utcnow(), increment_attempt=True)
 
     with Session(engine) as session:

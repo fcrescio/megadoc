@@ -295,6 +295,8 @@ services:
       CELERY_RESULT_BACKEND: redis://redis:6379/2
       DATABASE_URL: postgresql+psycopg://megadoc:megadoc@postgres:5432/megadoc
       PYTHONPATH: /app/packages/common/src:/app/services/api/src:/app/services/worker/src:/app/services/cli/src:/app/services/knowledge_classifier/src:/app/services/knowledge_worker/src:/app/services/specialist_worker/src
+      KN_LLM_MAX_TOKENS: 16384
+      SPECIALIST_ACCOUNTING_LLM_RECONCILIATION_MAX_TOKENS: 16384
     depends_on:
       redis:
         condition: service_healthy

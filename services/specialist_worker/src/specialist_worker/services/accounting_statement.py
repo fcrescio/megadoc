@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import logging
 import re
 import unicodedata
@@ -8,14 +9,223 @@ from html.parser import HTMLParser
 from typing import Any
 
 from common.db.models import DocumentUnit
-from knowledge_classifier.llm.base import LLMProvider
+from knowledge_classifier.llm.base import ChatMessage, LLMProvider
+from pydantic import BaseModel, Field
 
+from specialist_worker.services.accounting_agent import (
+    agentic_account_extraction,
+)
 from specialist_worker.services.accounting_reconciliation import (
     AccountingReconciliationProposal,
     propose_accounting_reconciliation,
 )
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# LLM-based primary extraction schema
+# ---------------------------------------------------------------------------
+
+class LLMTableRow(BaseModel):
+    """A single row inside an LLM-extracted table."""
+    cells: dict[str, str]
+    normalized_amounts: dict[str, float] = Field(default_factory=dict)
+
+
+class LLMTable(BaseModel):
+    """A single table extracted by the LLM."""
+    table_id: str
+    table_type: str = "unknown"  # expense_allocation, payment_schedule, summary, balance, unknown
+    headers: list[str]
+    rows: list[LLMTableRow]
+    totals: dict[str, float] = Field(default_factory=dict)
+
+
+class LLMFact(BaseModel):
+    """A single accounting fact extracted by the LLM."""
+    fact_type: str
+    amount: float
+    category_label: str | None = None
+    is_total: bool = False
+
+
+class LLMAccount(BaseModel):
+    """A single account (condominium unit) extracted by the LLM.
+    
+    Uses a compact flat dict (category→amount) instead of a list of fact objects
+    to keep the LLM response small enough to fit within token limits.
+    """
+    unit_code: str
+    subject_label: str
+    amounts: dict[str, float] = Field(default_factory=dict)
+
+
+class LLMExtractionResult(BaseModel):
+    """Top-level structured output from the LLM extraction pass."""
+    statement_type: str = "unknown"
+    accounting_period_from: str | None = None
+    accounting_period_to: str | None = None
+    tables: list[LLMTable] = Field(default_factory=list)
+    accounts: list[LLMAccount] = Field(default_factory=list)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    notes: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# LLM-powered account extraction
+# ---------------------------------------------------------------------------
+
+LLM_ACCOUNT_EXTRACTION_PROMPT = """Sei un contabile specializzato in estratti conto condominiali.
+Analizza il testo OCR che segue ed estrai l'elenco completo delle unità immobiliari
+con i relativi importi per OGNI categoria di spesa.
+
+Il testo contiene tabelle HTML. Cerca le tabelle di RIPARTO SPESE che hanno
+queste intestazioni: "Cod", "Nominativo", "quota mill.", "TOTALE".
+Queste tabelle contengono UNA RIGA per ogni unità immobiliare più una riga
+di totale. Il nome della categoria (es. GENERALI, SCALA N.10, ASCENSORE N.6, ...)
+è scritto come testo subito prima della tabella.
+
+IGNORA le tabelle riassuntive con intestazioni diverse (es. "Voce", "Importo",
+"Entrate", "Uscite", "Descrizione", "Preventivo", "Consuntivo").
+
+Per OGNI tabella di riparto che trovi, estrai TUTTE le unità. RAGGRUPPA
+i dati in un unico account per unità con un dizionario piatto categoria→importo:
+
+- unit_code: il codice unità (es. "1", "2", "3")
+- subject_label: il nome del proprietario/condomino
+- amounts: UN SOLO DIZIONARIO con chiave=nome categoria, valore=importo
+  Esempio: {{"GENERALI": 375.65, "SCALA N.10": 130.28, ...}}
+
+REGOLE:
+- Estrai SOLO dalle tabelle con intestazioni "Cod", "Nominativo", "quota mill.", "TOTALE".
+- RAGGRUPPA: ogni unità appare UNA SOLA volta con un unico dizionario amounts.
+- amounts contiene SOLO le categorie in cui l'unità compare.
+- Includi TUTTE le categorie di riparto che trovi.
+- Importi normalizzati: "1.234,56" → 1234.56
+- Se non trovi NESSUNA tabella di riparto valida, restituisci lista vuota.
+
+TABELLE ESTRATTE DAL PARSER (come riferimento):
+{table_summary}
+
+TESTO OCR:
+{text}
+"""
+
+
+def _extract_accounts_via_llm(
+    text: str,
+    tables: list[dict[str, Any]],
+    period_from: str | None,
+    period_to: str | None,
+    *,
+    provider: LLMProvider | None,
+) -> list[dict[str, Any]]:
+    """Try to extract accounts via LLM, using the raw text and extracted tables.
+
+    Returns a list of account dicts (same format as _extract_accounts), or
+    an empty list if the LLM is unavailable, fails, or returns nothing useful.
+    """
+    if provider is None or not text.strip():
+        return []
+
+    # Build a compact summary of extracted tables for context
+    table_lines: list[str] = []
+    for t in tables:
+        tid = t.get("table_id", "?")
+        ttype = t.get("table_type", "?")
+        headers = t.get("headers", [])
+        row_count = len(t.get("rows", []))
+        table_lines.append(f"  [{tid}] type={ttype}, headers={headers}, rows={row_count}")
+    table_summary = "\n".join(table_lines) if table_lines else "(nessuna tabella estratta)"
+
+    # Truncate text to avoid exceeding token limits
+    max_chars = 45_000
+    truncated = text[:max_chars]
+    if len(text) > max_chars:
+        logger.info(
+            "LLM account extraction text truncated from %d to %d chars",
+            len(text), max_chars,
+        )
+
+    messages = [
+        ChatMessage(
+            role="system",
+            content=(
+                "Sei un contabile specializzato in estratti conto condominiali. "
+                "Estrai l'elenco delle unità immobiliari con i relativi importi "
+                "dal testo OCR fornito. Rispondi SOLO con JSON valido."
+            ),
+        ),
+        ChatMessage(
+            role="user",
+            content=LLM_ACCOUNT_EXTRACTION_PROMPT.format(
+                text=truncated,
+                table_summary=table_summary,
+            ),
+        ),
+    ]
+    try:
+        parsed, raw = provider.chat_with_json(messages, LLMAccountExtractionResult)
+        result = LLMAccountExtractionResult.model_validate(parsed)
+    except Exception as exc:
+        logger.warning("LLM account extraction failed: %s", exc, exc_info=True)
+        return []
+
+    if not result.accounts:
+        logger.info("LLM account extraction returned no accounts")
+        return []
+
+    logger.info(
+        "LLM account extraction succeeded: %d accounts, confidence=%.2f",
+        len(result.accounts),
+        result.confidence,
+    )
+
+    # Convert LLM accounts (compact format) to pipeline format
+    pipeline_accounts: list[dict[str, Any]] = []
+    for llm_acc in result.accounts:
+        facts: list[dict[str, Any]] = []
+        for category_label, amount in llm_acc.amounts.items():
+            facts.append({
+                "fact_type": "allocated_expense",
+                "amount": abs(amount),
+                "raw_amount": amount,
+                "category_key": _normalize_key(category_label),
+                "category_label": category_label,
+                "is_total": False,
+                "currency": "EUR",
+                "period_context": {
+                    "from": period_from,
+                    "to": period_to,
+                    "source": "llm_extraction",
+                    "review_status": "unverified",
+                },
+                "evidence": {
+                    "table_id": None,
+                    "table_type": None,
+                    "accounting_context": None,
+                    "row_id": None,
+                    "column": None,
+                    "raw_value": None,
+                },
+            })
+        account_key = _normalize_key(llm_acc.unit_code)
+        pipeline_accounts.append({
+            "account_key": account_key,
+            "unit_code": llm_acc.unit_code,
+            "subject_label": llm_acc.subject_label,
+            "subject_aliases": [llm_acc.subject_label],
+            "facts": facts,
+        })
+
+    return pipeline_accounts
+
+
+class LLMAccountExtractionResult(BaseModel):
+    """Result from LLM-based account extraction."""
+    accounts: list[LLMAccount] = Field(default_factory=list)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
 def process_accounting_statement(
@@ -26,6 +236,8 @@ def process_accounting_statement(
     reconciliation_provider: LLMProvider | None = None,
 ) -> tuple[dict[str, Any], float]:
     text = segment_text or ""
+
+    # --- Rule-based pipeline (always runs) ---
     statement_type = _statement_type(text)
     period_from, period_to = _extract_period(text)
     tables = _extract_structured_tables(
@@ -36,7 +248,20 @@ def process_accounting_statement(
         period_to=period_to,
     ) or _extract_markdown_tables(text, period_from=period_from, period_to=period_to)
     validation_checks = _build_validation_checks(tables)
-    accounts = _extract_accounts(tables, period_from, period_to)
+
+    # --- Account extraction: agent-driven first, rule-based as fallback ---
+    # The agent iterates table by table, using the LLM to determine category
+    # names from context and extract accounts with correct labels.
+    if reconciliation_provider is not None:
+        accounts = agentic_account_extraction(
+            text, tables, period_from, period_to, provider=reconciliation_provider
+        )
+    else:
+        accounts = []
+    if not accounts:
+        # Agent unavailable or returned nothing — fall back to rule-based
+        accounts = _extract_accounts(tables, period_from, period_to)
+
     tables, validation_checks, accounts, reconciliation = _reconcile_with_llm(
         tables,
         validation_checks,
@@ -510,6 +735,8 @@ def _extract_structured_tables(
         if table_position >= 0:
             prefix = text[:table_position]
             search_offset = table_position + len(html)
+            parsed_table["_text_position"] = table_position
+            parsed_table["_text_end_position"] = search_offset
         parsed_table["accounting_context"] = _accounting_context(
             parsed_table,
             prefix,
@@ -856,9 +1083,25 @@ def _parse_amount(value: str | None) -> float | None:
     if not value:
         return None
     compact = value.replace("€", "").replace(" ", "")
-    if not re.fullmatch(r"-?\d{1,3}(?:\.\d{3})*(?:,\d+)?|-?\d+(?:,\d+)?", compact):
+    # Italian format: 1.234,56 (dots=thousands, comma=decimal)
+    # Simple format: 1234,56 (comma=decimal)
+    # OCR error: 1234.56 (dot used instead of comma for decimal)
+    italian_pattern = r"-?\d{1,3}(?:\.\d{3})*(?:,\d+)?"
+    simple_pattern = r"-?\d+(?:,\d+)?"
+    dot_decimal_pattern = r"-?\d+\.\d{1,2}"
+
+    if re.fullmatch(italian_pattern, compact):
+        # Remove thousands separators (dots), replace decimal comma with dot
+        normalized = compact.replace(".", "").replace(",", ".")
+    elif re.fullmatch(simple_pattern, compact):
+        # Replace decimal comma with dot
+        normalized = compact.replace(",", ".")
+    elif re.fullmatch(dot_decimal_pattern, compact):
+        # Dot IS the decimal separator — keep it
+        normalized = compact
+    else:
         return None
-    normalized = compact.replace(".", "").replace(",", ".")
+
     try:
         return float(normalized)
     except ValueError:
@@ -1100,7 +1343,7 @@ def _extract_account_identity(row: dict[str, Any]) -> tuple[str, str] | None:
             for value in textual_cells.values()
             if (
                 match := re.fullmatch(
-                    r"\s*([A-Z]{1,2}\s*\d{1,3})(?:\s*\([^)]*\))?\s*",
+                    r"\s*([A-Z]{0,2}\s*\d{1,3})(?:\s*\([^)]*\))?\s*",
                     value,
                     re.IGNORECASE,
                 )
@@ -1124,7 +1367,7 @@ def _extract_account_identity(row: dict[str, Any]) -> tuple[str, str] | None:
 
 
 def _parse_name_and_unit(value: str) -> tuple[str, str] | None:
-    parenthesized = re.match(r"^\s*(.+?)\s*\(([A-Z]{1,2}\s*\d{1,3})\)\s*$", value, re.IGNORECASE)
+    parenthesized = re.match(r"^\s*(.+?)\s*\(([A-Z]{0,2}\s*\d{1,3})\)\s*$", value, re.IGNORECASE)
     if parenthesized and _looks_like_subject(parenthesized.group(1)):
         return parenthesized.group(2).upper().replace(" ", ""), parenthesized.group(1).strip()
     return _parse_prefixed_account(value)
@@ -1132,7 +1375,7 @@ def _parse_name_and_unit(value: str) -> tuple[str, str] | None:
 
 def _parse_prefixed_account(value: str) -> tuple[str, str] | None:
     match = re.match(
-        r"^\s*-?\s*([A-Z]{1,2}\s*\d{1,3})\s+([A-ZÀ-ÖØ-Ý' ]{3,60}?)(?:\s+-|$)",
+        r"^\s*-?\s*([A-Z]{0,2}\s*\d{1,3})\s+([A-ZÀ-ÖØ-Ý' ]{3,60}?)(?:\s+-|$)",
         value,
         re.IGNORECASE,
     )
@@ -1162,6 +1405,33 @@ def _is_payment_ledger(table: dict[str, Any]) -> bool:
     return {"nominativo", "importo"}.issubset(headers) and any("data pag" in header for header in headers)
 
 
+def _derive_table_category(table: dict[str, Any]) -> str | None:
+    """Derive a category label from the table headers or context.
+
+    For expense_allocation tables, the category name may be embedded in the
+    first header (e.g. "ASCENSORE N.6 / Cod") or in the section label.
+
+    An explicit ``_category_label`` key on the table dict takes precedence
+    (set by the agent tool when the LLM has determined the category from
+    surrounding OCR context).
+    """
+    override = table.get("_category_label")
+    if override:
+        return override
+    headers = table.get("headers", [])
+    if headers:
+        first = str(headers[0])
+        # Check if category is embedded: "CATEGORY / Cod" or "CATEGORY / codice"
+        match = re.match(r"^(.+?)\s*/\s*(?:cod|codice|nominativo)$", first, re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+    # Fallback: use section label if it contains useful info
+    section_label = table.get("section_label", "")
+    if section_label and section_label != "Riparto consuntivo":
+        return section_label
+    return None
+
+
 def _extract_row_facts(
     table: dict[str, Any],
     row: dict[str, Any],
@@ -1182,17 +1452,23 @@ def _extract_row_facts(
     context_source = accounting_context.get("source") or "document_unit"
     context_review_status = accounting_context.get("review_status") or "unverified"
     facts: list[dict[str, Any]] = []
+    # Derive category label from table context for allocation tables
+    table_type = str(table.get("table_type") or "unknown")
+    table_category = _derive_table_category(table)
     for column, raw_amount in amounts.items():
         if not isinstance(raw_amount, (int, float)):
             continue
         fact_type, category_label, is_total = _classify_fact_column(
             str(column),
-            table_type=str(table.get("table_type") or "unknown"),
+            table_type=table_type,
             payment_ledger=payment_ledger,
             raw_value=str(cells.get(column) or ""),
         )
         if fact_type is None:
             continue
+        # Override category label for allocation tables with derived name
+        if table_type == "expense_allocation" and table_category:
+            category_label = table_category
         accounting_role = accounting_context.get("role")
         if accounting_role is None and fact_type == "personal_charge":
             accounting_role = "actual_personal_charge"
@@ -1252,6 +1528,12 @@ def _classify_fact_column(
     lowered = column.lower()
     if re.fullmatch(r"column_\d+", lowered):
         return None, None, False
+    # Skip identity/metadata columns
+    if lowered in ("cod", "codice", "nominativo", "condomino", "proprietario"):
+        return None, None, False
+    # Skip compound headers that contain slashes (e.g. "TOTALE / categoria")
+    if "/" in lowered:
+        return None, None, False
     if "mill" in lowered and _has_fractional_precision(raw_value, minimum_digits=3):
         return None, None, False
     if payment_ledger and lowered == "importo":
@@ -1281,8 +1563,17 @@ def _classify_fact_column(
 
 def _has_fractional_precision(value: str, *, minimum_digits: int) -> bool:
     compact = value.replace("€", "").replace(" ", "")
+    # Check for comma as decimal separator (Italian format): 1.234,56
     match = re.search(r",(\d+)$", compact)
-    return bool(match and len(match.group(1)) >= minimum_digits)
+    if match and len(match.group(1)) >= minimum_digits:
+        return True
+    # Check for dot as decimal separator — only the LAST dot qualifies
+    # (thousands separators appear before the decimal dot)
+    if "," not in compact:
+        dot_match = re.search(r"\.(\d+)$", compact)
+        if dot_match and len(dot_match.group(1)) >= minimum_digits:
+            return True
+    return False
 
 
 def _normalize_key(value: str) -> str:

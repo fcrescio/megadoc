@@ -2,11 +2,12 @@
 
 import logging
 import os
+import threading
 import uuid
 from datetime import datetime, timezone
 
 from celery import shared_task
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
@@ -22,9 +23,30 @@ from specialist_worker.dispatch import dispatch_specialist_job
 
 logger = logging.getLogger(__name__)
 
+_schema_ready = False
+_schema_ready_lock = threading.Lock()
+_SCHEMA_ADVISORY_LOCK_ID = 713915042
+
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _ensure_schema_once(engine) -> None:
+    global _schema_ready
+    if _schema_ready:
+        return
+    with _schema_ready_lock:
+        if _schema_ready:
+            return
+        with engine.connect() as conn:
+            conn.execute(text("SELECT pg_advisory_lock(:lock_id)"), {"lock_id": _SCHEMA_ADVISORY_LOCK_ID})
+            try:
+                ensure_knowledge_schema(engine)
+            finally:
+                conn.execute(text("SELECT pg_advisory_unlock(:lock_id)"), {"lock_id": _SCHEMA_ADVISORY_LOCK_ID})
+                conn.commit()
+        _schema_ready = True
 
 
 @shared_task(bind=True, max_retries=3)
@@ -43,7 +65,7 @@ def process_scan_unit_task(self, scan_unit_id: str):
         os.getenv("DATABASE_URL", "postgresql+psycopg://megadoc:megadoc@postgres:5432/megadoc"),
         echo=False,
     )
-    ensure_knowledge_schema(engine)
+    _ensure_schema_once(engine)
 
     with Session(engine) as gate_session:
         if has_active_ingestion_jobs(gate_session):
@@ -137,7 +159,7 @@ def finalize_scan_topics_task(self, scan_unit_id: str):
         os.getenv("DATABASE_URL", "postgresql+psycopg://megadoc:megadoc@postgres:5432/megadoc"),
         echo=False,
     )
-    ensure_knowledge_schema(engine)
+    _ensure_schema_once(engine)
 
     with Session(engine) as session:
         try:
