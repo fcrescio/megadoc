@@ -104,6 +104,7 @@ from knowledge_classifier.schemas import (
     TopicMergeRequest,
     TopicMergeResponse,
     CleanupReportResponse,
+    InactiveTopicCleanupResponse,
     KnowledgeJobResponse,
     ReviewUpdate,
     ReviewStatus,
@@ -3424,4 +3425,92 @@ def get_cleanup_report(
     return CleanupReportResponse(
         categories=report.get("categories", {}),
         summary=report.get("summary", {}),
+    )
+
+
+def _inactive_topic_cleanup_items(db: Session) -> list[dict[str, Any]]:
+    assignment_counts = dict(
+        db.execute(
+            select(
+                DocumentUnitTopicAssignment.topic_id,
+                func.count(DocumentUnitTopicAssignment.id),
+            ).group_by(DocumentUnitTopicAssignment.topic_id)
+        ).all()
+    )
+    pending_counts = dict(
+        db.execute(
+            select(
+                TopicProposal.matched_existing_topic_id,
+                func.count(TopicProposal.id),
+            )
+            .where(
+                TopicProposal.matched_existing_topic_id.is_not(None),
+                TopicProposal.proposal_status == "proposed",
+            )
+            .group_by(TopicProposal.matched_existing_topic_id)
+        ).all()
+    )
+    topics = db.execute(
+        select(Topic)
+        .where(Topic.is_active.is_(False))
+        .order_by(Topic.created_at.asc())
+    ).scalars().all()
+
+    items: list[dict[str, Any]] = []
+    for topic in topics:
+        assignment_count = int(assignment_counts.get(topic.id, 0))
+        pending_proposal_count = int(pending_counts.get(topic.id, 0))
+        deletable = (
+            not topic.canonical
+            and assignment_count == 0
+            and pending_proposal_count == 0
+        )
+        if topic.canonical:
+            reason = "Topic canonico: non cancellabile automaticamente."
+        elif assignment_count > 0:
+            reason = "Ha ancora assegnazioni: prima va unito o ritargettizzato."
+        elif pending_proposal_count > 0:
+            reason = "Ha proposte pendenti: prima vanno risolte."
+        else:
+            reason = "Inattivo, non canonico, senza assegnazioni o proposte pendenti."
+        items.append(
+            {
+                "id": str(topic.id),
+                "title": topic.title,
+                "slug": topic.slug,
+                "topic_kind": topic.topic_kind,
+                "topic_class": topic.topic_class,
+                "assignment_count": assignment_count,
+                "pending_proposal_count": pending_proposal_count,
+                "deletable": deletable,
+                "reason": reason,
+            }
+        )
+    return items
+
+
+@router.get("/cleanup/inactive-topics", response_model=InactiveTopicCleanupResponse)
+def preview_inactive_topic_cleanup(db: Session = Depends(get_db_session)):
+    """Preview inactive topics and which ones can be safely deleted."""
+    items = _inactive_topic_cleanup_items(db)
+    return InactiveTopicCleanupResponse(
+        items=items,
+        deletable_count=sum(1 for item in items if item["deletable"]),
+        deleted_count=0,
+    )
+
+
+@router.delete("/cleanup/inactive-topics", response_model=InactiveTopicCleanupResponse)
+def delete_deletable_inactive_topics(db: Session = Depends(get_db_session)):
+    """Delete only inactive non-canonical topics with no assignments or pending proposals."""
+    items_before = _inactive_topic_cleanup_items(db)
+    deletable_ids = [uuid.UUID(item["id"]) for item in items_before if item["deletable"]]
+    if deletable_ids:
+        db.execute(delete(Topic).where(Topic.id.in_(deletable_ids)))
+        db.commit()
+    items_after = _inactive_topic_cleanup_items(db)
+    return InactiveTopicCleanupResponse(
+        items=items_after,
+        deletable_count=sum(1 for item in items_after if item["deletable"]),
+        deleted_count=len(deletable_ids),
     )

@@ -766,3 +766,21 @@ class CleanupReportItem(BaseModel):
 class CleanupReportResponse(BaseModel):
     categories: dict[str, list[CleanupReportItem]]
     summary: dict[str, Any]
+
+
+class InactiveTopicCleanupItem(BaseModel):
+    id: str
+    title: str
+    slug: str
+    topic_kind: str
+    topic_class: str
+    assignment_count: int = 0
+    pending_proposal_count: int = 0
+    deletable: bool
+    reason: str
+
+
+class InactiveTopicCleanupResponse(BaseModel):
+    items: list[InactiveTopicCleanupItem] = Field(default_factory=list)
+    deletable_count: int = 0
+    deleted_count: int = 0

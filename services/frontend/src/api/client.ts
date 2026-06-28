@@ -37,6 +37,7 @@ import type {
   TopicMergePayload,
   TopicMergeResult,
   CleanupReport,
+  InactiveTopicCleanupResponse,
   KnowledgeDocumentUnit,
   KnowledgeTopicProposal,
   TopicAssignmentUpsertPayload,
@@ -411,6 +412,18 @@ export async function mergeTopic(
 export async function getCleanupReport(minSimilarity = 0.9): Promise<CleanupReport> {
   const response = await fetch(`${API_BASE}/knowledge/cleanup/report?min_similarity=${minSimilarity}`);
   return handleResponse<CleanupReport>(response);
+}
+
+export async function getInactiveTopicCleanup(): Promise<InactiveTopicCleanupResponse> {
+  const response = await fetch(`${API_BASE}/knowledge/cleanup/inactive-topics`);
+  return handleResponse<InactiveTopicCleanupResponse>(response);
+}
+
+export async function deleteInactiveTopics(): Promise<InactiveTopicCleanupResponse> {
+  const response = await fetch(`${API_BASE}/knowledge/cleanup/inactive-topics`, {
+    method: 'DELETE',
+  });
+  return handleResponse<InactiveTopicCleanupResponse>(response);
 }
 
 export function getDocumentDownloadUrl(

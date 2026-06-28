@@ -1,5 +1,11 @@
 import { memo, useState } from 'react';
-import { useKnowledgeTopics, useMergeTopic, useCleanupReport } from '../hooks/useDocuments';
+import {
+  useDeleteInactiveTopics,
+  useInactiveTopicCleanup,
+  useKnowledgeTopics,
+  useMergeTopic,
+  useCleanupReport,
+} from '../hooks/useDocuments';
 import type { KnowledgeTopicSummary, CleanupReportItem } from '../types';
 
 interface Props {
@@ -31,12 +37,17 @@ export const TopicCleanupPanel = memo(function TopicCleanupPanel({ deferredSearc
 
   const topicsQuery = useKnowledgeTopics(true);
   const reportQuery = useCleanupReport(0.9, true);
+  const inactiveCleanup = useInactiveTopicCleanup(true);
   const mergeMutation = useMergeTopic();
+  const deleteInactiveMutation = useDeleteInactiveTopics();
 
   const topics = topicsQuery.data ?? [];
   const report = reportQuery.data;
   const categories = report?.categories ?? {};
   const summary = report?.summary;
+  const inactiveItems = inactiveCleanup.data?.items ?? [];
+  const deletableInactive = inactiveItems.filter((item) => item.deletable);
+  const blockedInactive = inactiveItems.filter((item) => !item.deletable);
 
   const activeCategories = Object.keys(CATEGORY_LABELS).filter(
     (cat) => categories[cat] && categories[cat].length > 0
@@ -69,19 +80,70 @@ export const TopicCleanupPanel = memo(function TopicCleanupPanel({ deferredSearc
 
   return (
     <div className="flex h-full flex-col gap-3">
-      {/* Author input */}
-      <div className="flex shrink-0 items-center gap-3">
-        <input
-          value={mergeAuthor}
-          onChange={(e) => setMergeAuthor(e.target.value)}
-          placeholder="Operatore (facoltativo)"
-          className="rounded-xl border border-white/10 bg-slate-950/50 px-3 py-2 text-sm"
-        />
-        {summary && (
-          <span className="text-xs text-slate-400">
-            {summary.total_active_topics} topic · {summary.near_orphans_count} orfani · {summary.duplicate_title_groups} duplicati · {summary.shared_axis_groups} assi · {summary.probable_typo_pairs} typo · {summary.kind_mismatches_count} mismatch
-          </span>
-        )}
+      {/* Inactive cleanup + author input */}
+      <div className="grid shrink-0 gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(18rem,0.75fr)]">
+        <div className="rounded-2xl border border-white/10 bg-slate-950/35 p-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-white">Topic inattivi</p>
+              <p className="mt-1 text-xs text-slate-400">
+                Cancella solo topic inattivi non canonici, senza assegnazioni e senza proposte pendenti.
+              </p>
+            </div>
+            <button
+              onClick={() => deleteInactiveMutation.mutate()}
+              disabled={deletableInactive.length === 0 || deleteInactiveMutation.isPending}
+              className="rounded-full border border-rose-300/25 bg-rose-400/15 px-3 py-1.5 text-xs text-rose-100 disabled:opacity-40"
+            >
+              {deleteInactiveMutation.isPending ? 'Pulizia...' : `Elimina cancellabili (${deletableInactive.length})`}
+            </button>
+          </div>
+          {deleteInactiveMutation.data && (
+            <p className="mt-2 text-xs text-emerald-300">
+              Eliminati {deleteInactiveMutation.data.deleted_count} topic.
+            </p>
+          )}
+          {inactiveCleanup.isLoading ? (
+            <p className="mt-3 text-xs text-slate-500">Caricamento topic inattivi...</p>
+          ) : inactiveItems.length === 0 ? (
+            <p className="mt-3 text-xs text-slate-500">Nessun topic inattivo.</p>
+          ) : (
+            <div className="mt-3 max-h-36 space-y-2 overflow-y-auto">
+              {inactiveItems.map((item) => (
+                <div key={item.id} className={`rounded-xl border px-3 py-2 text-xs ${item.deletable ? 'border-rose-300/20 bg-rose-400/10' : 'border-amber-300/20 bg-amber-400/10'}`}>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate text-slate-100">{item.title}</span>
+                    <span className={item.deletable ? 'text-rose-200' : 'text-amber-200'}>
+                      {item.deletable ? 'cancellabile' : 'bloccato'}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-slate-400">
+                    {item.assignment_count} assegnazioni · {item.pending_proposal_count} proposte · {item.reason}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+          {blockedInactive.length > 0 && (
+            <p className="mt-2 text-xs text-amber-200">
+              {blockedInactive.length} topic inattivi richiedono merge, riattivazione o ritarget manuale.
+            </p>
+          )}
+        </div>
+
+        <div className="rounded-2xl border border-white/10 bg-slate-950/35 p-3">
+          <input
+            value={mergeAuthor}
+            onChange={(e) => setMergeAuthor(e.target.value)}
+            placeholder="Operatore (facoltativo)"
+            className="w-full rounded-xl border border-white/10 bg-slate-950/50 px-3 py-2 text-sm"
+          />
+          {summary && (
+            <p className="mt-3 text-xs text-slate-400">
+              {summary.total_active_topics} topic · {summary.near_orphans_count} orfani · {summary.duplicate_title_groups} duplicati · {summary.shared_axis_groups} assi · {summary.probable_typo_pairs} typo · {summary.kind_mismatches_count} mismatch
+            </p>
+          )}
+        </div>
       </div>
 
       {/* Category tabs */}

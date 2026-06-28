@@ -719,6 +719,24 @@ export interface CleanupReport {
   };
 }
 
+export interface InactiveTopicCleanupItem {
+  id: string;
+  title: string;
+  slug: string;
+  topic_kind: string;
+  topic_class: string;
+  assignment_count: number;
+  pending_proposal_count: number;
+  deletable: boolean;
+  reason: string;
+}
+
+export interface InactiveTopicCleanupResponse {
+  items: InactiveTopicCleanupItem[];
+  deletable_count: number;
+  deleted_count: number;
+}
+
 export interface TopicCreatePayload {
   slug: string;
   title: string;

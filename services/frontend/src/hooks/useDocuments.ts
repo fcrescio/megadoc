@@ -37,6 +37,7 @@ import type {
   TopicMergePayload,
   TopicMergeResult,
   CleanupReport,
+  InactiveTopicCleanupResponse,
   KnowledgeTopicProposal,
   TopicAssignmentUpsertPayload,
   TopicCreatePayload,
@@ -79,6 +80,8 @@ import {
   reviewGraphConsolidationSuggestion,
   mergeTopic,
   getCleanupReport,
+  getInactiveTopicCleanup,
+  deleteInactiveTopics,
   uploadDocument,
   getTopicProposals,
   rejectTopicProposal,
@@ -463,6 +466,31 @@ export function useCleanupReport(minSimilarity = 0.9, enabled = true) {
     queryFn: () => getCleanupReport(minSimilarity),
     enabled,
     staleTime: 30_000,
+  });
+}
+
+export function useInactiveTopicCleanup(enabled = true) {
+  return useQuery<InactiveTopicCleanupResponse>({
+    queryKey: ['inactive-topic-cleanup'],
+    queryFn: () => getInactiveTopicCleanup(),
+    enabled,
+    staleTime: 30_000,
+  });
+}
+
+export function useDeleteInactiveTopics() {
+  const queryClient = useQueryClient();
+
+  return useMutation<InactiveTopicCleanupResponse, Error, void>({
+    mutationFn: () => deleteInactiveTopics(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['inactive-topic-cleanup'] });
+      queryClient.invalidateQueries({ queryKey: ['cleanup-report'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-topics'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-topic'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-search'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge'] });
+    },
   });
 }
 
