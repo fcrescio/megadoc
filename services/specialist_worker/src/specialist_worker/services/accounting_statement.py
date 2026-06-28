@@ -332,6 +332,9 @@ def _build_llm_guided_summary_view(
         source_header = str(spec.get("source_header") or "")
         label = str(spec.get("label") or source_header).strip()
         role = str(spec.get("role") or "allocated_expense")
+        if _normalize_key(source_header) in {"totale", "totali"}:
+            label = "Totale"
+            role = "total"
         table = table_by_id.get(table_id)
         if table is None or not source_header or not label:
             continue
@@ -419,6 +422,23 @@ def _build_llm_guided_summary_view(
     rows = [rows_map[key] for key in row_order]
     if not columns or not rows:
         return None
+
+    columns = [
+        column
+        for column in columns
+        if any(column in row.get("cells", {}) for row in rows)
+    ]
+    if not columns:
+        return None
+    for row in rows:
+        cells = row.get("cells")
+        if isinstance(cells, dict):
+            for column in list(cells.keys()):
+                if column not in columns:
+                    del cells[column]
+    source_specs = [
+        spec for spec in source_specs if spec.get("label") in columns
+    ]
 
     totals: dict[str, float] = {}
     for column in columns:
