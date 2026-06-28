@@ -2,12 +2,17 @@
 
 import csv
 import io
+import os
+import re
+import unicodedata
 import uuid
 from datetime import date, datetime, timezone
+from decimal import Decimal
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse, PlainTextResponse
+from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
@@ -80,6 +85,8 @@ from knowledge_classifier.schemas import (
     KnowledgeContextSummaryResponse,
     ContextAccountingComparisonResponse,
     ContextAccountingSubjectResponse,
+    AccountingAskRequest,
+    AccountingAskResponse,
     AccountingFactCorrectionRequest,
     AccountingFactCorrectionResponse,
     KnowledgeAssertionResponse,
@@ -104,6 +111,9 @@ from knowledge_classifier.schemas import (
     TopicProposalResolution,
 )
 from knowledge_classifier.services.consolidation import KnowledgeBaseConsolidationService
+from knowledge_classifier.config import get_settings as get_knowledge_settings
+from knowledge_classifier.llm.base import ChatMessage
+from knowledge_classifier.llm.openai_compat import OpenAICompatibleProvider
 from knowledge_worker.dispatch import dispatch_scan_unit_processing
 from specialist_worker.dispatch import dispatch_specialist_job
 
@@ -112,6 +122,15 @@ router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+class _AccountingAskPlan(BaseModel):
+    subject: str | None = Field(default=None)
+    period_a_from: date | None = Field(default=None)
+    period_a_to: date | None = Field(default=None)
+    period_b_from: date | None = Field(default=None)
+    period_b_to: date | None = Field(default=None)
+    intent: str = Field(default="compare_periods")
 
 
 def _serialize_entity(entity: DocumentUnitEntity) -> dict[str, Any]:
@@ -1862,6 +1881,571 @@ def compare_context_accounting(
         period_b_to=period_b_to,
         accounting_role=accounting_role,
     )
+
+
+@router.post("/accounting/ask", response_model=AccountingAskResponse)
+def ask_accounting(
+    payload: AccountingAskRequest,
+    db: Session = Depends(get_db_session),
+):
+    """Answer natural-language accounting questions over LLM-guided table views.
+
+    This endpoint treats specialist ``summary_view`` payloads as dataframe-like
+    tables. The LLM is used only to plan the query; arithmetic and evidence
+    collection remain deterministic.
+    """
+    if payload.context_id and payload.document_id:
+        raise HTTPException(status_code=400, detail="Use either context_id or document_id, not both")
+
+    tables = _accounting_summary_dataframes(
+        db,
+        context_id=payload.context_id,
+        document_id=payload.document_id,
+    )
+    if not tables:
+        return {
+            "status": "no_accounting_tables",
+            "answer": "Non ho trovato tabelle contabili sintetiche nello scope richiesto.",
+            "warnings": ["Serve almeno un risultato contabile con summary_view."],
+            "plan": {},
+            "tables_used": [],
+            "computed_table": [],
+            "evidence": [],
+        }
+
+    plan = _plan_accounting_question(payload, tables)
+    subject = payload.subject or plan.subject or _fallback_subject_from_question(payload.question)
+    if not subject:
+        return {
+            "status": "needs_subject",
+            "answer": "Non riesco a identificare il soggetto contabile nella domanda.",
+            "warnings": ["Specifica un cognome, nominativo o codice unita."],
+            "plan": plan.model_dump(mode="json"),
+            "tables_used": _accounting_table_summaries(tables),
+            "computed_table": [],
+            "evidence": [],
+        }
+
+    period_a_from = payload.period_a_from or plan.period_a_from
+    period_a_to = payload.period_a_to or plan.period_a_to
+    period_b_from = payload.period_b_from or plan.period_b_from
+    period_b_to = payload.period_b_to or plan.period_b_to
+    if not all([period_a_from, period_a_to, period_b_from, period_b_to]):
+        inferred = _infer_two_periods(tables)
+        period_a_from = period_a_from or inferred.get("period_a_from")
+        period_a_to = period_a_to or inferred.get("period_a_to")
+        period_b_from = period_b_from or inferred.get("period_b_from")
+        period_b_to = period_b_to or inferred.get("period_b_to")
+    if not period_a_from or not period_a_to:
+        inferred_latest = _infer_latest_period(tables)
+        period_a_from = period_a_from or inferred_latest.get("period_from")
+        period_a_to = period_a_to or inferred_latest.get("period_to")
+
+    matching_rows = _matching_accounting_rows(tables, subject)
+    if not matching_rows:
+        return {
+            "status": "subject_not_found",
+            "answer": f"Non ho trovato righe contabili corrispondenti a '{subject}'.",
+            "warnings": [],
+            "plan": plan.model_dump(mode="json") | {"subject": subject},
+            "tables_used": _accounting_table_summaries(tables),
+            "computed_table": [],
+            "evidence": [],
+        }
+
+    period_a_rows = _rows_for_period(matching_rows, period_a_from, period_a_to)
+    period_b_rows = _rows_for_period(matching_rows, period_b_from, period_b_to)
+    if period_a_rows and not period_b_rows and not payload.period_b_from and not payload.period_b_to:
+        summary = _summarize_accounting_dataframe_rows(period_a_rows)
+        answer = _accounting_single_period_answer_text(subject, summary)
+        return {
+            "status": "answered_single_period",
+            "answer": answer,
+            "warnings": summary["warnings"],
+            "plan": plan.model_dump(mode="json") | {
+                "subject": subject,
+                "period_a_from": period_a_from.isoformat() if period_a_from else None,
+                "period_a_to": period_a_to.isoformat() if period_a_to else None,
+                "period_b_from": None,
+                "period_b_to": None,
+            },
+            "tables_used": _accounting_table_summaries(tables),
+            "computed_table": summary["rows"],
+            "evidence": summary["evidence"],
+        }
+    if not period_a_rows or not period_b_rows:
+        available = sorted({
+            f"{row['period_from']} - {row['period_to']}"
+            for row in matching_rows
+            if row.get("period_from") or row.get("period_to")
+        })
+        return {
+            "status": "insufficient_periods",
+            "answer": "Ho trovato il soggetto, ma non ho due periodi confrontabili nello scope richiesto.",
+            "warnings": [f"Periodi disponibili: {', '.join(available) or 'n/d'}"],
+            "plan": plan.model_dump(mode="json") | {"subject": subject},
+            "tables_used": _accounting_table_summaries(tables),
+            "computed_table": [],
+            "evidence": [],
+        }
+
+    comparison = _compare_accounting_dataframe_rows(period_a_rows, period_b_rows)
+    answer = _accounting_answer_text(subject, comparison)
+    return {
+        "status": "answered",
+        "answer": answer,
+        "warnings": comparison["warnings"],
+        "plan": plan.model_dump(mode="json") | {
+            "subject": subject,
+            "period_a_from": period_a_from.isoformat() if period_a_from else None,
+            "period_a_to": period_a_to.isoformat() if period_a_to else None,
+            "period_b_from": period_b_from.isoformat() if period_b_from else None,
+            "period_b_to": period_b_to.isoformat() if period_b_to else None,
+        },
+        "tables_used": _accounting_table_summaries(tables),
+        "computed_table": comparison["rows"],
+        "evidence": comparison["evidence"],
+    }
+
+
+def _normalize_search_text(value: str | None) -> str:
+    if not value:
+        return ""
+    normalized = unicodedata.normalize("NFKD", value.lower())
+    ascii_value = normalized.encode("ascii", "ignore").decode("ascii")
+    return re.sub(r"[^a-z0-9]+", " ", ascii_value).strip()
+
+
+def _accounting_llm_provider() -> OpenAICompatibleProvider | None:
+    settings = get_knowledge_settings()
+    endpoint = os.getenv("KN_WORKER_LLM_ENDPOINT", settings.llm_endpoint)
+    if endpoint.startswith("mock://"):
+        return None
+    return OpenAICompatibleProvider(
+        base_url=endpoint,
+        model=settings.llm_model,
+        api_key=settings.llm_api_key,
+        timeout=max(settings.llm_timeout, 120),
+        max_tokens=min(settings.llm_max_tokens, 2048),
+    )
+
+
+def _plan_accounting_question(
+    payload: AccountingAskRequest,
+    tables: list[dict[str, Any]],
+) -> _AccountingAskPlan:
+    provider = _accounting_llm_provider()
+    if provider is None:
+        return _fallback_accounting_plan(payload.question)
+    table_summary = [
+        {
+            "document_unit_title": table.get("document_unit_title"),
+            "period_from": table.get("period_from"),
+            "period_to": table.get("period_to"),
+            "columns": table.get("columns", [])[:30],
+            "sample_subjects": [
+                f"{row.get('unit_code', '')} {row.get('subject_label', '')}".strip()
+                for row in table.get("rows", [])[:8]
+            ],
+        }
+        for table in tables[:12]
+    ]
+    try:
+        parsed, _ = provider.chat_with_json(
+            [
+                ChatMessage(
+                    role="system",
+                    content=(
+                        "Sei un planner per interrogazioni contabili condominiali. "
+                        "Estrai solo soggetto e periodi dalla domanda. Non calcolare importi."
+                    ),
+                ),
+                ChatMessage(
+                    role="user",
+                    content=(
+                        "Dato questo insieme di tabelle contabili, produci un piano JSON. "
+                        "Se la domanda chiede 'nel 2022 rispetto al 2023' e i periodi disponibili "
+                        "sono esercizi 2022-07/2023-06 e 2023-07/2024-06, usa quegli intervalli. "
+                        f"Domanda: {payload.question}\n"
+                        f"Tabelle disponibili: {table_summary}"
+                    ),
+                ),
+            ],
+            _AccountingAskPlan,
+        )
+        return _AccountingAskPlan.model_validate(parsed)
+    except Exception:
+        return _fallback_accounting_plan(payload.question)
+
+
+def _fallback_accounting_plan(question: str) -> _AccountingAskPlan:
+    years = [int(item) for item in re.findall(r"\b(20\d{2})\b", question)]
+    kwargs: dict[str, Any] = {"subject": _fallback_subject_from_question(question)}
+    if len(years) >= 2:
+        kwargs.update(
+            {
+                "period_a_from": date(years[0], 1, 1),
+                "period_a_to": date(years[0], 12, 31),
+                "period_b_from": date(years[1], 1, 1),
+                "period_b_to": date(years[1], 12, 31),
+            }
+        )
+    return _AccountingAskPlan(**kwargs)
+
+
+def _fallback_subject_from_question(question: str) -> str | None:
+    stop = {
+        "ha", "speso", "piu", "meno", "nel", "nella", "rispetto", "quali",
+        "voci", "sono", "cambiate", "confronta", "bilancio", "condominiale",
+    }
+    candidates = [
+        token.strip(" ?.,;:").lower()
+        for token in re.findall(r"[A-Za-zÀ-ÖØ-öø-ÿ']{3,}", question)
+    ]
+    for token in candidates:
+        normalized = _normalize_search_text(token)
+        if normalized and normalized not in stop:
+            return token
+    return None
+
+
+def _accounting_summary_dataframes(
+    db: Session,
+    *,
+    context_id: str | None,
+    document_id: str | None,
+) -> list[dict[str, Any]]:
+    stmt = (
+        select(DocumentUnit, SpecialistResult, Document)
+        .join(SpecialistResult, SpecialistResult.document_unit_id == DocumentUnit.id)
+        .join(ScanUnit, ScanUnit.id == DocumentUnit.scan_unit_id)
+        .join(Document, Document.id == ScanUnit.source_document_id)
+        .where(SpecialistResult.specialist_type == "accounting_statement")
+        .order_by(Document.created_at.asc(), DocumentUnit.ordinal.asc(), SpecialistResult.created_at.desc())
+    )
+    if document_id:
+        try:
+            parsed_document_id = uuid.UUID(document_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid document_id") from exc
+        stmt = stmt.where(Document.id == parsed_document_id)
+    if context_id:
+        try:
+            parsed_context_id = uuid.UUID(context_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid context_id") from exc
+        stmt = stmt.join(
+            KnowledgeContextMembership,
+            KnowledgeContextMembership.document_unit_id == DocumentUnit.id,
+        ).where(KnowledgeContextMembership.context_id == parsed_context_id)
+
+    seen_units: set[str] = set()
+    tables: list[dict[str, Any]] = []
+    for doc_unit, result, document in db.execute(stmt).all():
+        unit_id = str(doc_unit.id)
+        if unit_id in seen_units:
+            continue
+        seen_units.add(unit_id)
+        if not isinstance(result.result_json, dict):
+            continue
+        summary_view = result.result_json.get("summary_view")
+        if not isinstance(summary_view, dict):
+            continue
+        rows = summary_view.get("rows")
+        columns = summary_view.get("columns")
+        if not isinstance(rows, list) or not rows or not isinstance(columns, list):
+            continue
+        tables.append(
+            {
+                "document_id": str(document.id),
+                "document_unit_id": unit_id,
+                "document_unit_title": doc_unit.title or f"Pagine {doc_unit.start_page}-{doc_unit.end_page}",
+                "original_filename": document.original_filename,
+                "start_page": doc_unit.start_page,
+                "end_page": doc_unit.end_page,
+                "period_from": result.result_json.get("accounting_period_from"),
+                "period_to": result.result_json.get("accounting_period_to"),
+                "columns": columns,
+                "rows": rows,
+                "source_columns": summary_view.get("source_columns", []),
+            }
+        )
+    return tables
+
+
+def _accounting_table_summaries(tables: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "document_id": table["document_id"],
+            "document_unit_id": table["document_unit_id"],
+            "title": table["document_unit_title"],
+            "filename": table["original_filename"],
+            "period_from": table.get("period_from"),
+            "period_to": table.get("period_to"),
+            "columns": table.get("columns", []),
+            "row_count": len(table.get("rows", [])),
+        }
+        for table in tables
+    ]
+
+
+def _matching_accounting_rows(tables: list[dict[str, Any]], subject: str) -> list[dict[str, Any]]:
+    needle = _normalize_search_text(subject)
+    matches: list[dict[str, Any]] = []
+    for table in tables:
+        for row in table.get("rows", []):
+            haystack = _normalize_search_text(
+                f"{row.get('unit_code', '')} {row.get('subject_label', '')} {row.get('account_key', '')}"
+            )
+            if needle and needle in haystack:
+                matches.append({**row, **{key: table[key] for key in (
+                    "document_id", "document_unit_id", "document_unit_title",
+                    "original_filename", "start_page", "end_page",
+                    "period_from", "period_to",
+                )}})
+    return matches
+
+
+def _parse_date_value(value: str | date | None) -> date | None:
+    if isinstance(value, date):
+        return value
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(str(value))
+    except ValueError:
+        return None
+
+
+def _rows_for_period(
+    rows: list[dict[str, Any]],
+    period_from: date | None,
+    period_to: date | None,
+) -> list[dict[str, Any]]:
+    if period_from is None or period_to is None:
+        return []
+    selected = []
+    for row in rows:
+        row_from = _parse_date_value(row.get("period_from"))
+        row_to = _parse_date_value(row.get("period_to"))
+        if row_from is None or row_to is None:
+            continue
+        if row_from <= period_to and row_to >= period_from:
+            selected.append(row)
+    return selected
+
+
+def _infer_two_periods(tables: list[dict[str, Any]]) -> dict[str, date]:
+    periods: list[tuple[date, date]] = []
+    for table in tables:
+        period_from = _parse_date_value(table.get("period_from"))
+        period_to = _parse_date_value(table.get("period_to"))
+        if period_from and period_to and (period_from, period_to) not in periods:
+            periods.append((period_from, period_to))
+    periods.sort()
+    if len(periods) < 2:
+        return {}
+    return {
+        "period_a_from": periods[-2][0],
+        "period_a_to": periods[-2][1],
+        "period_b_from": periods[-1][0],
+        "period_b_to": periods[-1][1],
+    }
+
+
+def _infer_latest_period(tables: list[dict[str, Any]]) -> dict[str, date]:
+    periods: list[tuple[date, date]] = []
+    for table in tables:
+        period_from = _parse_date_value(table.get("period_from"))
+        period_to = _parse_date_value(table.get("period_to"))
+        if period_from and period_to and (period_from, period_to) not in periods:
+            periods.append((period_from, period_to))
+    periods.sort()
+    if not periods:
+        return {}
+    return {"period_from": periods[-1][0], "period_to": periods[-1][1]}
+
+
+def _summarize_accounting_dataframe_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    categories = sorted({
+        column
+        for row in rows
+        for column in (row.get("cells") or {}).keys()
+    })
+    computed_rows: list[dict[str, Any]] = []
+    evidence: list[dict[str, Any]] = []
+    for category in categories:
+        amount, category_evidence = _sum_category(rows, category)
+        if amount == 0:
+            continue
+        computed_rows.append({"category": category, "amount": float(amount)})
+        evidence.extend(category_evidence)
+    total = _summary_total_amount(computed_rows)
+    return {
+        "total": float(total),
+        "rows": computed_rows,
+        "evidence": evidence[:80],
+        "warnings": [],
+    }
+
+
+def _compare_accounting_dataframe_rows(
+    period_a_rows: list[dict[str, Any]],
+    period_b_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    categories = sorted({
+        column
+        for row in [*period_a_rows, *period_b_rows]
+        for column in (row.get("cells") or {}).keys()
+    })
+    rows: list[dict[str, Any]] = []
+    evidence: list[dict[str, Any]] = []
+
+    for category in categories:
+        amount_a, evidence_a = _sum_category(period_a_rows, category)
+        amount_b, evidence_b = _sum_category(period_b_rows, category)
+        if amount_a == 0 and amount_b == 0:
+            continue
+        delta = amount_b - amount_a
+        rows.append(
+            {
+                "category": category,
+                "amount_a": float(amount_a),
+                "amount_b": float(amount_b),
+                "delta": float(delta),
+                "percentage_change": (
+                    round(float((delta / amount_a) * Decimal("100")), 2)
+                    if amount_a != 0 else None
+                ),
+            }
+        )
+        evidence.extend(evidence_a)
+        evidence.extend(evidence_b)
+
+    total_a = _comparison_total_amount(rows, "amount_a")
+    total_b = _comparison_total_amount(rows, "amount_b")
+    delta_total = total_b - total_a
+    return {
+        "total_a": float(total_a),
+        "total_b": float(total_b),
+        "delta": float(delta_total),
+        "direction": "period_b_more" if delta_total > 0 else "period_b_less" if delta_total < 0 else "equal",
+        "rows": rows,
+        "evidence": evidence[:80],
+        "warnings": [],
+    }
+
+
+def _is_total_category(category: str) -> bool:
+    normalized = _normalize_search_text(category)
+    return normalized == "totale" or normalized.startswith("totale ")
+
+
+def _summary_total_amount(rows: list[dict[str, Any]]) -> Decimal:
+    total_rows = [
+        Decimal(str(row.get("amount") or 0))
+        for row in rows
+        if _is_total_category(str(row.get("category") or ""))
+    ]
+    if total_rows:
+        return sum(total_rows, Decimal("0"))
+    return sum(
+        (
+            Decimal(str(row.get("amount") or 0))
+            for row in rows
+            if not _is_total_category(str(row.get("category") or ""))
+        ),
+        Decimal("0"),
+    )
+
+
+def _comparison_total_amount(rows: list[dict[str, Any]], amount_key: str) -> Decimal:
+    total_rows = [
+        Decimal(str(row.get(amount_key) or 0))
+        for row in rows
+        if _is_total_category(str(row.get("category") or ""))
+    ]
+    if total_rows:
+        return sum(total_rows, Decimal("0"))
+    return sum(
+        (
+            Decimal(str(row.get(amount_key) or 0))
+            for row in rows
+            if not _is_total_category(str(row.get("category") or ""))
+        ),
+        Decimal("0"),
+    )
+
+
+def _sum_category(rows: list[dict[str, Any]], category: str) -> tuple[Decimal, list[dict[str, Any]]]:
+    total = Decimal("0")
+    evidence: list[dict[str, Any]] = []
+    for row in rows:
+        cell = (row.get("cells") or {}).get(category)
+        if not isinstance(cell, dict):
+            continue
+        amount = Decimal(str(cell.get("amount") or 0))
+        total += amount
+        for fact in cell.get("facts", []) or [{"evidence": cell.get("evidence")}]:
+            if not isinstance(fact, dict):
+                continue
+            ev = fact.get("evidence") if isinstance(fact.get("evidence"), dict) else {}
+            evidence.append(
+                {
+                    "category": category,
+                    "amount": float(amount),
+                    "document_id": row.get("document_id"),
+                    "document_unit_id": row.get("document_unit_id"),
+                    "filename": row.get("original_filename"),
+                    "period_from": row.get("period_from"),
+                    "period_to": row.get("period_to"),
+                    "unit_code": row.get("unit_code"),
+                    "subject_label": row.get("subject_label"),
+                    "table_id": ev.get("table_id"),
+                    "row_id": ev.get("row_id"),
+                    "column": ev.get("column"),
+                    "page_number": ev.get("page_number"),
+                    "raw_value": ev.get("raw_value"),
+                }
+            )
+    return total, evidence
+
+
+def _accounting_answer_text(subject: str, comparison: dict[str, Any]) -> str:
+    direction = comparison["direction"]
+    total_a = format(float(comparison["total_a"]), ".2f")
+    total_b = format(float(comparison["total_b"]), ".2f")
+    delta = format(float(comparison["delta"]), ".2f")
+    if direction == "period_b_more":
+        prefix = f"{subject} risulta avere un totale maggiore nel periodo B"
+    elif direction == "period_b_less":
+        prefix = f"{subject} risulta avere un totale minore nel periodo B"
+    else:
+        prefix = f"{subject} risulta avere lo stesso totale nei due periodi"
+    changed = sorted(
+        comparison["rows"],
+        key=lambda row: abs(float(row["delta"])),
+        reverse=True,
+    )[:5]
+    changed_text = "; ".join(
+        f"{row['category']}: {row['amount_a']:.2f} -> {row['amount_b']:.2f} (delta {row['delta']:.2f})"
+        for row in changed
+    )
+    return f"{prefix}: A={total_a}, B={total_b}, delta={delta}. Voci principali: {changed_text or 'nessuna variazione'}."
+
+
+def _accounting_single_period_answer_text(subject: str, summary: dict[str, Any]) -> str:
+    total = format(float(summary["total"]), ".2f")
+    main_rows = sorted(
+        summary["rows"],
+        key=lambda row: abs(float(row["amount"])),
+        reverse=True,
+    )[:8]
+    detail = "; ".join(
+        f"{row['category']}: {row['amount']:.2f}"
+        for row in main_rows
+    )
+    return f"{subject} risulta avere un totale di {total}. Voci principali: {detail or 'nessuna voce valorizzata'}."
 
 
 @router.patch("/specialists/accounting-facts/{fact_id}/correction", response_model=AccountingFactCorrectionResponse)

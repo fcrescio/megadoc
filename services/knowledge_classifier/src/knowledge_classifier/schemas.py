@@ -466,6 +466,27 @@ class ContextAccountingComparisonResponse(BaseModel):
     changed_categories: list[ContextAccountingCategoryChangeResponse] = Field(default_factory=list)
 
 
+class AccountingAskRequest(BaseModel):
+    question: str = Field(..., min_length=3)
+    context_id: Optional[str] = None
+    document_id: Optional[str] = None
+    subject: Optional[str] = None
+    period_a_from: Optional[date] = None
+    period_a_to: Optional[date] = None
+    period_b_from: Optional[date] = None
+    period_b_to: Optional[date] = None
+
+
+class AccountingAskResponse(BaseModel):
+    status: str
+    answer: str
+    warnings: list[str] = Field(default_factory=list)
+    plan: dict[str, Any] = Field(default_factory=dict)
+    tables_used: list[dict[str, Any]] = Field(default_factory=list)
+    computed_table: list[dict[str, Any]] = Field(default_factory=list)
+    evidence: list[dict[str, Any]] = Field(default_factory=list)
+
+
 class AccountingFactCorrectionRequest(BaseModel):
     corrected_amount: Optional[float] = None
     corrected_category_label: Optional[str] = None

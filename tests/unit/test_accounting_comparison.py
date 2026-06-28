@@ -2,7 +2,12 @@ import uuid
 from datetime import date
 from decimal import Decimal
 
-from api.routers.knowledge import compare_context_accounting, list_context_accounting_subjects
+from api.routers.knowledge import (
+    _compare_accounting_dataframe_rows,
+    _summarize_accounting_dataframe_rows,
+    compare_context_accounting,
+    list_context_accounting_subjects,
+)
 from common.application.accounting import compare_context_accounting_periods, find_context_account_subjects
 from common.db.models import (
     AccountingAccount,
@@ -218,3 +223,48 @@ def test_insufficient_data_reports_unreconciled_available_period(db_session):
 
     assert result["status"] == "insufficient_data"
     assert len(result["warnings"]) == 2
+
+
+def test_dataframe_summary_uses_reported_total_without_double_counting():
+    rows = [
+        {
+            "cells": {
+                "Spese Generali": {"amount": 508.43},
+                "Riscaldamento": {"amount": 680.09},
+                "Totale": {"amount": 4064.07},
+            }
+        }
+    ]
+
+    result = _summarize_accounting_dataframe_rows(rows)
+
+    assert result["total"] == 4064.07
+    assert {row["category"] for row in result["rows"]} == {"Spese Generali", "Riscaldamento", "Totale"}
+
+
+def test_dataframe_comparison_uses_reported_totals_for_delta():
+    period_a_rows = [
+        {
+            "cells": {
+                "Spese Generali": {"amount": 500},
+                "Riscaldamento": {"amount": 700},
+                "Totale": {"amount": 3000},
+            }
+        }
+    ]
+    period_b_rows = [
+        {
+            "cells": {
+                "Spese Generali": {"amount": 550},
+                "Riscaldamento": {"amount": 600},
+                "Totale": {"amount": 3200},
+            }
+        }
+    ]
+
+    result = _compare_accounting_dataframe_rows(period_a_rows, period_b_rows)
+
+    assert result["total_a"] == 3000.0
+    assert result["total_b"] == 3200.0
+    assert result["delta"] == 200.0
+    assert result["direction"] == "period_b_more"
