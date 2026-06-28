@@ -7,6 +7,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from common.application.repositories import (
@@ -339,6 +340,25 @@ class OCRService:
     def _store_ocr_result(
         self, document_id: UUID, version_id: UUID, result_model: OCRResultModel
     ) -> OCRResult:
+        existing_result = self.session.execute(
+            select(OCRResult)
+            .where(
+                OCRResult.document_id == document_id,
+                OCRResult.document_version_id == version_id,
+                OCRResult.status == OCRStatus.SUCCEEDED.value,
+            )
+            .order_by(OCRResult.created_at.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+        if existing_result is not None:
+            logger.info(
+                "ocr_result_reused_for_document_version",
+                document_id=str(document_id),
+                version_id=str(version_id),
+                ocr_result_id=str(existing_result.id),
+            )
+            return existing_result
+
         base_key = f"{document_id}/{version_id}/ocr"
         self.storage.put_bytes(
             result_model.markdown_text.encode("utf-8"),

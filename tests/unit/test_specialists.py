@@ -1,5 +1,5 @@
-from common.application.specialists import extract_document_unit_text
-from common.db.models import DocumentUnit, OCRResult
+from common.application.specialists import extract_document_unit_text, route_specialists_for_document_unit
+from common.db.models import DocumentType, DocumentUnit, OCRResult
 
 
 def _document_unit(start_page: int, end_page: int) -> DocumentUnit:
@@ -39,3 +39,28 @@ def test_extract_document_unit_text_falls_back_when_page_payload_is_incomplete()
     text = extract_document_unit_text(_document_unit(2, 3), ocr_result)
 
     assert text == "Page two\nPage three"
+
+
+def test_route_specialists_does_not_treat_regulation_as_utility_bill():
+    document_unit = _document_unit(1, 8)
+    document_unit.document_type = DocumentType(code="regolamento_condominiale", name="Regolamento")
+    document_unit.title = "Regolamento tecnico Acque S.p.A."
+    document_unit.extracted_summary = "Regolamento del servizio idrico integrato e fornitura acqua"
+
+    specialists = route_specialists_for_document_unit(
+        document_unit,
+        "acqua fornitura numero cliente totale bolletta servizio idrico integrato",
+    )
+
+    assert specialists == []
+
+
+def test_route_specialists_accepts_real_utility_bill():
+    document_unit = _document_unit(1, 1)
+    document_unit.document_type = DocumentType(code="bolletta", name="Bolletta")
+    document_unit.title = "Bolletta Acque"
+    document_unit.extracted_summary = "Totale bolletta e data di emissione"
+
+    specialists = route_specialists_for_document_unit(document_unit, "numero cliente rif.bolletta acqua")
+
+    assert specialists == ["utility_bill"]

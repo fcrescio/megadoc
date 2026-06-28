@@ -49,6 +49,10 @@ def _ensure_schema_once(engine) -> None:
         _schema_ready = True
 
 
+def _advisory_lock_key(value: str) -> int:
+    return uuid.UUID(value).int % 2_147_483_647
+
+
 @shared_task(bind=True, max_retries=3)
 def process_scan_unit_task(self, scan_unit_id: str):
     """Process a scan unit through the knowledge pipeline.
@@ -121,6 +125,7 @@ def process_scan_unit_task(self, scan_unit_id: str):
             for specialist_job_id, specialist_type in specialist_dispatches:
                 dispatch_specialist_job(specialist_job_id, specialist_type)
 
+            _ensure_topic_finalization_job(engine, scan_unit_id)
             finalize_scan_topics_task.apply_async(args=[scan_unit_id], countdown=5, queue=settings.celery_queue)
 
             _update_knowledge_job(
@@ -163,6 +168,35 @@ def finalize_scan_topics_task(self, scan_unit_id: str):
 
     with Session(engine) as session:
         try:
+            locked = session.execute(
+                text("SELECT pg_try_advisory_lock(:lock_id)"),
+                {"lock_id": _advisory_lock_key(scan_unit_id)},
+            ).scalar_one()
+            if not locked:
+                logger.info("Topic finalization already active for scan_unit %s", scan_unit_id)
+                return {"scan_unit_id": scan_unit_id, "status": "already_active"}
+
+            finalization_job = _get_latest_knowledge_job(session, scan_unit_id, job_type="topic_finalization")
+            if finalization_job is not None and finalization_job.status == "succeeded":
+                logger.info("Topic finalization already completed for scan_unit %s", scan_unit_id)
+                return {"scan_unit_id": scan_unit_id, "status": "already_finalized"}
+            if finalization_job is None:
+                finalization_job = KnowledgeJob(
+                    scan_unit_id=uuid.UUID(scan_unit_id),
+                    job_type="topic_finalization",
+                    status="processing",
+                    started_at=_utcnow(),
+                    attempt_count=1,
+                )
+                session.add(finalization_job)
+            else:
+                finalization_job.status = "processing"
+                finalization_job.started_at = _utcnow()
+                finalization_job.finished_at = None
+                finalization_job.error_message = None
+                finalization_job.attempt_count += 1
+            session.commit()
+
             if settings.use_mock_llm:
                 llm_provider = MockDeterministicProvider(model=settings.llm_model)
             else:
@@ -176,29 +210,72 @@ def finalize_scan_topics_task(self, scan_unit_id: str):
 
             pipeline = KnowledgePipelineService(llm_provider, session)
             result = pipeline.finalize_scan_topics(scan_unit_id)
+            finalization_job.status = "succeeded"
+            finalization_job.finished_at = _utcnow()
+            finalization_job.error_message = None
             session.commit()
             logger.info("Task completed: %s", result)
             return result
         except RuntimeError as exc:
             session.rollback()
+            with Session(engine) as status_session:
+                finalization_job = _get_latest_knowledge_job(status_session, scan_unit_id, job_type="topic_finalization")
+                if finalization_job is not None:
+                    finalization_job.status = "pending"
+                    finalization_job.error_message = str(exc)
+                    status_session.commit()
             logger.info("Topic finalization deferred for scan_unit %s: %s", scan_unit_id, exc)
             raise self.retry(exc=exc, countdown=15)
         except Exception as exc:
             session.rollback()
+            with Session(engine) as status_session:
+                finalization_job = _get_latest_knowledge_job(status_session, scan_unit_id, job_type="topic_finalization")
+                if finalization_job is not None:
+                    finalization_job.status = "failed"
+                    finalization_job.finished_at = _utcnow()
+                    finalization_job.error_message = str(exc)
+                    status_session.commit()
             logger.error("Topic finalization failed: %s", exc, exc_info=True)
             raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))
         finally:
-            session.close()
+            try:
+                session.execute(
+                    text("SELECT pg_advisory_unlock(:lock_id)"),
+                    {"lock_id": _advisory_lock_key(scan_unit_id)},
+                )
+                session.commit()
+            except Exception:
+                session.rollback()
+            finally:
+                session.close()
 
 
-def _get_latest_knowledge_job(session: Session, scan_unit_id: str) -> KnowledgeJob | None:
+def _get_latest_knowledge_job(session: Session, scan_unit_id: str, job_type: str | None = None) -> KnowledgeJob | None:
     if isinstance(scan_unit_id, str):
         scan_unit_id = uuid.UUID(scan_unit_id)
-    return session.execute(
+    query = (
         select(KnowledgeJob)
         .where(KnowledgeJob.scan_unit_id == scan_unit_id)
         .order_by(KnowledgeJob.created_at.desc())
-    ).scalar_one_or_none()
+    )
+    if job_type is not None:
+        query = query.where(KnowledgeJob.job_type == job_type)
+    return session.execute(query).scalar_one_or_none()
+
+
+def _ensure_topic_finalization_job(engine, scan_unit_id: str) -> None:
+    with Session(engine) as session:
+        existing = _get_latest_knowledge_job(session, scan_unit_id, job_type="topic_finalization")
+        if existing is not None and existing.status in {"queued", "pending", "processing", "succeeded"}:
+            return
+        session.add(
+            KnowledgeJob(
+                scan_unit_id=uuid.UUID(scan_unit_id),
+                job_type="topic_finalization",
+                status="queued",
+            )
+        )
+        session.commit()
 
 
 def _update_knowledge_job(

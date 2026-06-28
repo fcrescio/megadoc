@@ -77,9 +77,28 @@ def route_specialists_for_document_unit(document_unit: DocumentUnit, segment_tex
     utility_score = sum(marker in text for marker in utility_markers)
     accounting_score = sum(marker in text for marker in accounting_markers)
 
-    if doc_type == "bolletta" or (doc_type == "fattura" and utility_score >= 3) or utility_score >= 5:
+    utility_allowed_types = {"bolletta", "fattura", None}
+    utility_blocked_types = {
+        "regolamento_condominiale",
+        "verbale",
+        "lettera",
+        "preventivo",
+        "rendiconto_contabile",
+        "riparto_spese",
+        "altro",
+    }
+    accounting_allowed_types = {"rendiconto_contabile", "riparto_spese", "preventivo", None}
+
+    if doc_type in utility_allowed_types and (
+        doc_type == "bolletta" or (doc_type == "fattura" and utility_score >= 3) or utility_score >= 6
+    ):
         specialists.append("utility_bill")
-    if doc_type in {"rendiconto_contabile", "riparto_spese"} or accounting_score >= 4:
+    elif doc_type in utility_blocked_types:
+        pass
+
+    if doc_type in accounting_allowed_types and (
+        doc_type in {"rendiconto_contabile", "riparto_spese"} or accounting_score >= 4
+    ):
         specialists.append("accounting_statement")
     return specialists
 
