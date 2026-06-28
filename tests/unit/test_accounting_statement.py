@@ -3,6 +3,7 @@ from specialist_worker.services.accounting_reconciliation import (
     AccountingCellCorrection,
     AccountingHeaderCorrection,
     AccountingReconciliationProposal,
+    AccountingSummaryColumn,
     AccountingTableExplanation,
     AccountingTableInterpretation,
 )
@@ -561,6 +562,61 @@ Periodo: 01/07/2022 - 30/06/2023
     assert explanation["role"] == "actual_allocation"
     assert "riparto consuntivo" in explanation["summary"]
     assert result["reconciliation"]["status"] == "no_proposal"
+
+
+def test_accounting_statement_builds_llm_guided_summary_view():
+    text = """
+Consuntivo Ripartizioni per unita
+Periodo: 01/07/2022 - 30/06/2023
+| Unita | Nominativo | Spese generali | Ascensore | Totale gestione |
+| --- | --- | ---: | ---: | ---: |
+| B11 | BONACCI FABIO | -60,00 | -15,00 | -75,00 |
+"""
+    provider = _ReconciliationProvider(
+        AccountingReconciliationProposal(
+            applicable=False,
+            summary="Vista di sintesi proposta senza correzioni strutturali.",
+            summary_columns=[
+                AccountingSummaryColumn(
+                    table_id="table_1",
+                    source_header="Spese generali",
+                    label="Spese generali",
+                    role="allocated_expense",
+                    reason="Colonna monetaria di riparto.",
+                ),
+                AccountingSummaryColumn(
+                    table_id="table_1",
+                    source_header="Ascensore",
+                    label="Ascensore",
+                    role="allocated_expense",
+                    reason="Colonna monetaria di riparto.",
+                ),
+            ],
+        )
+    )
+
+    result, _ = process_accounting_statement(
+        _document_unit(),
+        text,
+        "fixture:v6",
+        reconciliation_provider=provider,
+    )
+
+    summary = result["summary_view"]
+    assert summary["source"] == "llm_guided_summary_view"
+    assert summary["columns"] == ["Spese generali", "Ascensore"]
+    assert summary["totals"] == {"Spese generali": 60.0, "Ascensore": 15.0}
+    row = summary["rows"][0]
+    assert row["unit_code"] == "B11"
+    assert row["subject_label"] == "BONACCI FABIO"
+    assert row["cells"]["Spese generali"]["amount"] == 60.0
+    assert row["cells"]["Spese generali"]["evidence"] == {
+        "table_id": "table_1",
+        "row_id": "row_1",
+        "column": "Spese generali",
+        "page_number": None,
+        "raw_value": "-60,00",
+    }
 
 
 def test_accounting_statement_does_not_request_reconciliation_without_provider():

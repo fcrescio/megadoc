@@ -781,6 +781,7 @@ export interface AccountingTableRow {
 
 export interface AccountingTableData {
   document_unit_id: string;
+  source?: string;
   title: string;
   ordinal: number;
   start_page: number;
@@ -789,6 +790,13 @@ export interface AccountingTableData {
   rows: AccountingTableRow[];
   totals: Record<string, number>;
   explanation?: AccountingTableExplanation;
+  source_columns?: Array<{
+    table_id: string;
+    source_header: string;
+    label: string;
+    role?: string;
+    reason?: string;
+  }>;
 }
 
 export interface AccountingTableResponse {

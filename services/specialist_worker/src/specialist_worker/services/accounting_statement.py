@@ -272,6 +272,7 @@ def process_accounting_statement(
         provider=reconciliation_provider,
     )
     sections = _build_table_sections(tables)
+    summary_view = _build_llm_guided_summary_view(tables, reconciliation)
 
     confidence = 0.45
     if tables:
@@ -295,11 +296,154 @@ def process_accounting_statement(
         "currency": "EUR",
         "sections": sections,
         "tables": tables,
+        "summary_view": summary_view,
         "validation_checks": validation_checks,
         "accounts": accounts,
         "reconciliation": reconciliation,
     }
     return result, confidence
+
+
+def _build_llm_guided_summary_view(
+    tables: list[dict[str, Any]],
+    reconciliation: dict[str, Any],
+) -> dict[str, Any] | None:
+    proposal = reconciliation.get("proposal")
+    if not isinstance(proposal, dict):
+        return None
+    specs = proposal.get("summary_columns")
+    if not isinstance(specs, list) or not specs:
+        return None
+
+    table_by_id = {
+        str(table.get("table_id")): table
+        for table in tables
+        if table.get("table_id") is not None
+    }
+    columns: list[str] = []
+    rows_map: dict[str, dict[str, Any]] = {}
+    row_order: list[str] = []
+    source_specs: list[dict[str, Any]] = []
+
+    for spec in specs:
+        if not isinstance(spec, dict):
+            continue
+        table_id = str(spec.get("table_id") or "")
+        source_header = str(spec.get("source_header") or "")
+        label = str(spec.get("label") or source_header).strip()
+        role = str(spec.get("role") or "allocated_expense")
+        table = table_by_id.get(table_id)
+        if table is None or not source_header or not label:
+            continue
+        headers = table.get("headers")
+        if isinstance(headers, list) and source_header not in headers:
+            continue
+        if label not in columns:
+            columns.append(label)
+        source_specs.append(
+            {
+                "table_id": table_id,
+                "source_header": source_header,
+                "label": label,
+                "role": role,
+                "reason": spec.get("reason"),
+            }
+        )
+
+        for row in table.get("rows", []) or []:
+            if not isinstance(row, dict):
+                continue
+            identity = _extract_account_identity(row)
+            if identity is None:
+                continue
+            unit_code, subject_label = identity
+            cells = row.get("cells")
+            amounts = row.get("normalized_amounts")
+            if not isinstance(cells, dict) or not isinstance(amounts, dict):
+                continue
+            raw_value = cells.get(source_header)
+            amount = amounts.get(source_header)
+            if amount is None:
+                amount = _parse_amount(str(raw_value)) if raw_value is not None else None
+            if amount is None or abs(float(amount)) < 0.005:
+                continue
+
+            account_key = _normalize_key(f"{unit_code}_{subject_label}")
+            if account_key not in rows_map:
+                rows_map[account_key] = {
+                    "account_id": f"summary:{account_key}",
+                    "account_key": account_key,
+                    "unit_code": unit_code,
+                    "subject_label": subject_label,
+                    "cells": {},
+                }
+                row_order.append(account_key)
+
+            normalized_amount = float(amount)
+            if role in {"allocated_expense", "total", "payment", "installment"}:
+                normalized_amount = abs(normalized_amount)
+            fact_payload = {
+                "amount": normalized_amount,
+                "fact_id": (
+                    f"summary:{table_id}:"
+                    f"{row.get('row_id') or len(rows_map[account_key]['cells'])}:"
+                    f"{_normalize_key(label)}"
+                ),
+                "fact_type": role,
+                "is_total": role in {"total", "balance"},
+                "evidence": {
+                    "table_id": table_id,
+                    "row_id": row.get("row_id"),
+                    "column": source_header,
+                    "page_number": table.get("page_number"),
+                    "raw_value": str(raw_value) if raw_value is not None else None,
+                },
+            }
+            existing = rows_map[account_key]["cells"].get(label)
+            if existing is None:
+                rows_map[account_key]["cells"][label] = {
+                    "amount": normalized_amount,
+                    "fact_id": fact_payload["fact_id"],
+                    "fact_type": role,
+                    "is_total": fact_payload["is_total"],
+                    "evidence": fact_payload["evidence"],
+                    "fact_count": 1,
+                    "facts": [fact_payload],
+                }
+            else:
+                existing["amount"] = round(float(existing["amount"]) + normalized_amount, 2)
+                existing["fact_count"] += 1
+                existing["is_total"] = bool(existing["is_total"] or fact_payload["is_total"])
+                existing["facts"].append(fact_payload)
+
+    rows = [rows_map[key] for key in row_order]
+    if not columns or not rows:
+        return None
+
+    totals: dict[str, float] = {}
+    for column in columns:
+        totals[column] = round(
+            sum(float(row["cells"][column]["amount"]) for row in rows if column in row["cells"]),
+            2,
+        )
+
+    return {
+        "source": "llm_guided_summary_view",
+        "columns": columns,
+        "rows": rows,
+        "totals": totals,
+        "source_columns": source_specs,
+        "explanation": {
+            "summary": (
+                "Vista sintetica costruita da una selezione LLM-guided delle colonne monetarie "
+                "presenti nelle tabelle estratte. Le celle mantengono evidenza su tabella, riga, "
+                "colonna e valore OCR sorgente."
+            ),
+            "role": "llm_guided_accounting_summary",
+            "source": "accounting_reconciliation_llm",
+            "review_status": "unverified",
+        },
+    }
 
 
 def _reconcile_with_llm(

@@ -2521,7 +2521,7 @@ def get_document_accounting_table(
 
     tables = []
     for du in doc_units:
-        table = get_accounting_table(db, du.id)
+        table = _accounting_specialist_summary_view(du) or get_accounting_table(db, du.id)
         if table is not None:
             source_explanations = _accounting_source_table_explanations(du)
             table["document_unit_id"] = str(du.id)
@@ -2540,13 +2540,46 @@ def get_document_accounting_table(
                 for row in table.get("rows", []):
                     for cell in row.get("cells", {}).values():
                         if isinstance(cell, dict):
-                            ev = cell.get("evidence", {})
-                            if isinstance(ev, dict) and ev.get("page_number") is not None:
-                                ev["page_number"] = page_count - ev["page_number"] + 1
+                            _transform_accounting_cell_page_numbers(cell, page_count)
 
             tables.append(table)
 
     return {"document_id": document_id, "tables": tables}
+
+
+def _accounting_specialist_summary_view(doc_unit: DocumentUnit) -> dict[str, Any] | None:
+    for result in sorted(doc_unit.specialist_results, key=lambda item: item.created_at, reverse=True):
+        if result.specialist_type != "accounting_statement" or not isinstance(result.result_json, dict):
+            continue
+        summary_view = result.result_json.get("summary_view")
+        if not isinstance(summary_view, dict):
+            continue
+        rows = summary_view.get("rows")
+        columns = summary_view.get("columns")
+        totals = summary_view.get("totals")
+        if isinstance(rows, list) and rows and isinstance(columns, list) and isinstance(totals, dict):
+            return {
+                "document_unit_id": str(doc_unit.id),
+                "source": summary_view.get("source") or "specialist_summary_view",
+                "columns": columns,
+                "rows": rows,
+                "totals": totals,
+                "explanation": summary_view.get("explanation"),
+                "source_columns": summary_view.get("source_columns", []),
+            }
+    return None
+
+
+def _transform_accounting_cell_page_numbers(cell: dict[str, Any], page_count: int) -> None:
+    ev = cell.get("evidence", {})
+    if isinstance(ev, dict) and ev.get("page_number") is not None:
+        ev["page_number"] = page_count - ev["page_number"] + 1
+    for fact in cell.get("facts", []) or []:
+        if not isinstance(fact, dict):
+            continue
+        fact_ev = fact.get("evidence", {})
+        if isinstance(fact_ev, dict) and fact_ev.get("page_number") is not None:
+            fact_ev["page_number"] = page_count - fact_ev["page_number"] + 1
 
 
 @router.get("/documents/{document_id}/accounting-table/cell-detail")
