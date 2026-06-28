@@ -11,6 +11,7 @@ from specialist_worker.services.accounting_agent import (
     _normalize_allocation_indices,
     _tool_get_context,
     _tool_label_categories,
+    _tool_review_accounts,
 )
 from specialist_worker.services.accounting_statement import _extract_structured_tables, process_accounting_statement
 
@@ -617,6 +618,27 @@ Periodo: 01/07/2022 - 30/06/2023
         "page_number": None,
         "raw_value": "-60,00",
     }
+
+
+def test_accounting_agent_review_handles_missing_unit_code():
+    output = _tool_review_accounts(
+        {
+            "unknown_key": {
+                "unit_code": None,
+                "subject_label": "SOGGETTO IGNOTO",
+                "facts": [
+                    {
+                        "category_label": "Spese generali",
+                        "amount": 12.5,
+                        "is_total": False,
+                    }
+                ],
+            }
+        }
+    )
+
+    assert "SOGGETTO IGNOTO" in output
+    assert "Spese generali: 12.50" in output
 
 
 def test_accounting_statement_does_not_request_reconciliation_without_provider():

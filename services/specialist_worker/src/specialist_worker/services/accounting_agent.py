@@ -660,7 +660,7 @@ def _tool_review_accounts(
     # Sort by unit_code for stable output
     sorted_keys = sorted(
         accumulated_accounts.keys(),
-        key=lambda k: (accumulated_accounts[k].get("unit_code", k), k),
+        key=lambda k: (str(accumulated_accounts[k].get("unit_code") or k), str(k)),
     )
     for key in sorted_keys:
         acc = accumulated_accounts[key]
