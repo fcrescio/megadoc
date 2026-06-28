@@ -13,26 +13,11 @@ from knowledge_classifier.prompts import SEGMENTATION_PROMPT
 from knowledge_classifier.schemas import (
     PageRepresentation,
     SegmentCandidate,
-    SegmentBoundary,
     SegmentationResult,
 )
 from knowledge_classifier.services.language import detect_document_language, output_language_instruction
 
 logger = logging.getLogger(__name__)
-
-# Document boundary patterns
-BOUNDARY_PATTERNS = [
-    r"\bverbale\b",
-    r"\bassemblea\b",
-    r"\brendiconto\b",
-    r"\bfattura\b",
-    r"\bpreventivo\b",
-    r"\bbolletta\b",
-    r"\bcontratto\b",
-    r"\ballegato\b",
-    r"\bdocumento\s*\d+",
-]
-
 
 class SegmentationService:
     """Service for segmenting OCR results into document units."""
@@ -64,30 +49,20 @@ class SegmentationService:
         if not pages:
             raise ValueError("No page data available for segmentation.")
 
-        # First pass: heuristic boundary detection
-        heuristic_boundaries = self._detect_heuristic_boundaries(pages)
-        
-        if heuristic_boundaries:
-            # Use heuristics if we found clear boundaries
-            segments = self._build_segments_from_boundaries(heuristic_boundaries, page_count)
-            return SegmentationResult(
-                segments=segments,
-                overall_confidence=0.85,
-                boundaries=heuristic_boundaries
-            )
-        
-        # Second pass: LLM-based segmentation for ambiguous cases
+        # Multi-page segmentation is a semantic decision: delegate it to the LLM.
+        # Deterministic boundary rules are intentionally not used as an automatic
+        # fallback because they caused keyword-driven splits on noisy scans.
         if len(pages) > 1:
             llm_result = self._segment_with_llm(pages)
             return llm_result
         
-        # Default: single segment
+        # Single-page scans are the only solid deterministic case.
         return SegmentationResult(
             segments=[SegmentCandidate(
                 start_page=1,
                 end_page=page_count,
                 confidence=0.9,
-                rationale="Single page document or no boundaries detected"
+                rationale="Single page scan"
             )],
             overall_confidence=0.9,
             boundaries=[]
@@ -171,84 +146,6 @@ class SegmentationService:
                 keywords.append(kw)
         
         return keywords[:10]
-
-    def _detect_heuristic_boundaries(self, pages: list[PageRepresentation]) -> list[SegmentBoundary]:
-        """Detect boundaries using heuristics."""
-        boundaries = []
-        
-        for i in range(len(pages) - 1):
-            current = pages[i]
-            next_page = pages[i + 1]
-            
-            score = 0.0
-            reasons = []
-            
-            # Check for document type keywords at start of next page
-            for pattern in BOUNDARY_PATTERNS:
-                if re.search(pattern, next_page.text[:500], re.IGNORECASE):
-                    score += 0.3
-                    reasons.append(f"Found pattern: {pattern}")
-            
-            # Check for heading reset
-            if next_page.headings and not current.headings:
-                score += 0.2
-                reasons.append("Heading reset detected")
-            
-            # Check for keyword discontinuity
-            current_kw_set = set(current.keywords)
-            next_kw_set = set(next_page.keywords)
-            
-            if current_kw_set and next_kw_set:
-                overlap = len(current_kw_set & next_kw_set)
-                total = len(current_kw_set | next_kw_set)
-                if total > 0 and overlap / total < 0.3:
-                    score += 0.2
-                    reasons.append("Low keyword overlap")
-            
-            # Check for new document markers in headings
-            for heading in next_page.headings:
-                if any(p in heading.lower() for p in ["verbale", "rendiconto", "fattura", "preventivo"]):
-                    score += 0.4
-                    reasons.append(f"Document marker in heading: {heading}")
-            
-            if score >= 0.6:
-                boundaries.append(SegmentBoundary(
-                    page_before=current.page_number,
-                    page_after=next_page.page_number,
-                    confidence=min(score, 1.0),
-                    rationale="; ".join(reasons)
-                ))
-        
-        return boundaries
-
-    def _build_segments_from_boundaries(
-        self,
-        boundaries: list[SegmentBoundary],
-        page_count: int,
-    ) -> list[SegmentCandidate]:
-        """Build segments from detected boundaries."""
-        segments = []
-        start_page = 1
-        
-        for boundary in sorted(boundaries, key=lambda b: b.page_before):
-            segments.append(SegmentCandidate(
-                start_page=start_page,
-                end_page=boundary.page_before,
-                confidence=boundary.confidence,
-                rationale=f"Segment before boundary at page {boundary.page_after}"
-            ))
-            start_page = boundary.page_after
-        
-        # Final segment
-        if start_page <= page_count:
-            segments.append(SegmentCandidate(
-                start_page=start_page,
-                end_page=page_count,
-                confidence=0.8,
-                rationale="Final segment"
-            ))
-        
-        return segments
 
     def _segment_with_llm(self, pages: list[PageRepresentation]) -> SegmentationResult:
         """Use LLM to segment ambiguous documents."""

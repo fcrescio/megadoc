@@ -249,7 +249,7 @@ def process_accounting_statement(
     ) or _extract_markdown_tables(text, period_from=period_from, period_to=period_to)
     validation_checks = _build_validation_checks(tables)
 
-    # --- Account extraction: agent-driven first, rule-based as fallback ---
+    # --- Account extraction: agent-driven only ---
     # The agent iterates table by table, using the LLM to determine category
     # names from context and extract accounts with correct labels.
     if reconciliation_provider is not None:
@@ -258,9 +258,6 @@ def process_accounting_statement(
         )
     else:
         accounts = []
-    if not accounts:
-        # Agent unavailable or returned nothing — fall back to rule-based
-        accounts = _extract_accounts(tables, period_from, period_to)
 
     tables, validation_checks, accounts, reconciliation = _reconcile_with_llm(
         tables,
@@ -285,6 +282,8 @@ def process_accounting_statement(
         confidence += 0.10
     if any(table.get("source") == "docling_structured" for table in tables):
         confidence += 0.05
+    if reconciliation_provider is None or not accounts:
+        confidence = min(confidence, 0.69)
     confidence = min(confidence, 0.97)
 
     result = {
@@ -299,6 +298,7 @@ def process_accounting_statement(
         "summary_view": summary_view,
         "validation_checks": validation_checks,
         "accounts": accounts,
+        "account_extraction_mode": "llm_agent" if reconciliation_provider is not None else "llm_unavailable",
         "reconciliation": reconciliation,
     }
     return result, confidence

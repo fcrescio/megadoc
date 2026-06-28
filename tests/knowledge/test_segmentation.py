@@ -51,8 +51,8 @@ def test_segmentation_mixed_documents():
     assert result.segments[-1].end_page == 3
 
 
-def test_segmentation_heuristic_boundaries():
-    """Test heuristic boundary detection."""
+def test_segmentation_uses_llm_for_multi_page_boundaries():
+    """Test LLM-driven boundary detection for multi-page scans."""
     class MockSession:
         pass
     
@@ -74,6 +74,7 @@ def test_segmentation_heuristic_boundaries():
         page_count=2,
     )
     
-    # Should detect boundary between page 1 and 2
-    assert len(result.segments) >= 1
+    # Multi-page boundary detection is delegated to the LLM mock.
+    assert len(result.segments) == 2
+    assert result.boundaries
     assert result.overall_confidence > 0

@@ -55,7 +55,18 @@ def test_route_specialists_does_not_treat_regulation_as_utility_bill():
     assert specialists == []
 
 
-def test_route_specialists_accepts_real_utility_bill():
+def test_route_specialists_uses_document_type_not_keywords():
+    document_unit = _document_unit(1, 1)
+    document_unit.document_type = DocumentType(code="altro", name="Altro")
+    document_unit.title = "Testo con parole da bolletta"
+    document_unit.extracted_summary = "Totale bolletta, numero cliente, acqua, pod, pdr"
+
+    specialists = route_specialists_for_document_unit(document_unit, "numero cliente rif.bolletta acqua")
+
+    assert specialists == []
+
+
+def test_route_specialists_accepts_llm_classified_utility_bill():
     document_unit = _document_unit(1, 1)
     document_unit.document_type = DocumentType(code="bolletta", name="Bolletta")
     document_unit.title = "Bolletta Acque"

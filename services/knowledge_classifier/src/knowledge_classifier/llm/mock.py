@@ -70,6 +70,49 @@ class MockDeterministicProvider(LLMProvider):
 
     def _generate_mock_json(self, schema: type[BaseModel], user_text: str) -> dict[str, Any]:
         """Generate mock JSON data matching schema."""
+        if schema.__name__ == "SegmentationResult":
+            page_numbers = [int(value) for value in re.findall(r"=== Page (\d+) ===", user_text)]
+            page_count = max(page_numbers) if page_numbers else 1
+            lower_text = user_text.lower()
+            if page_count > 1 and "rendiconto" in lower_text and "verbale" in lower_text:
+                return {
+                    "segments": [
+                        {
+                            "start_page": 1,
+                            "end_page": 1,
+                            "confidence": 0.86,
+                            "rationale": "Mock LLM split at semantic document boundary.",
+                        },
+                        {
+                            "start_page": 2,
+                            "end_page": page_count,
+                            "confidence": 0.86,
+                            "rationale": "Mock LLM detected a second document.",
+                        },
+                    ],
+                    "overall_confidence": 0.86,
+                    "boundaries": [
+                        {
+                            "page_before": 1,
+                            "page_after": 2,
+                            "confidence": 0.86,
+                            "rationale": "Mock semantic boundary.",
+                        }
+                    ],
+                }
+            return {
+                "segments": [
+                    {
+                        "start_page": 1,
+                        "end_page": page_count,
+                        "confidence": 0.9,
+                        "rationale": "Mock LLM single document.",
+                    }
+                ],
+                "overall_confidence": 0.9,
+                "boundaries": [],
+            }
+
         if schema.__name__ == "PipelineRoutingDecision":
             lower_text = user_text.lower()
             if "document segment:" in lower_text:

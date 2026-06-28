@@ -44,61 +44,15 @@ def extract_document_unit_text(document_unit: DocumentUnit, ocr_result: OCRResul
 
 def route_specialists_for_document_unit(document_unit: DocumentUnit, segment_text: str) -> list[str]:
     doc_type = document_unit.document_type.code if document_unit.document_type else None
-    text = f"{document_unit.title or ''}\n{document_unit.extracted_summary or ''}\n{segment_text}".lower()
-
     specialists: list[str] = []
-    utility_markers = [
-        "bolletta",
-        "fornitura",
-        "data di emissione",
-        "entro quando devo pagare",
-        "totale bolletta",
-        "numero cliente",
-        "rif.bolletta",
-        "pod",
-        "pdr",
-        "energia elettrica",
-        "gas",
-        "acqua",
-    ]
-    accounting_markers = [
-        "bilancio preventivo",
-        "rendiconto",
-        "riparto",
-        "preventivo ripartizioni",
-        "saldo finale",
-        "totale gestione",
-        "esercizio",
-        "spese deliberate",
-        "importi",
-        "totali",
-    ]
 
-    utility_score = sum(marker in text for marker in utility_markers)
-    accounting_score = sum(marker in text for marker in accounting_markers)
-
-    utility_allowed_types = {"bolletta", "fattura", None}
-    utility_blocked_types = {
-        "regolamento_condominiale",
-        "verbale",
-        "lettera",
-        "preventivo",
-        "rendiconto_contabile",
-        "riparto_spese",
-        "altro",
-    }
-    accounting_allowed_types = {"rendiconto_contabile", "riparto_spese", "preventivo", None}
-
-    if doc_type in utility_allowed_types and (
-        doc_type == "bolletta" or (doc_type == "fattura" and utility_score >= 3) or utility_score >= 6
-    ):
+    # Specialist dispatch is based only on the LLM-assigned document type.
+    # Text markers are deliberately ignored here: ambiguous semantic routing
+    # must be handled by classification/review, not by keyword promotion.
+    if doc_type == "bolletta":
         specialists.append("utility_bill")
-    elif doc_type in utility_blocked_types:
-        pass
 
-    if doc_type in accounting_allowed_types and (
-        doc_type in {"rendiconto_contabile", "riparto_spese"} or accounting_score >= 4
-    ):
+    if doc_type in {"rendiconto_contabile", "riparto_spese", "preventivo"}:
         specialists.append("accounting_statement")
     return specialists
 
