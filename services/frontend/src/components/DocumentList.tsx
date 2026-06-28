@@ -24,6 +24,14 @@ const DocumentRow = memo(function DocumentRow({ doc, onSelect }: { doc: Document
   if (doc.ingestion_status === 'failed') {
     tags.push({ label: 'OCR fallito', color: 'bg-red-500/20 text-red-300 border-red-600/30' });
   }
+  if ((doc.knowledge_review_issue_count ?? 0) > 0 || (doc.needs_review_scan_unit_count ?? 0) > 0) {
+    const issueCount = doc.knowledge_review_issue_count ?? 0;
+    const scanCount = doc.needs_review_scan_unit_count ?? 0;
+    tags.push({
+      label: issueCount > 0 ? `Review: ${issueCount} unita` : `Review: ${scanCount} scansioni`,
+      color: 'bg-amber-500/20 text-amber-300 border-amber-600/30',
+    });
+  }
 
   return (
     <button

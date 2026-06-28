@@ -10,7 +10,7 @@ from urllib.request import Request as UrlRequest, urlopen
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile
 from redis import Redis
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import delete, func, or_, select, text
 from sqlalchemy.orm import Session
 
 from api.middleware import RequestContextMiddleware
@@ -40,7 +40,7 @@ from common.application.repositories import (
 )
 from common.application.services import DocumentService, JobService, persist_upload_to_temp
 from common.config import Settings, get_settings
-from common.db.models import DocumentAsset, DocumentUnit, IngestionJob, ManualComment, OCRResult, ScanUnit
+from common.db.models import DocumentAsset, DocumentUnit, IngestionJob, ManualComment, OCRResult, ScanUnit, TopicProposal
 from common.db.schema import ensure_knowledge_schema
 from common.db.session import engine, get_db_session
 from common.domain.enums import AssetType, SourceType
@@ -236,20 +236,41 @@ def list_documents(
 
     doc_ids = [row.id for row in rows]
 
-    # Batch: scan unit and document unit counts per document
+    # Batch: scan unit, document unit and actionable review counts per document.
     counts_query = (
         select(
             ScanUnit.source_document_id,
-            func.count(ScanUnit.id).label("su_count"),
+            func.count(func.distinct(ScanUnit.id)).label("su_count"),
             func.count(DocumentUnit.id).label("du_count"),
+            func.count(DocumentUnit.id)
+            .filter(DocumentUnit.review_status == "needs_review")
+            .label("needs_review_du_count"),
+            func.count(TopicProposal.id)
+            .filter(TopicProposal.proposal_status == "proposed")
+            .label("pending_proposal_count"),
+            func.count(func.distinct(ScanUnit.id))
+            .filter(
+                or_(
+                    DocumentUnit.review_status == "needs_review",
+                    TopicProposal.proposal_status == "proposed",
+                )
+            )
+            .label("needs_review_su_count"),
         )
         .outerjoin(DocumentUnit, DocumentUnit.scan_unit_id == ScanUnit.id)
+        .outerjoin(TopicProposal, TopicProposal.source_document_unit_id == DocumentUnit.id)
         .where(ScanUnit.source_document_id.in_(doc_ids))
         .group_by(ScanUnit.source_document_id)
     )
-    counts_map: dict[uuid.UUID, tuple[int, int]] = {}
+    counts_map: dict[uuid.UUID, tuple[int, int, int, int, int]] = {}
     for r in session.execute(counts_query).all():
-        counts_map[r.source_document_id] = (r.su_count, r.du_count)
+        counts_map[r.source_document_id] = (
+            r.su_count,
+            r.du_count,
+            r.needs_review_du_count,
+            r.pending_proposal_count,
+            r.needs_review_su_count,
+        )
 
     # Batch: latest OCR result per document (for preflight info)
     latest_ocr_subq = (
@@ -279,7 +300,10 @@ def list_documents(
 
     result: list[DocumentResponse] = []
     for row in rows:
-        su_count, du_count = counts_map.get(row.id, (0, 0))
+        su_count, du_count, needs_review_du_count, pending_proposal_count, needs_review_su_count = counts_map.get(
+            row.id, (0, 0, 0, 0, 0)
+        )
+        review_issue_count = needs_review_du_count + pending_proposal_count
 
         rotation_applied: int | None = None
         page_order_reversed: bool | None = None
@@ -310,6 +334,9 @@ def list_documents(
                 page_order_reversed=page_order_reversed,
                 ingestion_status=ingestion_status,
                 ingestion_error=ingestion_error,
+                knowledge_review_status="needs_review" if review_issue_count else "clear",
+                knowledge_review_issue_count=review_issue_count,
+                needs_review_scan_unit_count=needs_review_su_count,
             )
         )
 
@@ -325,10 +352,25 @@ def get_document(document_id: uuid.UUID, session: Session = Depends(db_session_d
     # Scan unit and document unit counts
     count_result = session.execute(
         select(
-            func.count(ScanUnit.id).label("su_count"),
+            func.count(func.distinct(ScanUnit.id)).label("su_count"),
             func.count(DocumentUnit.id).label("du_count"),
+            func.count(DocumentUnit.id)
+            .filter(DocumentUnit.review_status == "needs_review")
+            .label("needs_review_du_count"),
+            func.count(TopicProposal.id)
+            .filter(TopicProposal.proposal_status == "proposed")
+            .label("pending_proposal_count"),
+            func.count(func.distinct(ScanUnit.id))
+            .filter(
+                or_(
+                    DocumentUnit.review_status == "needs_review",
+                    TopicProposal.proposal_status == "proposed",
+                )
+            )
+            .label("needs_review_su_count"),
         )
         .outerjoin(DocumentUnit, DocumentUnit.scan_unit_id == ScanUnit.id)
+        .outerjoin(TopicProposal, TopicProposal.source_document_unit_id == DocumentUnit.id)
         .where(ScanUnit.source_document_id == document.id)
     ).one()
 
@@ -371,6 +413,11 @@ def get_document(document_id: uuid.UUID, session: Session = Depends(db_session_d
         page_order_reversed=page_order_reversed,
         ingestion_status=latest_job.status if latest_job else None,
         ingestion_error=latest_job.error_message if latest_job else None,
+        knowledge_review_status="needs_review"
+        if count_result.needs_review_du_count + count_result.pending_proposal_count
+        else "clear",
+        knowledge_review_issue_count=count_result.needs_review_du_count + count_result.pending_proposal_count,
+        needs_review_scan_unit_count=count_result.needs_review_su_count,
     )
 
 

@@ -39,6 +39,7 @@ import type {
   CleanupReport,
   InactiveTopicCleanupResponse,
   KnowledgeDocumentUnit,
+  KnowledgeScanUnit,
   KnowledgeTopicProposal,
   TopicAssignmentUpsertPayload,
   TopicCreatePayload,
@@ -545,6 +546,20 @@ export async function deleteDocumentUnitTopicAssignment(
     { method: 'DELETE' },
   );
   return handleResponse<KnowledgeDocumentUnit>(response);
+}
+
+export async function markDocumentUnitReviewed(documentUnitId: string): Promise<KnowledgeDocumentUnit> {
+  const response = await fetch(`${API_BASE}/knowledge/document-units/${documentUnitId}/mark-reviewed`, {
+    method: 'POST',
+  });
+  return handleResponse<KnowledgeDocumentUnit>(response);
+}
+
+export async function markScanUnitReviewed(scanUnitId: string): Promise<KnowledgeScanUnit> {
+  const response = await fetch(`${API_BASE}/knowledge/scan-units/${scanUnitId}/mark-reviewed`, {
+    method: 'POST',
+  });
+  return handleResponse<KnowledgeScanUnit>(response);
 }
 
 export async function getDocumentAccountingTable(documentId: string): Promise<AccountingTableResponse> {

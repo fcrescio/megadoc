@@ -14,6 +14,8 @@ import {
   useAddDocumentUnitTopicAssignment,
   useDeleteDocumentUnitTopicAssignment,
   useDeleteDocumentUnit,
+  useMarkDocumentUnitReviewed,
+  useMarkScanUnitReviewed,
   useReingestDocument,
 } from '../hooks/useDocuments';
 import { downloadAsset, getDocumentDownloadUrl, getSpecialistResultExportUrl } from '../api/client';
@@ -598,6 +600,8 @@ function DocumentDetail({ documentId, onBack, initialTab = 'info' }: Props) {
   const ensureSpecialists = useEnsureDocumentSpecialists();
   const reingest = useReingestDocument();
   const deleteDocUnit = useDeleteDocumentUnit();
+  const markDocumentUnitReviewed = useMarkDocumentUnitReviewed();
+  const markScanUnitReviewed = useMarkScanUnitReviewed();
 
   useEffect(() => {
     setActiveTab(initialTab);
@@ -890,6 +894,15 @@ function DocumentDetail({ documentId, onBack, initialTab = 'info' }: Props) {
                             <span className="px-2 py-1 rounded-full bg-blue-50 text-blue-700">
                               {scanUnit.status}
                             </span>
+                            {scanUnit.review && scanUnit.review.open_count > 0 ? (
+                              <span className="px-2 py-1 rounded-full bg-amber-50 text-amber-700">
+                                {scanUnit.review.open_count} azioni review
+                              </span>
+                            ) : (
+                              <span className="px-2 py-1 rounded-full bg-emerald-50 text-emerald-700">
+                                review ok
+                              </span>
+                            )}
                             <span className="px-2 py-1 rounded-full bg-gray-100 text-gray-700">
                               {scanUnit.page_count} pages
                             </span>
@@ -900,6 +913,36 @@ function DocumentDetail({ documentId, onBack, initialTab = 'info' }: Props) {
                             )}
                           </div>
                         </div>
+                        {scanUnit.review && scanUnit.review.issue_count > 0 && (
+                          <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div>
+                                <p className="text-sm font-semibold text-amber-900">
+                                  {scanUnit.review.open_count > 0 ? 'Da fare per chiudere la revisione' : 'Warning di qualita'}
+                                </p>
+                                <p className="text-xs text-amber-800">
+                                  Le proposal sono decisioni sui topic. Questa review verifica invece che la scansione sia stata divisa,
+                                  classificata e assegnata correttamente.
+                                </p>
+                              </div>
+                              <button
+                                onClick={() => markScanUnitReviewed.mutate(scanUnit.id)}
+                                disabled={markScanUnitReviewed.isPending || scanUnit.review.blocking_count > 0 || scanUnit.review.open_count === 0}
+                                className="px-3 py-1.5 text-xs font-medium rounded-md bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-60 disabled:cursor-not-allowed"
+                                title={scanUnit.review.blocking_count > 0 ? 'Risolvi prima le proposal pendenti' : 'Marca tutte le unità della scansione come revisionate'}
+                              >
+                                {markScanUnitReviewed.isPending ? 'Salvataggio...' : 'Marca scansione revisionata'}
+                              </button>
+                            </div>
+                            <ul className="mt-2 space-y-1 text-xs text-amber-900">
+                              {scanUnit.review.issues.map((issue, index) => (
+                                <li key={`${issue.type}:${issue.document_unit_id ?? issue.proposal_id ?? index}`}>
+                                  <span className="font-mono">{issue.severity}</span>: {issue.message}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
                       </div>
 
                       <div className="divide-y">
@@ -918,6 +961,16 @@ function DocumentDetail({ documentId, onBack, initialTab = 'info' }: Props) {
                               </div>
                               <div className="flex items-center gap-2">
                                 <p className="font-mono text-xs text-gray-400">{unit.id}</p>
+                                {unit.review_status === 'needs_review' && (
+                                  <button
+                                    onClick={() => markDocumentUnitReviewed.mutate(unit.id)}
+                                    disabled={markDocumentUnitReviewed.isPending || unit.proposal?.proposal_status === 'proposed'}
+                                    className="px-2 py-1 text-xs font-medium rounded-md bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 disabled:opacity-60 disabled:cursor-not-allowed"
+                                    title={unit.proposal?.proposal_status === 'proposed' ? 'Risolvi prima la proposal topic' : 'Marca questa document unit come revisionata'}
+                                  >
+                                    {markDocumentUnitReviewed.isPending ? 'Salvo...' : 'Revisionata'}
+                                  </button>
+                                )}
                                 <button
                                   onClick={() => {
                                     if (window.confirm(`Sopprimere la document unit ${unit.ordinal} (${unit.document_type_code ?? 'sconosciuto'}) e tutti i dati derivati?`)) {

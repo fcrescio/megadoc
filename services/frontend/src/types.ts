@@ -13,6 +13,9 @@ export interface Document {
   page_order_reversed: boolean | null;
   ingestion_status: string | null;
   ingestion_error: string | null;
+  knowledge_review_status: string | null;
+  knowledge_review_issue_count: number;
+  needs_review_scan_unit_count: number;
 }
 
 export interface PreflightInfo {
@@ -208,6 +211,25 @@ export interface KnowledgeDocumentUnit {
   updated_at: string | null;
 }
 
+export interface KnowledgeReviewIssue {
+  type: string;
+  severity: 'blocking' | 'action' | 'warning' | string;
+  message: string;
+  document_unit_id?: string;
+  proposal_id?: string;
+  specialist_result_id?: string;
+}
+
+export interface KnowledgeReviewSummary {
+  status: 'clear' | 'needs_review' | string;
+  issue_count: number;
+  blocking_count: number;
+  action_count: number;
+  warning_count: number;
+  open_count: number;
+  issues: KnowledgeReviewIssue[];
+}
+
 export interface KnowledgeScanUnit {
   id: string;
   source_document_id: string;
@@ -219,6 +241,7 @@ export interface KnowledgeScanUnit {
   classification_confidence: number | null;
   assignment_confidence: number | null;
   preflight: PreflightInfo | null;
+  review: KnowledgeReviewSummary | null;
   created_at: string;
   updated_at: string | null;
   document_units: KnowledgeDocumentUnit[];

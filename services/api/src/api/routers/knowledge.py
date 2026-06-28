@@ -110,6 +110,7 @@ from knowledge_classifier.schemas import (
     ReviewStatus,
     TopicAssignmentUpsert,
     TopicProposalResolution,
+    ScanUnitStatus,
 )
 from knowledge_classifier.services.consolidation import KnowledgeBaseConsolidationService
 from knowledge_classifier.config import get_settings as get_knowledge_settings
@@ -265,6 +266,103 @@ def _serialize_document_unit(doc_unit: DocumentUnit) -> dict[str, Any]:
         "created_at": doc_unit.created_at,
         "updated_at": doc_unit.updated_at,
     }
+
+
+def _review_issues_for_scan_unit(scan_unit: ScanUnit) -> list[dict[str, Any]]:
+    issues: list[dict[str, Any]] = []
+    if scan_unit.segmentation_confidence is not None and scan_unit.segmentation_confidence < 0.75:
+        issues.append(
+            {
+                "type": "low_scan_segmentation_confidence",
+                "severity": "warning",
+                "message": f"Confidenza segmentazione scansione bassa: {scan_unit.segmentation_confidence:.0%}.",
+            }
+        )
+    if scan_unit.classification_confidence is not None and scan_unit.classification_confidence < 0.75:
+        issues.append(
+            {
+                "type": "low_scan_classification_confidence",
+                "severity": "warning",
+                "message": f"Confidenza classificazione scansione bassa: {scan_unit.classification_confidence:.0%}.",
+            }
+        )
+
+    for doc_unit in sorted(scan_unit.document_units, key=lambda unit: unit.ordinal):
+        unit_label = f"Unita {doc_unit.ordinal}, pagine {doc_unit.start_page}-{doc_unit.end_page}"
+        if doc_unit.review_status == ReviewStatus.NEEDS_REVIEW.value:
+            issues.append(
+                {
+                    "type": "document_unit_needs_review",
+                    "severity": "action",
+                    "document_unit_id": str(doc_unit.id),
+                    "message": f"{unit_label}: controlla tipo documento, pagine e topic.",
+                }
+            )
+        if doc_unit.proposal is not None and doc_unit.proposal.proposal_status == "proposed":
+            issues.append(
+                {
+                    "type": "pending_topic_proposal",
+                    "severity": "blocking",
+                    "document_unit_id": str(doc_unit.id),
+                    "proposal_id": str(doc_unit.proposal.id),
+                    "message": f"{unit_label}: risolvi prima la proposal topic.",
+                }
+            )
+        if doc_unit.document_type_confidence is not None and doc_unit.document_type_confidence < 0.75:
+            issues.append(
+                {
+                    "type": "low_document_type_confidence",
+                    "severity": "warning",
+                    "document_unit_id": str(doc_unit.id),
+                    "message": f"{unit_label}: confidenza tipo documento {doc_unit.document_type_confidence:.0%}.",
+                }
+            )
+        if doc_unit.segmentation_confidence is not None and doc_unit.segmentation_confidence < 0.75:
+            issues.append(
+                {
+                    "type": "low_document_segmentation_confidence",
+                    "severity": "warning",
+                    "document_unit_id": str(doc_unit.id),
+                    "message": f"{unit_label}: confidenza segmentazione {doc_unit.segmentation_confidence:.0%}.",
+                }
+            )
+        for result in doc_unit.specialist_results:
+            if result.review_status == ReviewStatus.NEEDS_REVIEW.value:
+                issues.append(
+                    {
+                        "type": "specialist_result_needs_review",
+                        "severity": "action",
+                        "document_unit_id": str(doc_unit.id),
+                        "specialist_result_id": str(result.id),
+                        "message": f"{unit_label}: risultato specialista {result.specialist_type} da revisionare.",
+                    }
+                )
+    return issues
+
+
+def _scan_unit_review_summary(scan_unit: ScanUnit) -> dict[str, Any]:
+    issues = _review_issues_for_scan_unit(scan_unit)
+    blocking_count = sum(1 for issue in issues if issue.get("severity") == "blocking")
+    action_count = sum(1 for issue in issues if issue.get("severity") == "action")
+    warning_count = sum(1 for issue in issues if issue.get("severity") == "warning")
+    open_count = blocking_count + action_count
+    return {
+        "status": "needs_review" if open_count else "clear",
+        "issue_count": len(issues),
+        "blocking_count": blocking_count,
+        "action_count": action_count,
+        "warning_count": warning_count,
+        "open_count": open_count,
+        "issues": issues,
+    }
+
+
+def _refresh_scan_unit_review_status(scan_unit: ScanUnit) -> None:
+    summary = _scan_unit_review_summary(scan_unit)
+    if summary["open_count"] == 0:
+        scan_unit.status = ScanUnitStatus.ASSIGNED.value
+    elif scan_unit.status != ScanUnitStatus.FAILED.value:
+        scan_unit.status = ScanUnitStatus.NEEDS_REVIEW.value
 
 
 def _latest_specialist_result(document_unit: DocumentUnit, specialist_type: str) -> SpecialistResult | None:
@@ -625,6 +723,10 @@ def _serialize_scan_unit(
     include_units: bool = False,
     db: Session | None = None,
 ) -> dict[str, Any]:
+    review_summary = _scan_unit_review_summary(scan_unit)
+    effective_status = scan_unit.status
+    if scan_unit.status == ScanUnitStatus.NEEDS_REVIEW.value and review_summary["open_count"] == 0:
+        effective_status = ScanUnitStatus.ASSIGNED.value
     payload = {
         "id": str(scan_unit.id),
         "source_document_id": str(scan_unit.source_document_id),
@@ -633,11 +735,12 @@ def _serialize_scan_unit(
         else None,
         "source_ocr_result_id": str(scan_unit.source_ocr_result_id),
         "page_count": scan_unit.page_count,
-        "status": scan_unit.status,
+        "status": effective_status,
         "segmentation_confidence": scan_unit.segmentation_confidence,
         "classification_confidence": scan_unit.classification_confidence,
         "assignment_confidence": scan_unit.assignment_confidence,
         "preflight": _load_preflight(scan_unit, db),
+        "review": review_summary,
         "created_at": scan_unit.created_at,
         "updated_at": scan_unit.updated_at,
     }
@@ -1025,10 +1128,93 @@ def review_document_unit(
         doc_unit.review_status = update.review_status
     if update.title:
         doc_unit.title = update.title
+    if doc_unit.scan_unit is not None:
+        _refresh_scan_unit_review_status(doc_unit.scan_unit)
     
     db.commit()
 
     return DocumentUnitResponse(**_serialize_document_unit(doc_unit))
+
+
+@router.post("/document-units/{document_unit_id}/mark-reviewed", response_model=DocumentUnitResponse)
+def mark_document_unit_reviewed(document_unit_id: str, db: Session = Depends(get_db_session)):
+    """Mark a document unit as reviewed and refresh its parent scan status."""
+    result = db.execute(
+        select(DocumentUnit)
+        .options(
+            selectinload(DocumentUnit.document_type),
+            selectinload(DocumentUnit.entities),
+            selectinload(DocumentUnit.topic_assignments).selectinload(DocumentUnitTopicAssignment.topic),
+            selectinload(DocumentUnit.proposal).selectinload(TopicProposal.matched_topic),
+            selectinload(DocumentUnit.scan_unit).selectinload(ScanUnit.document_units),
+            selectinload(DocumentUnit.specialist_jobs),
+            selectinload(DocumentUnit.specialist_results),
+            selectinload(DocumentUnit.outgoing_links)
+            .selectinload(DocumentUnitLink.target_document_unit)
+            .selectinload(DocumentUnit.document_type),
+            selectinload(DocumentUnit.outgoing_links)
+            .selectinload(DocumentUnitLink.target_document_unit)
+            .selectinload(DocumentUnit.scan_unit),
+        )
+        .where(DocumentUnit.id == uuid.UUID(document_unit_id))
+    )
+    doc_unit = result.scalar_one_or_none()
+    if doc_unit is None:
+        raise HTTPException(status_code=404, detail="Document unit not found")
+    if doc_unit.proposal is not None and doc_unit.proposal.proposal_status == "proposed":
+        raise HTTPException(status_code=409, detail="Resolve pending topic proposal first")
+
+    doc_unit.review_status = ReviewStatus.HUMAN_REVIEWED.value
+    if doc_unit.scan_unit is not None:
+        _refresh_scan_unit_review_status(doc_unit.scan_unit)
+    db.commit()
+    db.refresh(doc_unit)
+    return DocumentUnitResponse(**_serialize_document_unit(doc_unit))
+
+
+@router.post("/scan-units/{scan_unit_id}/mark-reviewed")
+def mark_scan_unit_reviewed(scan_unit_id: str, db: Session = Depends(get_db_session)):
+    """Mark all non-blocked document units in a scan as reviewed."""
+    result = db.execute(
+        select(ScanUnit)
+        .options(
+            selectinload(ScanUnit.document_units).selectinload(DocumentUnit.document_type),
+            selectinload(ScanUnit.document_units).selectinload(DocumentUnit.entities),
+            selectinload(ScanUnit.document_units)
+            .selectinload(DocumentUnit.topic_assignments)
+            .selectinload(DocumentUnitTopicAssignment.topic),
+            selectinload(ScanUnit.document_units)
+            .selectinload(DocumentUnit.proposal)
+            .selectinload(TopicProposal.matched_topic),
+            selectinload(ScanUnit.document_units).selectinload(DocumentUnit.specialist_jobs),
+            selectinload(ScanUnit.document_units).selectinload(DocumentUnit.specialist_results),
+            selectinload(ScanUnit.document_units)
+            .selectinload(DocumentUnit.outgoing_links)
+            .selectinload(DocumentUnitLink.target_document_unit)
+            .selectinload(DocumentUnit.document_type),
+            selectinload(ScanUnit.document_units)
+            .selectinload(DocumentUnit.outgoing_links)
+            .selectinload(DocumentUnitLink.target_document_unit)
+            .selectinload(DocumentUnit.scan_unit),
+        )
+        .where(ScanUnit.id == uuid.UUID(scan_unit_id))
+    )
+    scan_unit = result.scalar_one_or_none()
+    if scan_unit is None:
+        raise HTTPException(status_code=404, detail="Scan unit not found")
+
+    summary = _scan_unit_review_summary(scan_unit)
+    blocking = [issue for issue in summary["issues"] if issue.get("severity") == "blocking"]
+    if blocking:
+        raise HTTPException(status_code=409, detail="Resolve pending topic proposals first")
+
+    for doc_unit in scan_unit.document_units:
+        if doc_unit.review_status == ReviewStatus.NEEDS_REVIEW.value:
+            doc_unit.review_status = ReviewStatus.HUMAN_REVIEWED.value
+    _refresh_scan_unit_review_status(scan_unit)
+    db.commit()
+    db.refresh(scan_unit)
+    return _serialize_scan_unit(scan_unit, include_units=True, db=db)
 
 
 @router.post("/document-units/{document_unit_id}/topic-assignments", response_model=DocumentUnitResponse)
@@ -2787,6 +2973,8 @@ def approve_topic_proposal(
                 rationale=proposal.rationale,
             )
         proposal.source_document_unit.review_status = ReviewStatus.HUMAN_REVIEWED.value
+        if proposal.source_document_unit.scan_unit is not None:
+            _refresh_scan_unit_review_status(proposal.source_document_unit.scan_unit)
 
     proposal.proposal_status = "approved"
     proposal.matched_existing_topic_id = topic.id
@@ -2826,6 +3014,8 @@ def reject_topic_proposal(proposal_id: str, db: Session = Depends(get_db_session
         for assignment in removable_assignments:
             db.delete(assignment)
         proposal.source_document_unit.review_status = ReviewStatus.HUMAN_REVIEWED.value
+        if proposal.source_document_unit.scan_unit is not None:
+            _refresh_scan_unit_review_status(proposal.source_document_unit.scan_unit)
 
     provisional_topic = proposal.matched_topic
     provisional_topic_id = provisional_topic.id if provisional_topic is not None else None

@@ -50,6 +50,9 @@ class DocumentResponse(BaseModel):
     page_order_reversed: bool | None = None
     ingestion_status: str | None = None
     ingestion_error: str | None = None
+    knowledge_review_status: str | None = None
+    knowledge_review_issue_count: int = 0
+    needs_review_scan_unit_count: int = 0
 
 
 class DocumentVersionResponse(BaseModel):

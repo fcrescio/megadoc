@@ -39,6 +39,8 @@ import type {
   CleanupReport,
   InactiveTopicCleanupResponse,
   KnowledgeTopicProposal,
+  KnowledgeDocumentUnit,
+  KnowledgeScanUnit,
   TopicAssignmentUpsertPayload,
   TopicCreatePayload,
   TopicProposalResolutionPayload,
@@ -90,6 +92,8 @@ import {
   addDocumentUnitTopicAssignment,
   deleteDocumentUnitTopicAssignment,
   deleteDocumentUnit,
+  markDocumentUnitReviewed,
+  markScanUnitReviewed,
   reingestDocument,
   getDocumentAccountingTable,
   getDocumentAccountingRawTables,
@@ -626,6 +630,34 @@ export function useDeleteDocumentUnitTopicAssignment() {
       queryClient.invalidateQueries({ queryKey: ['knowledge-search'] });
       queryClient.invalidateQueries({ queryKey: ['knowledge-entities'] });
       queryClient.invalidateQueries({ queryKey: ['knowledge-entity-detail'] });
+    },
+  });
+}
+
+export function useMarkDocumentUnitReviewed() {
+  const queryClient = useQueryClient();
+  return useMutation<KnowledgeDocumentUnit, Error, string>({
+    mutationFn: (documentUnitId) => markDocumentUnitReviewed(documentUnitId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['documents'] });
+      queryClient.invalidateQueries({ queryKey: ['document'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-topics'] });
+      queryClient.invalidateQueries({ queryKey: ['topic-proposals'] });
+    },
+  });
+}
+
+export function useMarkScanUnitReviewed() {
+  const queryClient = useQueryClient();
+  return useMutation<KnowledgeScanUnit, Error, string>({
+    mutationFn: (scanUnitId) => markScanUnitReviewed(scanUnitId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['documents'] });
+      queryClient.invalidateQueries({ queryKey: ['document'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-topics'] });
+      queryClient.invalidateQueries({ queryKey: ['topic-proposals'] });
     },
   });
 }

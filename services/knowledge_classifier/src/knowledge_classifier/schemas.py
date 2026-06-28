@@ -582,6 +582,7 @@ class ScanUnitResponse(BaseModel):
     classification_confidence: Optional[float] = None
     assignment_confidence: Optional[float] = None
     preflight: Optional[dict] = None
+    review: Optional[dict[str, Any]] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 
