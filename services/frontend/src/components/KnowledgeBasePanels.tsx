@@ -1,13 +1,10 @@
 import { memo, useEffect, useMemo, useState } from 'react';
 import {
   useCanonicalEntities,
-  useContextAccountingComparison,
-  useContextAccountingSubjects,
   useGraphConsolidationSuggestions,
   useKnowledgeAssertions,
   useKnowledgeEntities,
   useKnowledgeEntityDetail,
-  useKnowledgeContexts,
   useKnowledgeNode,
   useKnowledgeNodes,
   useKnowledgeSearch,
@@ -20,7 +17,6 @@ import {
   useSpecialistUtilityBills,
 } from '../hooks/useDocuments';
 import type { KnowledgeAssertion } from '../types';
-import AccountingReconciliationModal from './AccountingReconciliationModal';
 
 function formatDate(value: string | null | undefined) {
   if (!value) return 'n/d';
@@ -44,146 +40,6 @@ const tabClass = (current: boolean) =>
       ? 'border-cyan-300/35 bg-cyan-400/15 text-cyan-100'
       : 'border-white/10 bg-white/5 text-slate-300 hover:bg-white/10'
   }`;
-
-/* ── Comparisons Panel ── */
-
-interface ComparisonsPanelProps {
-  onOpenDocument: (documentId: string) => void;
-}
-
-export const ComparisonsPanel = memo(function ComparisonsPanel({ onOpenDocument: _onOpenDocument }: ComparisonsPanelProps) {
-  const [selectedContextId, setSelectedContextId] = useState<string | null>(null);
-  const [comparisonSubject, setComparisonSubject] = useState('');
-  const [selectedAccountKey, setSelectedAccountKey] = useState('');
-  const [comparisonRole, setComparisonRole] = useState('actual_allocation');
-  const [periodAFrom, setPeriodAFrom] = useState('2022-07-01');
-  const [periodATo, setPeriodATo] = useState('2023-06-30');
-  const [periodBFrom, setPeriodBFrom] = useState('2023-07-01');
-  const [periodBTo, setPeriodBTo] = useState('2024-06-30');
-  const [showAccountingReview, setShowAccountingReview] = useState(false);
-  const deferredComparisonSubject = useMemo(() => comparisonSubject.trim(), [comparisonSubject]);
-
-  const contextsQuery = useKnowledgeContexts({ limit: 40 }, true);
-  const contexts = contextsQuery.data ?? [];
-  const contextsKey = useMemo(() => contexts.map((c) => c.id).join(','), [contexts]);
-  const accountingSubjects = useContextAccountingSubjects(selectedContextId, {
-    query: deferredComparisonSubject || undefined,
-    limit: 20,
-  }, true);
-  const accountingComparison = useContextAccountingComparison(selectedContextId, {
-    subject: deferredComparisonSubject,
-    accountKey: selectedAccountKey || undefined,
-    accountingRole: comparisonRole,
-    periodAFrom,
-    periodATo,
-    periodBFrom,
-    periodBTo,
-  }, true);
-
-  useEffect(() => {
-    if (!contexts.length) {
-      setSelectedContextId(null);
-    } else if (!selectedContextId || !contexts.some((c) => c.id === selectedContextId)) {
-      setSelectedContextId(contexts[0].id);
-    }
-  }, [contextsKey]);
-
-  useEffect(() => {
-    if (selectedAccountKey && !(accountingSubjects.data ?? []).some((s) => s.account_key === selectedAccountKey)) {
-      setSelectedAccountKey('');
-    }
-  }, [accountingSubjects.data, selectedAccountKey]);
-
-  return (
-    <div className="flex h-full flex-col gap-3">
-      <div className="grid shrink-0 gap-2 rounded-2xl border border-white/10 bg-slate-950/35 p-3 lg:grid-cols-[minmax(14rem,2fr)_minmax(10rem,1fr)_minmax(10rem,1fr)_minmax(10rem,1fr)]">
-        <select value={selectedContextId ?? ''} onChange={(e) => setSelectedContextId(e.target.value || null)} className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm">
-          {contexts.length === 0 && <option value="">Nessun contesto disponibile</option>}
-          {contexts.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
-        </select>
-        <input value={comparisonSubject} onChange={(e) => { setComparisonSubject(e.target.value); setSelectedAccountKey(''); }} placeholder="Soggetto, es. Cognome" className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm" />
-        <select value={selectedAccountKey} onChange={(e) => setSelectedAccountKey(e.target.value)} className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm">
-          <option value="">Risoluzione automatica</option>
-          {(accountingSubjects.data ?? []).map((s) => <option key={s.account_key} value={s.account_key}>{s.subject_label} {s.unit_codes.join(' / ')}</option>)}
-        </select>
-        <select value={comparisonRole} onChange={(e) => setComparisonRole(e.target.value)} className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm">
-          <option value="actual_allocation">Consuntivo spese</option>
-          <option value="budget_allocation">Preventivo spese</option>
-        </select>
-      </div>
-      <div className="grid shrink-0 gap-2 rounded-2xl border border-white/10 bg-slate-950/35 p-3 md:grid-cols-2">
-        <div className="flex items-center gap-2">
-          <span className="text-xs uppercase tracking-wide text-slate-400">Periodo A</span>
-          <input type="date" value={periodAFrom} onChange={(e) => setPeriodAFrom(e.target.value)} className="min-w-0 flex-1 rounded-lg border border-white/10 bg-slate-950 px-2 py-2 text-sm" />
-          <input type="date" value={periodATo} onChange={(e) => setPeriodATo(e.target.value)} className="min-w-0 flex-1 rounded-lg border border-white/10 bg-slate-950 px-2 py-2 text-sm" />
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-xs uppercase tracking-wide text-slate-400">Periodo B</span>
-          <input type="date" value={periodBFrom} onChange={(e) => setPeriodBFrom(e.target.value)} className="min-w-0 flex-1 rounded-lg border border-white/10 bg-slate-950 px-2 py-2 text-sm" />
-          <input type="date" value={periodBTo} onChange={(e) => setPeriodBTo(e.target.value)} className="min-w-0 flex-1 rounded-lg border border-white/10 bg-slate-950 px-2 py-2 text-sm" />
-        </div>
-      </div>
-      <div className="min-h-0 flex-1 overflow-y-auto rounded-2xl border border-white/10 bg-slate-950/35 p-4">
-        {accountingComparison.isLoading ? (
-          <p className="text-sm text-slate-400">Elaborazione confronto...</p>
-        ) : accountingComparison.data ? (
-          <div className="space-y-4">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <p className="text-lg font-semibold text-white">{accountingComparison.data.selected_subject?.subject_label ?? comparisonSubject}</p>
-                <p className="mt-1 text-sm text-slate-400">{contexts.find((c) => c.id === selectedContextId)?.label ?? 'Contesto'} · {comparisonRole}</p>
-              </div>
-              <span className={`rounded-full border px-3 py-2 text-xs ${accountingComparison.data.status === 'comparable' ? 'border-emerald-300/25 bg-emerald-400/15 text-emerald-100' : accountingComparison.data.status === 'needs_review' ? 'border-amber-300/25 bg-amber-400/15 text-amber-100' : 'border-slate-300/20 bg-white/5 text-slate-200'}`}>
-                {accountingComparison.data.status}
-              </span>
-            </div>
-            {accountingComparison.data.status === 'comparable' && (
-              <div className="grid gap-3 md:grid-cols-3">
-                <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-                  <p className="text-xs text-slate-400">Periodo A</p>
-                  <p className="mt-1 text-lg text-white">{formatCurrency(accountingComparison.data.period_a?.total)}</p>
-                </div>
-                <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-                  <p className="text-xs text-slate-400">Periodo B</p>
-                  <p className="mt-1 text-lg text-white">{formatCurrency(accountingComparison.data.period_b?.total)}</p>
-                </div>
-                <div className="rounded-xl border border-cyan-300/20 bg-cyan-400/10 p-3">
-                  <p className="text-xs text-cyan-100">Differenza B - A</p>
-                  <p className="mt-1 text-lg text-white">{formatCurrency(accountingComparison.data.delta)}</p>
-                  <p className="text-xs text-slate-300">{accountingComparison.data.percentage_change}%</p>
-                </div>
-              </div>
-            )}
-            {accountingComparison.data.warnings.map((w) => <p key={w} className="rounded-xl border border-amber-300/20 bg-amber-400/10 p-3 text-sm text-amber-100">{w}</p>)}
-            {accountingComparison.data.status === 'needs_review' && (
-              <button onClick={() => setShowAccountingReview(true)} className="rounded-full border border-amber-300/25 bg-amber-400/15 px-4 py-2 text-sm text-amber-100">Riconcilia tabella</button>
-            )}
-            {accountingComparison.data.changed_categories.length > 0 && (
-              <div className="overflow-hidden rounded-xl border border-white/10">
-                <div className="grid grid-cols-[minmax(12rem,1fr)_8rem_8rem_8rem] bg-white/5 px-3 py-2 text-xs uppercase tracking-wide text-slate-400">
-                  <span>Voce</span><span className="text-right">A</span><span className="text-right">B</span><span className="text-right">Delta</span>
-                </div>
-                {accountingComparison.data.changed_categories.map((cat) => (
-                  <div key={cat.category_key} className="grid grid-cols-[minmax(12rem,1fr)_8rem_8rem_8rem] border-t border-white/10 px-3 py-2 text-sm">
-                    <span className="truncate text-white">{cat.category_label}</span>
-                    <span className="text-right text-slate-300">{formatCurrency(cat.amount_a)}</span>
-                    <span className="text-right text-slate-300">{formatCurrency(cat.amount_b)}</span>
-                    <span className="text-right text-cyan-100">{formatCurrency(cat.delta)}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        ) : (
-          <p className="text-sm text-slate-400">Seleziona un contesto e indica un soggetto da confrontare.</p>
-        )}
-      </div>
-      {showAccountingReview && accountingComparison.data && (
-        <AccountingReconciliationModal comparison={accountingComparison.data} onClose={() => setShowAccountingReview(false)} />
-      )}
-    </div>
-  );
-});
 
 /* ── Facts Panel ── */
 

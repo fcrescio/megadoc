@@ -6,7 +6,6 @@ import {
 } from '../hooks/useDocuments';
 import ProposalList from './ProposalList';
 import {
-  ComparisonsPanel,
   FactsPanel,
   SpecialistsPanel,
   TopicsPanel,
@@ -19,10 +18,10 @@ interface Props {
   onOpenDocument: (documentId: string) => void;
 }
 
-type Panel = 'comparisons' | 'facts' | 'specialists' | 'topics' | 'entities' | 'reviews' | 'cleanup';
+type Panel = 'facts' | 'specialists' | 'topics' | 'entities' | 'reviews' | 'cleanup';
 
 function KnowledgeBase({ onOpenDocument }: Props) {
-  const [panel, setPanel] = useState<Panel>('comparisons');
+  const [panel, setPanel] = useState<Panel>('facts');
   const [searchInput, setSearchInput] = useState('');
   const [showProposals, setShowProposals] = useState(false);
   const deferredSearch = useDeferredValue(searchInput.trim());
@@ -86,7 +85,6 @@ function KnowledgeBase({ onOpenDocument }: Props) {
         </div>
         <nav className="mt-3 flex flex-wrap gap-2">
           {[
-            { id: 'comparisons' as Panel, label: 'Confronti' },
             { id: 'facts' as Panel, label: 'Fatti' },
             { id: 'specialists' as Panel, label: 'Specialisti' },
             { id: 'topics' as Panel, label: 'Topic' },
@@ -102,7 +100,6 @@ function KnowledgeBase({ onOpenDocument }: Props) {
       </section>
 
       <section className="min-h-0 flex-1 overflow-hidden rounded-lg border border-slate-700 bg-slate-800 p-4">
-        {panel === 'comparisons' && <ComparisonsPanel onOpenDocument={onOpenDocument} />}
         {panel === 'facts' && <FactsPanel onOpenDocument={onOpenDocument} deferredSearch={deferredSearch} />}
         {panel === 'specialists' && <SpecialistsPanel onOpenDocument={onOpenDocument} deferredSearch={deferredSearch} />}
         {panel === 'topics' && <TopicsPanel onOpenDocument={onOpenDocument} deferredSearch={deferredSearch} includeInactive={false} />}
