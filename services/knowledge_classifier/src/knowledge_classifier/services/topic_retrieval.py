@@ -165,11 +165,20 @@ class TopicRetrievalService:
             f"{topic_title_lower} {topic_slug_lower} {topic_desc_lower}"
         )
 
-        for document_anchor in search_terms["anchors"]:
-            if topic_anchor and document_anchor and document_anchor.isdisjoint(topic_anchor):
+        if topic_anchor:
+            document_anchors = [anchor for anchor in search_terms["anchors"] if anchor]
+            anchor_matches = [
+                anchor
+                for anchor in document_anchors
+                if not anchor.isdisjoint(topic_anchor)
+            ]
+            if document_anchors and not anchor_matches:
                 return 0.0, [
                     "Anchor mismatch: document building/address differs from topic"
                 ]
+            if anchor_matches:
+                score += 0.35
+                reasons.append("Anchor match: document address matches topic")
         
         topic_words = self._tokenize(topic_title_lower)
         

@@ -29,6 +29,38 @@ def test_score_topic_rejects_conflicting_building_anchor():
     assert reasons == ["Anchor mismatch: document building/address differs from topic"]
 
 
+def test_score_topic_accepts_one_matching_anchor_when_document_has_vendor_address():
+    service = _service()
+    topic = Topic(
+        slug="appartamento-pisa",
+        title="Appartamento Pisa",
+        topic_class="general_administration",
+        topic_kind="family",
+        description="Appartamento situato nel condominio di Via Cesare Studiati a Pisa.",
+    )
+    terms = {
+        "title_words": {"preventivo", "impresa", "edile", "siragusa", "francesco"},
+        "summary_words": {"preventivo", "spesa", "lavori", "modifiche", "interne", "appartamento", "pisa"},
+        "entity_values": {
+            "via studiati, pisa",
+            "via amedeo, 88 - 56010 nodica (pi)",
+        },
+        "entity_normalized": {
+            "via_studiati_pisa",
+            "via_amedeo_88_56010_nodica_pi",
+        },
+        "anchors": [
+            {"studiati", "pisa"},
+            {"amedeo", "nodica"},
+        ],
+    }
+
+    score, reasons = service._score_topic(topic, "preventivo", terms)
+
+    assert score > 0
+    assert "Anchor match: document address matches topic" in reasons
+
+
 def test_score_topic_keeps_generic_topic_without_address_anchor():
     service = _service()
     topic = Topic(
