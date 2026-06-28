@@ -13,7 +13,11 @@ from specialist_worker.services.accounting_agent import (
     _tool_label_categories,
     _tool_review_accounts,
 )
-from specialist_worker.services.accounting_statement import _extract_structured_tables, process_accounting_statement
+from specialist_worker.services.accounting_statement import (
+    _extract_account_identity,
+    _extract_structured_tables,
+    process_accounting_statement,
+)
 
 
 def _document_unit() -> DocumentUnit:
@@ -639,6 +643,18 @@ def test_accounting_agent_review_handles_missing_unit_code():
 
     assert "SOGGETTO IGNOTO" in output
     assert "Spese generali: 12.50" in output
+
+
+def test_accounting_identity_prefers_prefixed_unit_with_slash_subject():
+    assert _extract_account_identity(
+        {
+            "cells": {
+                "column_1": "A3 TIESI VINCENZO/BRUNO ERMINIA",
+                "column_2": "Appartame",
+                "column_10": "1",
+            }
+        }
+    ) == ("A3", "TIESI VINCENZO/BRUNO ERMINIA")
 
 
 def test_accounting_statement_does_not_request_reconciliation_without_provider():

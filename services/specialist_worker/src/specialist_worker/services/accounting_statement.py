@@ -1552,7 +1552,7 @@ def _parse_name_and_unit(value: str) -> tuple[str, str] | None:
 
 def _parse_prefixed_account(value: str) -> tuple[str, str] | None:
     match = re.match(
-        r"^\s*-?\s*([A-Z]{0,2}\s*\d{1,3})\s+([A-ZÀ-ÖØ-Ý' ]{3,60}?)(?:\s+-|$)",
+        r"^\s*-?\s*([A-Z]{0,2}\s*\d{1,3})\s+([A-ZÀ-ÖØ-Ý'/ ]{3,80}?)(?:\s+-|$)",
         value,
         re.IGNORECASE,
     )
