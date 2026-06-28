@@ -22,6 +22,8 @@ import type {
   ContextAccountingComparison,
   AccountingFactCorrectionPayload,
   AccountingFactCorrectionResult,
+  KnowledgeAgentRequest,
+  KnowledgeAgentResponse,
   KnowledgeGraphStats,
   KnowledgeNodeSummary,
   KnowledgeNodeDetail,
@@ -165,6 +167,15 @@ export async function searchKnowledge(
   }
   const response = await fetch(`${API_BASE}/knowledge/search?${params.toString()}`);
   return handleResponse<KnowledgeSearchResult>(response);
+}
+
+export async function askKnowledgeAgent(payload: KnowledgeAgentRequest): Promise<KnowledgeAgentResponse> {
+  const response = await fetch(`${API_BASE}/knowledge/agent/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return handleResponse<KnowledgeAgentResponse>(response);
 }
 
 export async function getSpecialistUtilityBills(options?: {

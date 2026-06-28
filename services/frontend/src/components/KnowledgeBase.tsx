@@ -11,6 +11,7 @@ import {
   TopicsPanel,
   EntitiesPanel,
   ReviewsPanel,
+  AgentPanel,
 } from './KnowledgeBasePanels';
 import { TopicCleanupPanel } from './TopicCleanupPanel';
 
@@ -18,7 +19,7 @@ interface Props {
   onOpenDocument: (documentId: string) => void;
 }
 
-type Panel = 'facts' | 'specialists' | 'topics' | 'entities' | 'reviews' | 'cleanup';
+type Panel = 'agent' | 'facts' | 'specialists' | 'topics' | 'entities' | 'reviews' | 'cleanup';
 
 function KnowledgeBase({ onOpenDocument }: Props) {
   const [panel, setPanel] = useState<Panel>('facts');
@@ -86,6 +87,7 @@ function KnowledgeBase({ onOpenDocument }: Props) {
         <nav className="mt-3 flex flex-wrap gap-2">
           {[
             { id: 'facts' as Panel, label: 'Fatti' },
+            { id: 'agent' as Panel, label: 'Dialogo' },
             { id: 'specialists' as Panel, label: 'Specialisti' },
             { id: 'topics' as Panel, label: 'Topic' },
             { id: 'entities' as Panel, label: 'Entità' },
@@ -101,6 +103,7 @@ function KnowledgeBase({ onOpenDocument }: Props) {
 
       <section className="min-h-0 flex-1 overflow-hidden rounded-lg border border-slate-700 bg-slate-800 p-4">
         {panel === 'facts' && <FactsPanel onOpenDocument={onOpenDocument} deferredSearch={deferredSearch} />}
+        {panel === 'agent' && <AgentPanel onOpenDocument={onOpenDocument} />}
         {panel === 'specialists' && <SpecialistsPanel onOpenDocument={onOpenDocument} deferredSearch={deferredSearch} />}
         {panel === 'topics' && <TopicsPanel onOpenDocument={onOpenDocument} deferredSearch={deferredSearch} includeInactive={false} />}
         {panel === 'entities' && <EntitiesPanel onOpenDocument={onOpenDocument} deferredSearch={deferredSearch} />}

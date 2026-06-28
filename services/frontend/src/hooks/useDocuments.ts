@@ -22,6 +22,8 @@ import type {
   ContextAccountingComparison,
   AccountingFactCorrectionPayload,
   AccountingFactCorrectionResult,
+  KnowledgeAgentRequest,
+  KnowledgeAgentResponse,
   KnowledgeGraphStats,
   KnowledgeNodeSummary,
   KnowledgeNodeDetail,
@@ -73,6 +75,7 @@ import {
   getKnowledgeNodes,
   getKnowledgeNode,
   getKnowledgeAssertions,
+  askKnowledgeAgent,
   getManual,
   createManualComment,
   updateManualComment,
@@ -213,6 +216,12 @@ export function useKnowledgeSearch(
     queryKey: ['knowledge-search', query, options?.includeInactive, options?.topicKind, options?.topicClass, options?.limit],
     queryFn: () => searchKnowledge(query, options),
     enabled: query.trim().length >= 2,
+  });
+}
+
+export function useKnowledgeAgentChat() {
+  return useMutation<KnowledgeAgentResponse, Error, KnowledgeAgentRequest>({
+    mutationFn: (payload) => askKnowledgeAgent(payload),
   });
 }
 

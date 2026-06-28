@@ -8,7 +8,7 @@ import unicodedata
 import uuid
 from datetime import date, datetime, timezone
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse, PlainTextResponse
@@ -133,6 +133,69 @@ class _AccountingAskPlan(BaseModel):
     period_b_from: date | None = Field(default=None)
     period_b_to: date | None = Field(default=None)
     intent: str = Field(default="compare_periods")
+
+
+class _KnowledgeAgentAction(BaseModel):
+    action: Literal[
+        "search_archive",
+        "list_topics",
+        "get_document_unit",
+        "get_document",
+        "get_page_text",
+        "request_page_vision",
+        "final_answer",
+    ]
+    reasoning: str = Field(default="")
+    query: str | None = Field(default=None)
+    document_id: str | None = Field(default=None)
+    document_unit_id: str | None = Field(default=None)
+    topic_id: str | None = Field(default=None)
+    page_number: int | None = Field(default=None)
+    limit: int | None = Field(default=None)
+    answer: str | None = Field(default=None)
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    citations: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class KnowledgeAgentChatRequest(BaseModel):
+    question: str = Field(..., min_length=3, max_length=4000)
+    max_steps: int = Field(default=8, ge=1, le=12)
+    allow_vision: bool = Field(default=False)
+
+
+class KnowledgeAgentTraceStep(BaseModel):
+    step: int
+    action: str
+    reasoning: str | None = None
+    input: dict[str, Any] = Field(default_factory=dict)
+    output: dict[str, Any] | list[Any] | str | None = None
+    error: str | None = None
+
+
+class KnowledgeAgentCitation(BaseModel):
+    document_id: str | None = None
+    document_unit_id: str | None = None
+    original_filename: str | None = None
+    title: str | None = None
+    page_from: int | None = None
+    page_to: int | None = None
+    quote: str | None = None
+
+
+class KnowledgeAgentVisionRequest(BaseModel):
+    document_id: str
+    page_number: int
+    reason: str | None = None
+
+
+class KnowledgeAgentChatResponse(BaseModel):
+    status: str
+    answer: str
+    confidence: float | None = None
+    tool_trace: list[KnowledgeAgentTraceStep] = Field(default_factory=list)
+    citations: list[KnowledgeAgentCitation] = Field(default_factory=list)
+    vision_requests: list[KnowledgeAgentVisionRequest] = Field(default_factory=list)
+    model: str | None = None
 
 
 def _serialize_entity(entity: DocumentUnitEntity) -> dict[str, Any]:
@@ -2070,6 +2133,160 @@ def compare_context_accounting(
     )
 
 
+@router.post("/agent/chat", response_model=KnowledgeAgentChatResponse)
+def chat_with_knowledge_agent(
+    payload: KnowledgeAgentChatRequest,
+    db: Session = Depends(get_db_session),
+):
+    provider = _knowledge_agent_provider()
+    if provider is None:
+        raise HTTPException(status_code=503, detail="LLM backend is not configured")
+
+    messages = [
+        ChatMessage(
+            role="system",
+            content=(
+                "Sei un agente read-only che interroga un archivio documentale tramite tool. "
+                "Non inventare fatti: usa i tool per cercare documenti, topic, testo OCR e risultati specialistici. "
+                "Quando rispondi cita document_id/document_unit_id e pagine se disponibili. "
+                "Se il testo OCR non basta e servirebbe vedere la pagina, usa request_page_vision. "
+                "La vision e' disponibile solo come richiesta strutturata: non fingere di aver visto immagini."
+            ),
+        ),
+        ChatMessage(
+            role="user",
+            content=(
+                f"Domanda utente: {payload.question}\n"
+                f"Vision consentita dall'utente: {payload.allow_vision}.\n"
+                "Scegli una sola azione JSON alla volta."
+            ),
+        ),
+    ]
+    trace: list[KnowledgeAgentTraceStep] = []
+    vision_requests: list[KnowledgeAgentVisionRequest] = []
+    final_action: _KnowledgeAgentAction | None = None
+
+    for step in range(1, payload.max_steps + 1):
+        try:
+            action, _ = provider.chat_with_json(messages, _KnowledgeAgentAction, temperature=0.1, max_retries=2)
+            action = _KnowledgeAgentAction.model_validate(action)
+        except Exception as exc:
+            trace.append(
+                KnowledgeAgentTraceStep(
+                    step=step,
+                    action="llm_error",
+                    error=str(exc),
+                )
+            )
+            break
+
+        action_input = action.model_dump(
+            mode="json",
+            exclude={"answer", "confidence", "citations"},
+            exclude_none=True,
+        )
+        if action.action == "final_answer":
+            if not action.answer or not action.answer.strip():
+                trace.append(
+                    KnowledgeAgentTraceStep(
+                        step=step,
+                        action="invalid_final_answer",
+                        reasoning=action.reasoning,
+                        input=action_input,
+                        error="final_answer requires a non-empty answer",
+                    )
+                )
+                messages.append(ChatMessage(role="assistant", content=action.model_dump_json(exclude_none=True)))
+                messages.append(
+                    ChatMessage(
+                        role="user",
+                        content=(
+                            "La final_answer non e' valida: il campo answer deve contenere una risposta testuale. "
+                            "Produci final_answer con answer non vuoto e cita le fonti quando disponibili."
+                        ),
+                    )
+                )
+                continue
+            final_action = action
+            trace.append(
+                KnowledgeAgentTraceStep(
+                    step=step,
+                    action=action.action,
+                    reasoning=action.reasoning,
+                    input=action_input,
+                    output={"answer": action.answer, "confidence": action.confidence},
+                )
+            )
+            break
+
+        tool_output: dict[str, Any] | list[Any]
+        error: str | None = None
+        try:
+            tool_output = _run_knowledge_agent_tool(db, action, allow_vision=payload.allow_vision)
+            if action.action == "request_page_vision" and isinstance(tool_output, dict):
+                request = tool_output.get("vision_request")
+                if isinstance(request, dict):
+                    vision_requests.append(KnowledgeAgentVisionRequest.model_validate(request))
+        except Exception as exc:
+            tool_output = {}
+            error = str(exc)
+
+        trace.append(
+            KnowledgeAgentTraceStep(
+                step=step,
+                action=action.action,
+                reasoning=action.reasoning,
+                input=action_input,
+                output=tool_output,
+                error=error,
+            )
+        )
+        messages.append(ChatMessage(role="assistant", content=action.model_dump_json(exclude_none=True)))
+        messages.append(
+            ChatMessage(
+                role="user",
+                content=f"Risultato tool {action.action}: {tool_output if error is None else {'error': error}}",
+            )
+        )
+
+    if final_action is None:
+        synthesized = _synthesize_knowledge_agent_answer(provider, payload.question, trace)
+        if synthesized:
+            return KnowledgeAgentChatResponse(
+                status="answered_synthesized",
+                answer=synthesized,
+                confidence=None,
+                tool_trace=trace,
+                citations=[],
+                vision_requests=vision_requests,
+                model=provider.model_name,
+            )
+        return KnowledgeAgentChatResponse(
+            status="incomplete",
+            answer="Non sono riuscito a produrre una risposta affidabile con i tool disponibili.",
+            confidence=None,
+            tool_trace=trace,
+            citations=[],
+            vision_requests=vision_requests,
+            model=provider.model_name,
+        )
+
+    citations = [
+        KnowledgeAgentCitation.model_validate(item)
+        for item in final_action.citations
+        if isinstance(item, dict) and any(value is not None for value in item.values())
+    ]
+    return KnowledgeAgentChatResponse(
+        status="answered",
+        answer=final_action.answer or "",
+        confidence=final_action.confidence,
+        tool_trace=trace,
+        citations=citations,
+        vision_requests=vision_requests,
+        model=provider.model_name,
+    )
+
+
 @router.post("/accounting/ask", response_model=AccountingAskResponse)
 def ask_accounting(
     payload: AccountingAskRequest,
@@ -2215,6 +2432,314 @@ def _accounting_llm_provider() -> OpenAICompatibleProvider | None:
         timeout=max(settings.llm_timeout, 120),
         max_tokens=min(settings.llm_max_tokens, 2048),
     )
+
+
+def _knowledge_agent_provider() -> OpenAICompatibleProvider | None:
+    settings = get_knowledge_settings()
+    endpoint = os.getenv("KN_WORKER_LLM_ENDPOINT", settings.llm_endpoint)
+    if endpoint.startswith("mock://"):
+        return None
+    return OpenAICompatibleProvider(
+        base_url=endpoint,
+        model=settings.llm_model,
+        api_key=settings.llm_api_key,
+        timeout=max(settings.llm_timeout, 180),
+        max_tokens=min(settings.llm_max_tokens, 4096),
+    )
+
+
+def _run_knowledge_agent_tool(
+    db: Session,
+    action: _KnowledgeAgentAction,
+    *,
+    allow_vision: bool,
+) -> dict[str, Any] | list[Any]:
+    limit = max(1, min(action.limit or 8, 20))
+    if action.action == "search_archive":
+        return _agent_search_archive(db, action.query or "", limit=limit)
+    if action.action == "list_topics":
+        return _agent_list_topics(db, action.query, limit=limit)
+    if action.action == "get_document_unit":
+        if not action.document_unit_id:
+            raise ValueError("document_unit_id is required")
+        return _agent_document_unit(db, action.document_unit_id)
+    if action.action == "get_document":
+        if not action.document_id:
+            raise ValueError("document_id is required")
+        return _agent_document(db, action.document_id)
+    if action.action == "get_page_text":
+        if not action.document_id or action.page_number is None:
+            raise ValueError("document_id and page_number are required")
+        return _agent_page_text(db, action.document_id, action.page_number)
+    if action.action == "request_page_vision":
+        if not allow_vision:
+            return {"vision_request": None, "status": "vision_not_allowed_by_user"}
+        if not action.document_id or action.page_number is None:
+            raise ValueError("document_id and page_number are required")
+        return {
+            "status": "vision_requested",
+            "vision_request": {
+                "document_id": action.document_id,
+                "page_number": action.page_number,
+                "reason": action.reasoning or None,
+            },
+            "note": "Il provider chat corrente accetta solo testo; la richiesta e' esposta alla UI e alla futura esecuzione multimodale.",
+        }
+    raise ValueError(f"Unsupported action: {action.action}")
+
+
+def _synthesize_knowledge_agent_answer(
+    provider: OpenAICompatibleProvider,
+    question: str,
+    trace: list[KnowledgeAgentTraceStep],
+) -> str | None:
+    trace_payload = [
+        {
+            "step": step.step,
+            "action": step.action,
+            "output": step.output,
+            "error": step.error,
+        }
+        for step in trace[-8:]
+    ]
+    try:
+        response = provider.chat(
+            [
+                ChatMessage(
+                    role="system",
+                    content=(
+                        "Sei un agente read-only che deve rispondere usando solo i risultati tool forniti. "
+                        "Se i risultati non bastano, dichiaralo esplicitamente. Non inventare dati."
+                    ),
+                ),
+                ChatMessage(
+                    role="user",
+                    content=(
+                        f"Domanda: {question}\n"
+                        f"Trace tool JSON: {trace_payload}\n"
+                        "Scrivi una risposta breve in italiano."
+                    ),
+                ),
+            ],
+            temperature=0.1,
+        )
+        return response.content.strip() or None
+    except Exception:
+        return None
+
+
+def _agent_search_archive(db: Session, query: str, *, limit: int) -> dict[str, Any]:
+    normalized = f"%{query.strip().lower()}%" if query.strip() else "%"
+    units = db.execute(
+        select(DocumentUnit)
+        .join(DocumentUnit.scan_unit)
+        .join(ScanUnit.document)
+        .outerjoin(DocumentUnit.document_type)
+        .options(
+            selectinload(DocumentUnit.scan_unit).selectinload(ScanUnit.document),
+            selectinload(DocumentUnit.document_type),
+            selectinload(DocumentUnit.topic_assignments).selectinload(DocumentUnitTopicAssignment.topic),
+            selectinload(DocumentUnit.entities),
+        )
+        .where(
+            or_(
+                func.lower(DocumentUnit.title).like(normalized),
+                func.lower(DocumentUnit.extracted_summary).like(normalized),
+                func.lower(Document.original_filename).like(normalized),
+            )
+        )
+        .order_by(Document.created_at.desc(), DocumentUnit.ordinal.asc())
+        .limit(limit)
+    ).scalars().all()
+    topics = _agent_list_topics(db, query, limit=min(limit, 8))
+    return {
+        "query": query,
+        "document_units": [_agent_document_unit_brief(unit) for unit in units],
+        "topics": topics,
+    }
+
+
+def _agent_list_topics(db: Session, query: str | None, *, limit: int) -> list[dict[str, Any]]:
+    stmt = select(Topic).where(Topic.is_active.is_(True)).order_by(Topic.updated_at.desc().nullslast(), Topic.created_at.desc())
+    if query and query.strip():
+        pattern = f"%{query.strip().lower()}%"
+        stmt = stmt.where(
+            or_(
+                func.lower(Topic.title).like(pattern),
+                func.lower(Topic.slug).like(pattern),
+                func.lower(Topic.description).like(pattern),
+            )
+        )
+    topics = db.execute(stmt.limit(limit)).scalars().all()
+    return [
+        {
+            "topic_id": str(topic.id),
+            "title": topic.title,
+            "slug": topic.slug,
+            "topic_class": topic.topic_class,
+            "topic_kind": topic.topic_kind,
+            "description": topic.description,
+        }
+        for topic in topics
+    ]
+
+
+def _agent_document(db: Session, document_id: str) -> dict[str, Any]:
+    try:
+        doc_uuid = uuid.UUID(document_id)
+    except ValueError as exc:
+        raise ValueError("Invalid document_id") from exc
+    document = db.get(Document, doc_uuid)
+    if document is None:
+        raise ValueError("Document not found")
+    units = db.execute(
+        select(DocumentUnit)
+        .join(DocumentUnit.scan_unit)
+        .where(ScanUnit.source_document_id == doc_uuid)
+        .options(
+            selectinload(DocumentUnit.scan_unit).selectinload(ScanUnit.document),
+            selectinload(DocumentUnit.document_type),
+            selectinload(DocumentUnit.topic_assignments).selectinload(DocumentUnitTopicAssignment.topic),
+            selectinload(DocumentUnit.specialist_results),
+        )
+        .order_by(DocumentUnit.start_page.asc(), DocumentUnit.ordinal.asc())
+    ).scalars().all()
+    return {
+        "document_id": str(document.id),
+        "original_filename": document.original_filename,
+        "created_at": document.created_at.isoformat() if document.created_at else None,
+        "document_units": [_agent_document_unit_brief(unit) for unit in units],
+    }
+
+
+def _agent_document_unit(db: Session, document_unit_id: str) -> dict[str, Any]:
+    try:
+        unit_uuid = uuid.UUID(document_unit_id)
+    except ValueError as exc:
+        raise ValueError("Invalid document_unit_id") from exc
+    unit = db.execute(
+        select(DocumentUnit)
+        .where(DocumentUnit.id == unit_uuid)
+        .options(
+            selectinload(DocumentUnit.scan_unit).selectinload(ScanUnit.document),
+            selectinload(DocumentUnit.document_type),
+            selectinload(DocumentUnit.topic_assignments).selectinload(DocumentUnitTopicAssignment.topic),
+            selectinload(DocumentUnit.entities),
+            selectinload(DocumentUnit.specialist_results),
+        )
+    ).scalar_one_or_none()
+    if unit is None:
+        raise ValueError("Document unit not found")
+    return _agent_document_unit_detail(unit)
+
+
+def _agent_page_text(db: Session, document_id: str, page_number: int) -> dict[str, Any]:
+    if page_number < 1:
+        raise ValueError("page_number must be >= 1")
+    try:
+        doc_uuid = uuid.UUID(document_id)
+    except ValueError as exc:
+        raise ValueError("Invalid document_id") from exc
+    ocr = db.execute(
+        select(OCRResult)
+        .where(OCRResult.document_id == doc_uuid)
+        .order_by(OCRResult.created_at.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if ocr is None:
+        raise ValueError("OCR result not found")
+    return {
+        "document_id": document_id,
+        "page_number": page_number,
+        "page_count": ocr.page_count,
+        "text": _extract_ocr_page_text(ocr, page_number)[:5000],
+    }
+
+
+def _agent_document_unit_brief(unit: DocumentUnit) -> dict[str, Any]:
+    document = unit.scan_unit.document if unit.scan_unit else None
+    return {
+        "document_unit_id": str(unit.id),
+        "document_id": str(document.id) if document else None,
+        "original_filename": document.original_filename if document else None,
+        "title": unit.title,
+        "document_type_code": unit.document_type.code if unit.document_type else None,
+        "pages": [unit.start_page, unit.end_page],
+        "summary": (unit.extracted_summary or "")[:700] or None,
+        "review_status": unit.review_status,
+        "topics": [
+            {
+                "topic_id": str(assignment.topic.id),
+                "title": assignment.topic.title,
+                "role": assignment.assignment_role,
+                "confidence": assignment.confidence,
+            }
+            for assignment in unit.topic_assignments
+            if assignment.topic and assignment.topic.is_active
+        ],
+    }
+
+
+def _agent_document_unit_detail(unit: DocumentUnit) -> dict[str, Any]:
+    detail = _agent_document_unit_brief(unit)
+    detail["entities"] = [
+        {
+            "type": entity.entity_type,
+            "value": entity.entity_value,
+            "normalized": entity.normalized_value,
+            "confidence": entity.confidence,
+            "pages": [entity.page_from, entity.page_to],
+        }
+        for entity in unit.entities
+    ][:40]
+    detail["specialist_results"] = [
+        _agent_specialist_result_summary(result)
+        for result in sorted(unit.specialist_results, key=lambda item: item.created_at, reverse=True)
+    ][:8]
+    return detail
+
+
+def _agent_specialist_result_summary(result: SpecialistResult) -> dict[str, Any]:
+    payload = result.result_json or {}
+    summary_view = payload.get("summary_view") if isinstance(payload, dict) else None
+    raw_tables = payload.get("raw_tables") if isinstance(payload, dict) else None
+    return {
+        "result_id": str(result.id),
+        "specialist_type": result.specialist_type,
+        "review_status": result.review_status,
+        "confidence": result.confidence,
+        "summary": payload.get("summary") if isinstance(payload, dict) else None,
+        "statement_type": payload.get("statement_type") if isinstance(payload, dict) else None,
+        "period": {
+            "from": payload.get("accounting_period_from") if isinstance(payload, dict) else None,
+            "to": payload.get("accounting_period_to") if isinstance(payload, dict) else None,
+        },
+        "summary_view": {
+            "columns": (summary_view or {}).get("columns", [])[:30] if isinstance(summary_view, dict) else [],
+            "row_count": len((summary_view or {}).get("rows", [])) if isinstance(summary_view, dict) else 0,
+            "sample_rows": (summary_view or {}).get("rows", [])[:5] if isinstance(summary_view, dict) else [],
+            "explanation": (summary_view or {}).get("explanation") if isinstance(summary_view, dict) else None,
+        },
+        "raw_table_count": len(raw_tables) if isinstance(raw_tables, list) else None,
+    }
+
+
+def _extract_ocr_page_text(ocr: OCRResult, page_number: int) -> str:
+    structured = ocr.structured_json or {}
+    pages = structured.get("pages") if isinstance(structured, dict) else None
+    if isinstance(pages, list):
+        for page in pages:
+            if not isinstance(page, dict):
+                continue
+            current = page.get("page_number") or page.get("page") or page.get("index")
+            if current == page_number or current == page_number - 1:
+                text = page.get("text") or page.get("markdown") or page.get("content")
+                if isinstance(text, str) and text.strip():
+                    return text
+    # Last resort for OCR engines that only expose full text.
+    if ocr.page_count <= 1:
+        return ocr.full_text or ocr.markdown_text or ""
+    return ocr.markdown_text or ocr.full_text or ""
 
 
 def _plan_accounting_question(

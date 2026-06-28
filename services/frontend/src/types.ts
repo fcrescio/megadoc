@@ -320,6 +320,47 @@ export interface KnowledgeSearchResult {
   document_units: KnowledgeSearchDocumentHit[];
 }
 
+export interface KnowledgeAgentRequest {
+  question: string;
+  max_steps?: number;
+  allow_vision?: boolean;
+}
+
+export interface KnowledgeAgentTraceStep {
+  step: number;
+  action: string;
+  reasoning: string | null;
+  input: Record<string, unknown>;
+  output: unknown;
+  error: string | null;
+}
+
+export interface KnowledgeAgentCitation {
+  document_id: string | null;
+  document_unit_id: string | null;
+  original_filename: string | null;
+  title: string | null;
+  page_from: number | null;
+  page_to: number | null;
+  quote: string | null;
+}
+
+export interface KnowledgeAgentVisionRequest {
+  document_id: string;
+  page_number: number;
+  reason: string | null;
+}
+
+export interface KnowledgeAgentResponse {
+  status: string;
+  answer: string;
+  confidence: number | null;
+  tool_trace: KnowledgeAgentTraceStep[];
+  citations: KnowledgeAgentCitation[];
+  vision_requests: KnowledgeAgentVisionRequest[];
+  model: string | null;
+}
+
 export interface SpecialistUtilityBillSummary {
   result_id: string;
   document_unit_id: string;

@@ -8,6 +8,7 @@ import {
   useKnowledgeNode,
   useKnowledgeNodes,
   useKnowledgeSearch,
+  useKnowledgeAgentChat,
   useMergeCanonicalEntity,
   useKnowledgeTopic,
   useKnowledgeTopics,
@@ -39,7 +40,141 @@ const tabClass = (current: boolean) =>
     current
       ? 'border-cyan-300/35 bg-cyan-400/15 text-cyan-100'
       : 'border-white/10 bg-white/5 text-slate-300 hover:bg-white/10'
-  }`;
+    }`;
+
+/* ── Agent Panel ── */
+
+interface AgentPanelProps {
+  onOpenDocument: (documentId: string) => void;
+}
+
+export function AgentPanel({ onOpenDocument }: AgentPanelProps) {
+  const [question, setQuestion] = useState('');
+  const [allowVision, setAllowVision] = useState(false);
+  const agent = useKnowledgeAgentChat();
+  const result = agent.data;
+
+  const ask = () => {
+    const trimmed = question.trim();
+    if (!trimmed) return;
+    agent.mutate({ question: trimmed, allow_vision: allowVision, max_steps: 8 });
+  };
+
+  return (
+    <div className="grid h-full min-h-0 gap-3 lg:grid-cols-[0.85fr_1.15fr]">
+      <div className="flex min-h-0 flex-col gap-3 rounded-2xl border border-white/10 bg-slate-950/35 p-4">
+        <div>
+          <p className="text-sm font-semibold text-white">Dialogo con l'archivio</p>
+          <p className="mt-1 text-xs text-slate-400">
+            L'agente usa tool read-only sulla base dati e restituisce traccia, citazioni e richieste vision.
+          </p>
+        </div>
+        <textarea
+          value={question}
+          onChange={(event) => setQuestion(event.target.value)}
+          placeholder="Esempio: quali documenti parlano dell'appartamento di Pisa e quali hanno tabelle contabili?"
+          className="min-h-[11rem] flex-1 resize-none rounded-2xl border border-white/10 bg-slate-900 p-3 text-sm text-white outline-none placeholder:text-slate-500"
+        />
+        <label className="flex items-start gap-2 text-xs text-slate-300">
+          <input
+            type="checkbox"
+            checked={allowVision}
+            onChange={(event) => setAllowVision(event.target.checked)}
+            className="mt-0.5"
+          />
+          <span>Consenti all'agente di chiedere pagine da analizzare con vision quando il testo OCR non basta.</span>
+        </label>
+        <button
+          onClick={ask}
+          disabled={agent.isPending || question.trim().length < 3}
+          className="rounded-full border border-cyan-300/35 bg-cyan-400/15 px-4 py-2 text-sm text-cyan-100 disabled:opacity-40"
+        >
+          {agent.isPending ? 'Interrogo...' : 'Chiedi'}
+        </button>
+        {agent.error && (
+          <p className="rounded-xl border border-rose-300/25 bg-rose-400/10 p-3 text-sm text-rose-100">
+            {(agent.error as Error).message}
+          </p>
+        )}
+      </div>
+
+      <div className="min-h-0 overflow-y-auto rounded-2xl border border-white/10 bg-slate-950/35 p-4">
+        {!result ? (
+          <p className="text-sm text-slate-400">Fai una domanda per vedere risposta e strumenti usati.</p>
+        ) : (
+          <div className="space-y-4">
+            <section className="rounded-2xl border border-cyan-300/20 bg-cyan-400/10 p-4">
+              <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-cyan-100">
+                <span>{result.status}</span>
+                {result.model && <span>modello: {result.model}</span>}
+                {result.confidence !== null && <span>{Math.round(result.confidence * 100)}% confidenza</span>}
+              </div>
+              <p className="whitespace-pre-wrap text-sm leading-6 text-white">{result.answer}</p>
+            </section>
+
+            {result.citations.length > 0 && (
+              <section>
+                <p className="mb-2 text-sm font-semibold text-white">Fonti</p>
+                <div className="grid gap-2 md:grid-cols-2">
+                  {result.citations.map((citation, index) => (
+                    <button
+                      key={`${citation.document_unit_id ?? citation.document_id}-${index}`}
+                      onClick={() => citation.document_id && onOpenDocument(citation.document_id)}
+                      disabled={!citation.document_id}
+                      className="rounded-xl border border-white/10 bg-white/5 p-3 text-left text-sm hover:bg-white/10 disabled:opacity-60"
+                    >
+                      <p className="truncate text-cyan-200">{citation.title || citation.original_filename || 'Documento'}</p>
+                      <p className="mt-1 text-xs text-slate-400">
+                        Pagine {citation.page_from ?? '?'}-{citation.page_to ?? citation.page_from ?? '?'}
+                      </p>
+                      {citation.quote && <p className="mt-2 line-clamp-3 text-xs text-slate-300">{citation.quote}</p>}
+                    </button>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {result.vision_requests.length > 0 && (
+              <section className="rounded-2xl border border-amber-300/20 bg-amber-400/10 p-3">
+                <p className="text-sm font-semibold text-amber-100">Pagine richieste per vision</p>
+                <div className="mt-2 space-y-2">
+                  {result.vision_requests.map((request) => (
+                    <button
+                      key={`${request.document_id}-${request.page_number}`}
+                      onClick={() => onOpenDocument(request.document_id)}
+                      className="block w-full rounded-xl border border-amber-300/15 bg-slate-950/25 p-3 text-left text-xs text-amber-50"
+                    >
+                      Documento {request.document_id}, pagina {request.page_number}
+                      {request.reason && <span className="mt-1 block text-amber-100/80">{request.reason}</span>}
+                    </button>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            <section>
+              <p className="mb-2 text-sm font-semibold text-white">Trace tool</p>
+              <div className="space-y-2">
+                {result.tool_trace.map((step) => (
+                  <details key={step.step} className="rounded-xl border border-white/10 bg-white/5 p-3">
+                    <summary className="cursor-pointer text-sm text-slate-200">
+                      #{step.step} {step.action}
+                      {step.error && <span className="ml-2 text-rose-200">errore</span>}
+                    </summary>
+                    {step.reasoning && <p className="mt-2 text-xs text-slate-400">{step.reasoning}</p>}
+                    <pre className="mt-2 max-h-64 overflow-auto rounded-lg bg-slate-950/70 p-3 text-xs text-slate-300">
+                      {JSON.stringify({ input: step.input, output: step.output, error: step.error }, null, 2)}
+                    </pre>
+                  </details>
+                ))}
+              </div>
+            </section>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 /* ── Facts Panel ── */
 
