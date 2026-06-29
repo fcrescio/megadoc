@@ -2148,7 +2148,8 @@ def chat_with_knowledge_agent(
             content=(
                 "Sei un agente read-only che interroga un archivio documentale tramite tool. "
                 "Non inventare fatti: usa i tool per cercare documenti, topic, testo OCR e risultati specialistici. "
-                "Quando rispondi cita document_id/document_unit_id e pagine se disponibili. "
+                "Prima di rispondere su un documento devi leggere il testo OCR con get_page_text per le pagine rilevanti. "
+                "La final_answer deve includere citations con document_id e pagina per ogni affermazione documentale. "
                 "Se il testo OCR non basta e servirebbe vedere la pagina, usa request_page_vision. "
                 "La vision e' disponibile solo come richiesta strutturata: non fingere di aver visto immagini."
             ),
@@ -2186,14 +2187,15 @@ def chat_with_knowledge_agent(
             exclude_none=True,
         )
         if action.action == "final_answer":
-            if not action.answer or not action.answer.strip():
+            final_error = _validate_knowledge_agent_final(action, trace)
+            if final_error:
                 trace.append(
                     KnowledgeAgentTraceStep(
                         step=step,
                         action="invalid_final_answer",
                         reasoning=action.reasoning,
                         input=action_input,
-                        error="final_answer requires a non-empty answer",
+                        error=final_error,
                     )
                 )
                 messages.append(ChatMessage(role="assistant", content=action.model_dump_json(exclude_none=True)))
@@ -2201,8 +2203,10 @@ def chat_with_knowledge_agent(
                     ChatMessage(
                         role="user",
                         content=(
-                            "La final_answer non e' valida: il campo answer deve contenere una risposta testuale. "
-                            "Produci final_answer con answer non vuoto e cita le fonti quando disponibili."
+                            f"La final_answer non e' valida: {final_error}. "
+                            "Prima leggi le pagine rilevanti con get_page_text se necessario, poi produci una "
+                            "final_answer con answer non vuoto e citations contenenti document_id, page_from/page_to "
+                            "e quote breve."
                         ),
                     )
                 )
@@ -2250,20 +2254,12 @@ def chat_with_knowledge_agent(
         )
 
     if final_action is None:
-        synthesized = _synthesize_knowledge_agent_answer(provider, payload.question, trace)
-        if synthesized:
-            return KnowledgeAgentChatResponse(
-                status="answered_synthesized",
-                answer=synthesized,
-                confidence=None,
-                tool_trace=trace,
-                citations=[],
-                vision_requests=vision_requests,
-                model=provider.model_name,
-            )
         return KnowledgeAgentChatResponse(
             status="incomplete",
-            answer="Non sono riuscito a produrre una risposta affidabile con i tool disponibili.",
+            answer=(
+                "Non sono riuscito a produrre una risposta con fonti pagina verificabili. "
+                "Controlla il trace: l'agente deve leggere le pagine con get_page_text prima di rispondere."
+            ),
             confidence=None,
             tool_trace=trace,
             citations=[],
@@ -2285,6 +2281,55 @@ def chat_with_knowledge_agent(
         vision_requests=vision_requests,
         model=provider.model_name,
     )
+
+
+def _validate_knowledge_agent_final(
+    action: _KnowledgeAgentAction,
+    trace: list[KnowledgeAgentTraceStep],
+) -> str | None:
+    if not action.answer or not action.answer.strip():
+        return "final_answer requires a non-empty answer"
+
+    citations = [
+        KnowledgeAgentCitation.model_validate(item)
+        for item in action.citations
+        if isinstance(item, dict) and any(value is not None for value in item.values())
+    ]
+    if not citations:
+        return "final_answer requires at least one citation"
+
+    for citation in citations:
+        if not citation.document_id:
+            return "each citation requires document_id"
+        if citation.page_from is None and citation.page_to is None:
+            return "each citation requires page_from or page_to"
+        if not _trace_has_page_text_for_citation(trace, citation):
+            return "each cited document/page must have been read with get_page_text before final_answer"
+    return None
+
+
+def _trace_has_page_text_for_citation(
+    trace: list[KnowledgeAgentTraceStep],
+    citation: KnowledgeAgentCitation,
+) -> bool:
+    page_from = citation.page_from if citation.page_from is not None else citation.page_to
+    page_to = citation.page_to if citation.page_to is not None else citation.page_from
+    if page_from is None or page_to is None:
+        return False
+
+    for step in trace:
+        if step.action != "get_page_text" or step.error:
+            continue
+        output = step.output
+        if not isinstance(output, dict):
+            continue
+        if str(output.get("document_id")) != citation.document_id:
+            continue
+        page_number = output.get("page_number")
+        if isinstance(page_number, int) and page_from <= page_number <= page_to:
+            text = output.get("text")
+            return isinstance(text, str) and bool(text.strip())
+    return False
 
 
 @router.post("/accounting/ask", response_model=AccountingAskResponse)
@@ -2486,46 +2531,6 @@ def _run_knowledge_agent_tool(
             "note": "Il provider chat corrente accetta solo testo; la richiesta e' esposta alla UI e alla futura esecuzione multimodale.",
         }
     raise ValueError(f"Unsupported action: {action.action}")
-
-
-def _synthesize_knowledge_agent_answer(
-    provider: OpenAICompatibleProvider,
-    question: str,
-    trace: list[KnowledgeAgentTraceStep],
-) -> str | None:
-    trace_payload = [
-        {
-            "step": step.step,
-            "action": step.action,
-            "output": step.output,
-            "error": step.error,
-        }
-        for step in trace[-8:]
-    ]
-    try:
-        response = provider.chat(
-            [
-                ChatMessage(
-                    role="system",
-                    content=(
-                        "Sei un agente read-only che deve rispondere usando solo i risultati tool forniti. "
-                        "Se i risultati non bastano, dichiaralo esplicitamente. Non inventare dati."
-                    ),
-                ),
-                ChatMessage(
-                    role="user",
-                    content=(
-                        f"Domanda: {question}\n"
-                        f"Trace tool JSON: {trace_payload}\n"
-                        "Scrivi una risposta breve in italiano."
-                    ),
-                ),
-            ],
-            temperature=0.1,
-        )
-        return response.content.strip() or None
-    except Exception:
-        return None
 
 
 def _agent_search_archive(db: Session, query: str, *, limit: int) -> dict[str, Any]:
