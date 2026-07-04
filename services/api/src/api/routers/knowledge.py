@@ -146,6 +146,7 @@ class _KnowledgeAgentAction(BaseModel):
         "list_topics",
         "get_document_unit",
         "get_document",
+        "search_document_text",
         "get_page_text",
         "request_page_vision",
         "final_answer",
@@ -164,7 +165,7 @@ class _KnowledgeAgentAction(BaseModel):
 
 class KnowledgeAgentChatRequest(BaseModel):
     question: str = Field(..., min_length=3, max_length=4000)
-    max_steps: int = Field(default=8, ge=1, le=12)
+    max_steps: int = Field(default=12, ge=1, le=20)
     allow_vision: bool = Field(default=False)
 
 
@@ -2191,6 +2192,8 @@ def chat_with_knowledge_agent(
                 "Non inventare fatti: usa i tool per cercare documenti, topic, testo OCR e risultati specialistici. "
                 "Per domande naturali o concettuali usa semantic_search prima della ricerca keyword. "
                 "Prima di rispondere su un documento devi leggere il testo OCR con get_page_text per le pagine rilevanti. "
+                "Dopo aver identificato un documento lungo, usa search_document_text per localizzare le pagine rilevanti "
+                "invece di sfogliarlo pagina per pagina. "
                 "La final_answer deve includere answer non vuoto e citations con document_id, page_from/page_to "
                 "e quote breve per ogni affermazione documentale. Non mettere la risposta solo in reasoning. "
                 "Se il testo OCR non basta e servirebbe vedere la pagina, usa request_page_vision. "
@@ -3025,6 +3028,10 @@ def _run_knowledge_agent_tool(
         if not action.document_id:
             raise ValueError("document_id is required")
         return _agent_document(db, action.document_id)
+    if action.action == "search_document_text":
+        if not action.document_id:
+            raise ValueError("document_id is required")
+        return _agent_search_document_text(db, action.document_id, action.query or "", limit=limit)
     if action.action == "get_page_text":
         if not action.document_id or action.page_number is None:
             raise ValueError("document_id and page_number are required")
@@ -3172,6 +3179,64 @@ def _agent_page_text(db: Session, document_id: str, page_number: int) -> dict[st
         "page_count": ocr.page_count,
         "text": _extract_ocr_page_text(ocr, page_number)[:5000],
     }
+
+
+def _agent_search_document_text(db: Session, document_id: str, query: str, *, limit: int) -> dict[str, Any]:
+    if not query.strip():
+        return {"document_id": document_id, "query": query, "hits": [], "warning": "query is empty"}
+    try:
+        doc_uuid = uuid.UUID(document_id)
+    except ValueError as exc:
+        raise ValueError("Invalid document_id") from exc
+    ocr = db.execute(
+        select(OCRResult)
+        .where(OCRResult.document_id == doc_uuid)
+        .order_by(OCRResult.created_at.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if ocr is None:
+        raise ValueError("OCR result not found")
+
+    terms = [term for term in re.split(r"\W+", query.lower()) if len(term) >= 3]
+    hits: list[dict[str, Any]] = []
+    for page_number in range(1, max(ocr.page_count, 1) + 1):
+        page_text = _extract_ocr_page_text(ocr, page_number)
+        if not page_text.strip():
+            continue
+        hit = _text_page_hit(page_text, terms)
+        if hit is None:
+            continue
+        start, end, score = hit
+        snippet = page_text[max(0, start - 180) : min(len(page_text), end + 180)]
+        hits.append(
+            {
+                "document_id": document_id,
+                "page_number": page_number,
+                "score": score,
+                "snippet": " ".join(snippet.split()),
+            }
+        )
+    hits.sort(key=lambda item: (-item["score"], item["page_number"]))
+    return {"document_id": document_id, "query": query, "hits": hits[:limit]}
+
+
+def _text_page_hit(text: str, terms: list[str]) -> tuple[int, int, int] | None:
+    if not terms:
+        return None
+    lowered = text.lower()
+    positions: list[tuple[int, int]] = []
+    matched_terms = 0
+    for term in terms:
+        position = lowered.find(term)
+        if position < 0:
+            continue
+        matched_terms += 1
+        positions.append((position, position + len(term)))
+    if not positions:
+        return None
+    start = min(position[0] for position in positions)
+    end = max(position[1] for position in positions)
+    return start, end, matched_terms
 
 
 def _agent_document_unit_brief(unit: DocumentUnit) -> dict[str, Any]:
