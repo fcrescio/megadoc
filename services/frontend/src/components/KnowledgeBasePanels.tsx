@@ -69,7 +69,7 @@ export function AgentPanel({ onOpenDocument }: AgentPanelProps) {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [messages, liveSteps.length, isStreaming]);
+  }, [messages.length]);
 
   const ask = async () => {
     const question = draft.trim();
@@ -251,9 +251,9 @@ function ChatMessageCard({
           {result?.status && <span className="ml-2 normal-case text-slate-500">{result.status}</span>}
           {result?.model && <span className="ml-2 normal-case text-slate-500">{result.model}</span>}
         </div>
+        {liveSteps.length > 0 && <AgentTrace steps={liveSteps} compact />}
         <p className="whitespace-pre-wrap text-sm leading-6">{message.content}</p>
         {result && <AgentResultDetails result={result} onOpenDocument={onOpenDocument} />}
-        {liveSteps.length > 0 && <AgentTrace steps={liveSteps} compact />}
       </div>
     </div>
   );
@@ -315,8 +315,8 @@ function AgentTrace({ steps, compact = false }: { steps: KnowledgeAgentTraceStep
   if (steps.length === 0) return null;
   return (
     <section>
-      <p className="mb-2 text-xs font-semibold text-white">{compact ? 'Step in corso' : 'Trace tool'}</p>
-      <div className="space-y-2">
+      <p className="mb-2 text-xs font-semibold text-white">{compact ? 'Ragionamento in corso' : 'Trace tool'}</p>
+      <div className={`space-y-2 ${compact ? 'mb-3 max-h-72 overflow-y-auto rounded-xl border border-white/10 bg-slate-950/35 p-2' : ''}`}>
         {steps.map((step) => (
           <details key={`${step.step}-${step.action}`} className="rounded-xl border border-white/10 bg-white/5 p-3" open={compact}>
             <summary className="cursor-pointer text-sm text-slate-200">

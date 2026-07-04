@@ -100,15 +100,15 @@ function App() {
     <div className="min-h-screen text-slate-100 bg-slate-900">
       <div className="absolute inset-0 pointer-events-none opacity-20 bg-[linear-gradient(rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-[size:32px_32px]" />
 
-      <header className="sticky top-0 z-20 bg-slate-950 border-b border-slate-700">
-        <div className="max-w-7xl mx-auto px-5 py-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+      <header className="sticky top-0 z-20 border-b border-slate-700 bg-slate-950 lg:fixed lg:inset-y-0 lg:left-0 lg:w-60 lg:border-b-0 lg:border-r">
+        <div className="mx-auto flex max-w-7xl flex-col gap-3 px-5 py-3 lg:h-full lg:px-4 lg:py-5">
           <div>
             <p className="text-xs uppercase tracking-[0.35em] text-cyan-300/80">Megadoc</p>
             <h1 className="text-lg font-semibold text-white">Console documentale</h1>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3 justify-end">
-            <nav className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-3 lg:min-h-0 lg:flex-1 lg:flex-col lg:items-stretch lg:justify-start">
+            <nav className="flex flex-wrap items-center gap-2 lg:flex-col lg:items-stretch">
               {[
                 { id: 'documents', label: 'Documenti' },
                 { id: 'knowledge', label: 'Conoscenza' },
@@ -118,7 +118,7 @@ function App() {
                 <button
                   key={item.id}
                   onClick={() => openView(item.id as View)}
-                  className={`px-4 py-2 rounded-full text-sm font-medium transition ${
+                  className={`rounded-full px-4 py-2 text-sm font-medium transition lg:w-full lg:rounded-xl lg:text-left ${
                     activeView === item.id
                       ? 'bg-cyan-400/15 text-cyan-200 border border-cyan-300/30'
                       : 'bg-white/5 text-slate-300 border border-white/10 hover:bg-white/10'
@@ -133,7 +133,7 @@ function App() {
         </div>
       </header>
 
-      <main className="relative max-w-7xl mx-auto px-5 py-4">
+      <main className="relative mx-auto max-w-7xl px-5 py-4 lg:ml-60 lg:max-w-none lg:px-4">
         {!route.selectedDoc && route.view !== 'knowledge' && (
           <section className="mb-8 rounded-xl border border-slate-700 bg-slate-800 overflow-hidden">
             <div className="grid gap-6 lg:grid-cols-[1.4fr_0.9fr] p-6 lg:p-8">

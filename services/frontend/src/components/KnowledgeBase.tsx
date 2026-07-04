@@ -33,7 +33,7 @@ function KnowledgeBase({ onOpenDocument }: Props) {
   const proposals = useTopicProposals();
 
   const tabClass = (current: boolean) =>
-    `rounded-full border px-4 py-2 text-sm transition ${
+    `rounded-full border px-4 py-2 text-sm transition lg:w-full lg:rounded-xl lg:text-left ${
       current
         ? 'border-cyan-300/35 bg-cyan-400/15 text-cyan-100'
         : 'border-white/10 bg-white/5 text-slate-300 hover:bg-white/10'
@@ -52,10 +52,10 @@ function KnowledgeBase({ onOpenDocument }: Props) {
   }
 
   return (
-    <div className="flex h-[calc(100vh-7.75rem)] min-h-[38rem] flex-col gap-3">
-      <section className="shrink-0 rounded-lg border border-slate-700 bg-slate-800 p-4">
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="flex min-w-[16rem] flex-1 items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-2.5">
+    <div className="grid h-[calc(100vh-7.75rem)] min-h-[38rem] gap-3 lg:h-[calc(100vh-2rem)] lg:grid-cols-[18rem_minmax(0,1fr)]">
+      <aside className="flex min-h-0 flex-col rounded-lg border border-slate-700 bg-slate-800 p-4">
+        <div className="flex shrink-0 flex-wrap items-center gap-3 lg:block">
+          <div className="flex min-w-[16rem] flex-1 items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-2.5 lg:min-w-0">
             <span className="text-cyan-200">⌕</span>
             <input
               value={searchInput}
@@ -69,7 +69,7 @@ function KnowledgeBase({ onOpenDocument }: Props) {
               </button>
             )}
           </div>
-          <div className="flex flex-wrap gap-2 text-xs">
+          <div className="flex flex-wrap gap-2 text-xs lg:mt-3 lg:grid lg:grid-cols-2">
             <span className="rounded-full border border-indigo-300/20 bg-indigo-400/10 px-3 py-2 text-indigo-100">
               {graphStats.data?.nodes ?? 0} nodi
             </span>
@@ -84,7 +84,7 @@ function KnowledgeBase({ onOpenDocument }: Props) {
             </button>
           </div>
         </div>
-        <nav className="mt-3 flex flex-wrap gap-2">
+        <nav className="mt-3 flex shrink-0 flex-wrap gap-2 lg:min-h-0 lg:flex-1 lg:flex-col lg:overflow-y-auto">
           {[
             { id: 'facts' as Panel, label: 'Fatti' },
             { id: 'agent' as Panel, label: 'Dialogo' },
@@ -99,9 +99,9 @@ function KnowledgeBase({ onOpenDocument }: Props) {
             </button>
           ))}
         </nav>
-      </section>
+      </aside>
 
-      <section className="min-h-0 flex-1 overflow-hidden rounded-lg border border-slate-700 bg-slate-800 p-4">
+      <section className="min-h-0 overflow-hidden rounded-lg border border-slate-700 bg-slate-800 p-3 lg:p-4">
         {panel === 'facts' && <FactsPanel onOpenDocument={onOpenDocument} deferredSearch={deferredSearch} />}
         {panel === 'agent' && <AgentPanel onOpenDocument={onOpenDocument} />}
         {panel === 'specialists' && <SpecialistsPanel onOpenDocument={onOpenDocument} deferredSearch={deferredSearch} />}
