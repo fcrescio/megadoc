@@ -21,6 +21,89 @@ interface Props {
 
 type Panel = 'agent' | 'facts' | 'specialists' | 'topics' | 'entities' | 'reviews' | 'cleanup';
 
+function PanelIcon({ icon }: { icon: Panel }) {
+  const common = {
+    className: 'mx-auto h-4 w-4',
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 1.9,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+    'aria-hidden': true,
+  };
+  if (icon === 'facts') {
+    return (
+      <svg {...common}>
+        <path d="M6 6h12" />
+        <path d="M6 12h12" />
+        <path d="M6 18h8" />
+        <circle cx="4" cy="6" r="1" />
+        <circle cx="4" cy="12" r="1" />
+        <circle cx="4" cy="18" r="1" />
+      </svg>
+    );
+  }
+  if (icon === 'agent') {
+    return (
+      <svg {...common}>
+        <path d="M5 6.75A2.75 2.75 0 0 1 7.75 4h8.5A2.75 2.75 0 0 1 19 6.75v5.5A2.75 2.75 0 0 1 16.25 15H11l-4 4v-4.1A2.75 2.75 0 0 1 5 12.25z" />
+        <path d="M9 9h.01" />
+        <path d="M12 9h.01" />
+        <path d="M15 9h.01" />
+      </svg>
+    );
+  }
+  if (icon === 'specialists') {
+    return (
+      <svg {...common}>
+        <path d="M12 3.5v4" />
+        <path d="M12 16.5v4" />
+        <path d="M4.5 12h4" />
+        <path d="M15.5 12h4" />
+        <circle cx="12" cy="12" r="4.5" />
+        <path d="m8.8 8.8 6.4 6.4" />
+        <path d="m15.2 8.8-6.4 6.4" />
+      </svg>
+    );
+  }
+  if (icon === 'topics') {
+    return (
+      <svg {...common}>
+        <path d="M4 7.5h7l2 2h7v7A2.5 2.5 0 0 1 17.5 19h-11A2.5 2.5 0 0 1 4 16.5z" />
+        <path d="M4 7.5V6a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v1.5" />
+      </svg>
+    );
+  }
+  if (icon === 'entities') {
+    return (
+      <svg {...common}>
+        <circle cx="12" cy="8" r="3" />
+        <path d="M5.5 20a6.5 6.5 0 0 1 13 0" />
+      </svg>
+    );
+  }
+  if (icon === 'reviews') {
+    return (
+      <svg {...common}>
+        <path d="M6 4h9l3 3v13H6z" />
+        <path d="M15 4v3h3" />
+        <path d="m8.5 13 2 2 4-5" />
+      </svg>
+    );
+  }
+  return (
+    <svg {...common}>
+      <path d="M5 6h14" />
+      <path d="M9 6V4h6v2" />
+      <path d="M8 10v8" />
+      <path d="M12 10v8" />
+      <path d="M16 10v8" />
+      <path d="M6.5 6 7.5 20h9L17.5 6" />
+    </svg>
+  );
+}
+
 function KnowledgeBase({ onOpenDocument }: Props) {
   const [panel, setPanel] = useState<Panel>('facts');
   const [searchInput, setSearchInput] = useState('');
@@ -107,16 +190,18 @@ function KnowledgeBase({ onOpenDocument }: Props) {
         </div>
         <nav className="mt-3 flex shrink-0 flex-wrap gap-2 lg:min-h-0 lg:flex-1 lg:flex-col lg:overflow-y-auto">
           {[
-            { id: 'facts' as Panel, label: 'Fatti', short: 'F' },
-            { id: 'agent' as Panel, label: 'Dialogo', short: 'D' },
-            { id: 'specialists' as Panel, label: 'Specialisti', short: 'S' },
-            { id: 'topics' as Panel, label: 'Topic', short: 'T' },
-            { id: 'entities' as Panel, label: 'Entità', short: 'E' },
-            { id: 'reviews' as Panel, label: 'Revisioni', short: 'R' },
-            { id: 'cleanup' as Panel, label: 'Cleanup', short: 'C' },
+            { id: 'facts' as Panel, label: 'Fatti' },
+            { id: 'agent' as Panel, label: 'Dialogo' },
+            { id: 'specialists' as Panel, label: 'Specialisti' },
+            { id: 'topics' as Panel, label: 'Topic' },
+            { id: 'entities' as Panel, label: 'Entità' },
+            { id: 'reviews' as Panel, label: 'Revisioni' },
+            { id: 'cleanup' as Panel, label: 'Cleanup' },
           ].map((tab) => (
             <button key={tab.id} onClick={() => setPanel(tab.id)} title={tab.label} className={tabClass(panel === tab.id)}>
-              <span className={isSideNavCollapsed ? 'hidden lg:inline' : 'hidden'}>{tab.short}</span>
+              <span className={isSideNavCollapsed ? 'hidden lg:inline' : 'hidden'}>
+                <PanelIcon icon={tab.id} />
+              </span>
               <span className={isSideNavCollapsed ? 'lg:hidden' : ''}>{tab.label}</span>
             </button>
           ))}

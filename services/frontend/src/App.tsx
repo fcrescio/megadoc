@@ -10,6 +10,7 @@ const ManualView = lazy(() => import('./components/ManualView'));
 
 type View = 'documents' | 'knowledge' | 'upload' | 'manual';
 type DocumentTab = 'info' | 'pdf' | 'ocr' | 'knowledge' | 'versions' | 'assets';
+type MainNavIcon = 'documents' | 'knowledge' | 'manual' | 'upload';
 
 interface RouteState {
   view: View;
@@ -47,6 +48,61 @@ function RouteFallback() {
     <div className="rounded-3xl border border-white/10 bg-slate-950/40 p-6 text-sm text-slate-300">
       Caricamento...
     </div>
+  );
+}
+
+function NavIcon({ icon }: { icon: MainNavIcon }) {
+  const common = {
+    className: 'mx-auto h-4 w-4',
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 1.9,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+    'aria-hidden': true,
+  };
+  if (icon === 'documents') {
+    return (
+      <svg {...common}>
+        <path d="M7 3.75h7l3 3v13.5H7z" />
+        <path d="M14 3.75v3h3" />
+        <path d="M9.5 11h5" />
+        <path d="M9.5 15h5" />
+      </svg>
+    );
+  }
+  if (icon === 'knowledge') {
+    return (
+      <svg {...common}>
+        <circle cx="12" cy="12" r="3" />
+        <circle cx="5" cy="7" r="2" />
+        <circle cx="19" cy="7" r="2" />
+        <circle cx="7" cy="19" r="2" />
+        <circle cx="17" cy="19" r="2" />
+        <path d="M7 8.2 10 11" />
+        <path d="m17 8.2-3 2.8" />
+        <path d="m8.4 17.4 2.2-3" />
+        <path d="m15.6 17.4-2.2-3" />
+      </svg>
+    );
+  }
+  if (icon === 'manual') {
+    return (
+      <svg {...common}>
+        <path d="M5 4.5h8a3 3 0 0 1 3 3v12H8a3 3 0 0 0-3 3z" />
+        <path d="M16 7.5h3v12h-3" />
+        <path d="M8 8h4" />
+        <path d="M8 12h5" />
+      </svg>
+    );
+  }
+  return (
+    <svg {...common}>
+      <path d="M12 16V4" />
+      <path d="m7 9 5-5 5 5" />
+      <path d="M5 16v3.25A1.75 1.75 0 0 0 6.75 21h10.5A1.75 1.75 0 0 0 19 19.25V16" />
+    </svg>
   );
 }
 
@@ -129,10 +185,10 @@ function App() {
           <div className="flex flex-wrap items-center justify-end gap-3 lg:min-h-0 lg:flex-1 lg:flex-col lg:items-stretch lg:justify-start">
             <nav className="flex flex-wrap items-center gap-2 lg:flex-col lg:items-stretch">
               {[
-                { id: 'documents', label: 'Documenti', short: 'D' },
-                { id: 'knowledge', label: 'Conoscenza', short: 'K' },
-                { id: 'manual', label: 'Manuale', short: 'M' },
-                { id: 'upload', label: 'Caricamento', short: 'U' },
+                { id: 'documents', label: 'Documenti', icon: 'documents' },
+                { id: 'knowledge', label: 'Conoscenza', icon: 'knowledge' },
+                { id: 'manual', label: 'Manuale', icon: 'manual' },
+                { id: 'upload', label: 'Caricamento', icon: 'upload' },
               ].map((item) => (
                 <button
                   key={item.id}
@@ -146,7 +202,9 @@ function App() {
                       : 'border border-white/10 bg-white/5 text-slate-300 hover:border-cyan-300/25 hover:bg-cyan-300/10 hover:text-white'
                   }`}
                 >
-                  <span className={isMainNavCollapsed ? 'hidden lg:inline' : 'hidden'}>{item.short}</span>
+                  <span className={isMainNavCollapsed ? 'hidden lg:inline' : 'hidden'}>
+                    <NavIcon icon={item.icon as MainNavIcon} />
+                  </span>
                   <span className={isMainNavCollapsed ? 'lg:hidden' : ''}>{item.label}</span>
                 </button>
               ))}
