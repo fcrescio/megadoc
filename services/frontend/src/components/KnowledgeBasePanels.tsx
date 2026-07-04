@@ -70,7 +70,7 @@ export function AgentPanel({ onOpenDocument }: AgentPanelProps) {
     const trimmed = question.trim();
     if (!trimmed) return;
     setSelectedRunId(null);
-    agent.mutate({ question: trimmed, allow_vision: allowVision, max_steps: 8 });
+    agent.mutate({ question: trimmed, allow_vision: allowVision, max_steps: 10 });
   };
 
   return (
