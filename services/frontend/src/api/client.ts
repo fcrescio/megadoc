@@ -24,6 +24,8 @@ import type {
   AccountingFactCorrectionResult,
   KnowledgeAgentRequest,
   KnowledgeAgentResponse,
+  KnowledgeAgentRunDetail,
+  KnowledgeAgentRunSummary,
   KnowledgeGraphStats,
   KnowledgeNodeSummary,
   KnowledgeNodeDetail,
@@ -176,6 +178,18 @@ export async function askKnowledgeAgent(payload: KnowledgeAgentRequest): Promise
     body: JSON.stringify(payload),
   });
   return handleResponse<KnowledgeAgentResponse>(response);
+}
+
+export async function getKnowledgeAgentRuns(limit = 25): Promise<KnowledgeAgentRunSummary[]> {
+  const params = new URLSearchParams();
+  params.set('limit', String(limit));
+  const response = await fetch(`${API_BASE}/knowledge/agent/runs?${params.toString()}`);
+  return handleResponse<KnowledgeAgentRunSummary[]>(response);
+}
+
+export async function getKnowledgeAgentRun(runId: string): Promise<KnowledgeAgentRunDetail> {
+  const response = await fetch(`${API_BASE}/knowledge/agent/runs/${runId}`);
+  return handleResponse<KnowledgeAgentRunDetail>(response);
 }
 
 export async function getSpecialistUtilityBills(options?: {

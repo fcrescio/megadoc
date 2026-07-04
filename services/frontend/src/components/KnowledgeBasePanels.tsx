@@ -9,6 +9,8 @@ import {
   useKnowledgeNodes,
   useKnowledgeSearch,
   useKnowledgeAgentChat,
+  useKnowledgeAgentRun,
+  useKnowledgeAgentRuns,
   useMergeCanonicalEntity,
   useKnowledgeTopic,
   useKnowledgeTopics,
@@ -31,6 +33,13 @@ function formatCurrency(value: number | null | undefined) {
   return new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(value);
 }
 
+function formatDateTime(value: string | null | undefined) {
+  if (!value) return 'n/d';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleString('it-IT');
+}
+
 function formatAssertionValue(assertion: KnowledgeAssertion) {
   return assertion.object_node_label ?? assertion.value_text ?? 'n/d';
 }
@@ -51,12 +60,16 @@ interface AgentPanelProps {
 export function AgentPanel({ onOpenDocument }: AgentPanelProps) {
   const [question, setQuestion] = useState('');
   const [allowVision, setAllowVision] = useState(false);
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const agent = useKnowledgeAgentChat();
-  const result = agent.data;
+  const runs = useKnowledgeAgentRuns(20);
+  const selectedRun = useKnowledgeAgentRun(selectedRunId);
+  const result = selectedRun.data ?? agent.data;
 
   const ask = () => {
     const trimmed = question.trim();
     if (!trimmed) return;
+    setSelectedRunId(null);
     agent.mutate({ question: trimmed, allow_vision: allowVision, max_steps: 8 });
   };
 
@@ -96,10 +109,46 @@ export function AgentPanel({ onOpenDocument }: AgentPanelProps) {
             {(agent.error as Error).message}
           </p>
         )}
+        <div className="min-h-0 flex-1 overflow-y-auto rounded-2xl border border-white/10 bg-slate-900/70 p-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <p className="text-sm font-semibold text-white">Ultimi dialoghi</p>
+            <button
+              onClick={() => runs.refetch()}
+              className="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-300 hover:bg-white/10"
+            >
+              Aggiorna
+            </button>
+          </div>
+          {runs.isLoading ? (
+            <p className="text-xs text-slate-400">Caricamento storico...</p>
+          ) : runs.data?.length ? (
+            <div className="space-y-2">
+              {runs.data.map((run) => (
+                <button
+                  key={run.id}
+                  onClick={() => setSelectedRunId(run.id)}
+                  className={`w-full rounded-xl border p-3 text-left hover:bg-white/10 ${
+                    selectedRunId === run.id ? 'border-cyan-300/35 bg-cyan-400/10' : 'border-white/10 bg-white/5'
+                  }`}
+                >
+                  <p className="line-clamp-2 text-xs font-medium text-slate-100">{run.question}</p>
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    {formatDateTime(run.created_at)} · {run.status} · {run.tool_step_count} tool · {run.citation_count} fonti
+                    {run.duration_ms !== null ? ` · ${run.duration_ms} ms` : ''}
+                  </p>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-slate-400">Nessun dialogo salvato.</p>
+          )}
+        </div>
       </div>
 
       <div className="min-h-0 overflow-y-auto rounded-2xl border border-white/10 bg-slate-950/35 p-4">
-        {!result ? (
+        {selectedRun.isFetching && selectedRunId ? (
+          <p className="text-sm text-slate-400">Caricamento dialogo...</p>
+        ) : !result ? (
           <p className="text-sm text-slate-400">Fai una domanda per vedere risposta e strumenti usati.</p>
         ) : (
           <div className="space-y-4">
@@ -108,7 +157,10 @@ export function AgentPanel({ onOpenDocument }: AgentPanelProps) {
                 <span>{result.status}</span>
                 {result.model && <span>modello: {result.model}</span>}
                 {result.confidence !== null && <span>{Math.round(result.confidence * 100)}% confidenza</span>}
+                {'run_id' in result && result.run_id && <span>run: {result.run_id}</span>}
+                {'id' in result && <span>run: {result.id}</span>}
               </div>
+              {'question' in result && <p className="mb-3 text-sm text-cyan-50/80">Domanda: {result.question}</p>}
               <p className="whitespace-pre-wrap text-sm leading-6 text-white">{result.answer}</p>
             </section>
 

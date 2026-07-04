@@ -24,6 +24,8 @@ import type {
   AccountingFactCorrectionResult,
   KnowledgeAgentRequest,
   KnowledgeAgentResponse,
+  KnowledgeAgentRunDetail,
+  KnowledgeAgentRunSummary,
   KnowledgeGraphStats,
   KnowledgeNodeSummary,
   KnowledgeNodeDetail,
@@ -76,6 +78,8 @@ import {
   getKnowledgeNode,
   getKnowledgeAssertions,
   askKnowledgeAgent,
+  getKnowledgeAgentRun,
+  getKnowledgeAgentRuns,
   getManual,
   createManualComment,
   updateManualComment,
@@ -220,8 +224,28 @@ export function useKnowledgeSearch(
 }
 
 export function useKnowledgeAgentChat() {
+  const queryClient = useQueryClient();
   return useMutation<KnowledgeAgentResponse, Error, KnowledgeAgentRequest>({
     mutationFn: (payload) => askKnowledgeAgent(payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['knowledge-agent-runs'] });
+    },
+  });
+}
+
+export function useKnowledgeAgentRuns(limit = 25) {
+  return useQuery<KnowledgeAgentRunSummary[]>({
+    queryKey: ['knowledge-agent-runs', limit],
+    queryFn: () => getKnowledgeAgentRuns(limit),
+    staleTime: 10_000,
+  });
+}
+
+export function useKnowledgeAgentRun(runId: string | null) {
+  return useQuery<KnowledgeAgentRunDetail>({
+    queryKey: ['knowledge-agent-run', runId],
+    queryFn: () => getKnowledgeAgentRun(runId!),
+    enabled: !!runId,
   });
 }
 

@@ -4,6 +4,7 @@ import csv
 import io
 import os
 import re
+import time
 import unicodedata
 import uuid
 from datetime import date, datetime, timezone
@@ -48,6 +49,7 @@ from common.db.models import (
     Topic,
     TopicAlias,
     TopicProposal,
+    KnowledgeAgentRun,
     KnowledgeJob,
     GraphConsolidationReview,
     SpecialistJob,
@@ -196,6 +198,29 @@ class KnowledgeAgentChatResponse(BaseModel):
     citations: list[KnowledgeAgentCitation] = Field(default_factory=list)
     vision_requests: list[KnowledgeAgentVisionRequest] = Field(default_factory=list)
     model: str | None = None
+    run_id: str | None = None
+
+
+class KnowledgeAgentRunSummary(BaseModel):
+    id: str
+    question: str
+    answer: str
+    status: str
+    model: str | None = None
+    confidence: float | None = None
+    allow_vision: bool
+    max_steps: int
+    tool_step_count: int
+    citation_count: int
+    vision_request_count: int
+    duration_ms: int | None = None
+    created_at: datetime
+
+
+class KnowledgeAgentRunDetail(KnowledgeAgentRunSummary):
+    tool_trace: list[KnowledgeAgentTraceStep] = Field(default_factory=list)
+    citations: list[KnowledgeAgentCitation] = Field(default_factory=list)
+    vision_requests: list[KnowledgeAgentVisionRequest] = Field(default_factory=list)
 
 
 def _serialize_entity(entity: DocumentUnitEntity) -> dict[str, Any]:
@@ -2138,6 +2163,7 @@ def chat_with_knowledge_agent(
     payload: KnowledgeAgentChatRequest,
     db: Session = Depends(get_db_session),
 ):
+    started = time.monotonic()
     provider = _knowledge_agent_provider()
     if provider is None:
         raise HTTPException(status_code=503, detail="LLM backend is not configured")
@@ -2254,7 +2280,7 @@ def chat_with_knowledge_agent(
         )
 
     if final_action is None:
-        return KnowledgeAgentChatResponse(
+        response = KnowledgeAgentChatResponse(
             status="incomplete",
             answer=(
                 "Non sono riuscito a produrre una risposta con fonti pagina verificabili. "
@@ -2266,13 +2292,20 @@ def chat_with_knowledge_agent(
             vision_requests=vision_requests,
             model=provider.model_name,
         )
+        response.run_id = _persist_knowledge_agent_run(
+            db,
+            payload=payload,
+            response=response,
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+        return response
 
     citations = [
         KnowledgeAgentCitation.model_validate(item)
         for item in final_action.citations
         if isinstance(item, dict) and any(value is not None for value in item.values())
     ]
-    return KnowledgeAgentChatResponse(
+    response = KnowledgeAgentChatResponse(
         status="answered",
         answer=final_action.answer or "",
         confidence=final_action.confidence,
@@ -2281,6 +2314,37 @@ def chat_with_knowledge_agent(
         vision_requests=vision_requests,
         model=provider.model_name,
     )
+    response.run_id = _persist_knowledge_agent_run(
+        db,
+        payload=payload,
+        response=response,
+        duration_ms=int((time.monotonic() - started) * 1000),
+    )
+    return response
+
+
+@router.get("/agent/runs", response_model=list[KnowledgeAgentRunSummary])
+def list_knowledge_agent_runs(
+    limit: int = Query(default=25, ge=1, le=100),
+    status_filter: str | None = Query(default=None, alias="status"),
+    db: Session = Depends(get_db_session),
+):
+    stmt = select(KnowledgeAgentRun).order_by(KnowledgeAgentRun.created_at.desc()).limit(limit)
+    if status_filter:
+        stmt = stmt.where(KnowledgeAgentRun.status == status_filter)
+    runs = db.execute(stmt).scalars().all()
+    return [_serialize_knowledge_agent_run_summary(run) for run in runs]
+
+
+@router.get("/agent/runs/{run_id}", response_model=KnowledgeAgentRunDetail)
+def get_knowledge_agent_run(
+    run_id: uuid.UUID,
+    db: Session = Depends(get_db_session),
+):
+    run = db.get(KnowledgeAgentRun, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Knowledge agent run not found")
+    return _serialize_knowledge_agent_run_detail(run)
 
 
 def _validate_knowledge_agent_final(
@@ -2330,6 +2394,72 @@ def _trace_has_page_text_for_citation(
             text = output.get("text")
             return isinstance(text, str) and bool(text.strip())
     return False
+
+
+def _persist_knowledge_agent_run(
+    db: Session,
+    *,
+    payload: KnowledgeAgentChatRequest,
+    response: KnowledgeAgentChatResponse,
+    duration_ms: int,
+) -> str:
+    run = KnowledgeAgentRun(
+        question=payload.question,
+        answer=response.answer,
+        status=response.status,
+        model=response.model,
+        confidence=response.confidence,
+        allow_vision=payload.allow_vision,
+        max_steps=payload.max_steps,
+        tool_trace_json=[step.model_dump(mode="json") for step in response.tool_trace],
+        citations_json=[citation.model_dump(mode="json") for citation in response.citations],
+        vision_requests_json=[request.model_dump(mode="json") for request in response.vision_requests],
+        duration_ms=duration_ms,
+    )
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+    return str(run.id)
+
+
+def _serialize_knowledge_agent_run_summary(run: KnowledgeAgentRun) -> KnowledgeAgentRunSummary:
+    return KnowledgeAgentRunSummary(
+        id=str(run.id),
+        question=run.question,
+        answer=run.answer,
+        status=run.status,
+        model=run.model,
+        confidence=run.confidence,
+        allow_vision=run.allow_vision,
+        max_steps=run.max_steps,
+        tool_step_count=len(run.tool_trace_json or []),
+        citation_count=len(run.citations_json or []),
+        vision_request_count=len(run.vision_requests_json or []),
+        duration_ms=run.duration_ms,
+        created_at=run.created_at,
+    )
+
+
+def _serialize_knowledge_agent_run_detail(run: KnowledgeAgentRun) -> KnowledgeAgentRunDetail:
+    summary = _serialize_knowledge_agent_run_summary(run)
+    return KnowledgeAgentRunDetail(
+        **summary.model_dump(),
+        tool_trace=[
+            KnowledgeAgentTraceStep.model_validate(item)
+            for item in (run.tool_trace_json or [])
+            if isinstance(item, dict)
+        ],
+        citations=[
+            KnowledgeAgentCitation.model_validate(item)
+            for item in (run.citations_json or [])
+            if isinstance(item, dict)
+        ],
+        vision_requests=[
+            KnowledgeAgentVisionRequest.model_validate(item)
+            for item in (run.vision_requests_json or [])
+            if isinstance(item, dict)
+        ],
+    )
 
 
 @router.post("/accounting/ask", response_model=AccountingAskResponse)

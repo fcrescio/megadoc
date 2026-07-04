@@ -359,6 +359,29 @@ export interface KnowledgeAgentResponse {
   citations: KnowledgeAgentCitation[];
   vision_requests: KnowledgeAgentVisionRequest[];
   model: string | null;
+  run_id: string | null;
+}
+
+export interface KnowledgeAgentRunSummary {
+  id: string;
+  question: string;
+  answer: string;
+  status: string;
+  model: string | null;
+  confidence: number | null;
+  allow_vision: boolean;
+  max_steps: number;
+  tool_step_count: number;
+  citation_count: number;
+  vision_request_count: number;
+  duration_ms: number | null;
+  created_at: string;
+}
+
+export interface KnowledgeAgentRunDetail extends KnowledgeAgentRunSummary {
+  tool_trace: KnowledgeAgentTraceStep[];
+  citations: KnowledgeAgentCitation[];
+  vision_requests: KnowledgeAgentVisionRequest[];
 }
 
 export interface SpecialistUtilityBillSummary {

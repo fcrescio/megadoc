@@ -213,6 +213,28 @@ class TopicProposal(Base):
     )
 
 
+class KnowledgeAgentRun(Base):
+    __tablename__ = "knowledge_agent_runs"
+    __table_args__ = (
+        Index("ix_knowledge_agent_runs_created_at", "created_at"),
+        Index("ix_knowledge_agent_runs_status", "status"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    answer: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(64), nullable=False)
+    model: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    allow_vision: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    max_steps: Mapped[int] = mapped_column(Integer, nullable=False)
+    tool_trace_json: Mapped[list] = mapped_column(JSON, nullable=False)
+    citations_json: Mapped[list] = mapped_column(JSON, nullable=False)
+    vision_requests_json: Mapped[list] = mapped_column(JSON, nullable=False)
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 class ScanUnit(Base):
     __tablename__ = "scan_units"
 
