@@ -52,6 +52,9 @@ function RouteFallback() {
 
 function App() {
   const [route, setRoute] = useState<RouteState>(() => parseRoute());
+  const [isMainNavCollapsed, setIsMainNavCollapsed] = useState(() => {
+    return window.localStorage.getItem('megadoc.mainNavCollapsed') === 'true';
+  });
 
   useEffect(() => {
     const handlePopState = () => setRoute(parseRoute());
@@ -95,63 +98,85 @@ function App() {
   };
 
   const activeView = route.selectedDoc ? 'documents' : route.view;
+  const mainNavWidthClass = isMainNavCollapsed ? 'lg:w-20' : 'lg:w-60';
+  const mainContentOffsetClass = isMainNavCollapsed ? 'lg:ml-20' : 'lg:ml-60';
 
   return (
-    <div className="min-h-screen text-slate-100 bg-slate-900">
-      <div className="absolute inset-0 pointer-events-none opacity-20 bg-[linear-gradient(rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-[size:32px_32px]" />
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.18),transparent_34rem),radial-gradient(circle_at_bottom_right,rgba(129,140,248,0.16),transparent_32rem),linear-gradient(135deg,#020617_0%,#0f172a_48%,#111827_100%)] text-slate-100">
+      <div className="absolute inset-0 pointer-events-none opacity-25 bg-[linear-gradient(rgba(125,211,252,0.08)_1px,transparent_1px),linear-gradient(90deg,rgba(125,211,252,0.08)_1px,transparent_1px)] bg-[size:32px_32px]" />
 
-      <header className="sticky top-0 z-20 border-b border-slate-700 bg-slate-950 lg:fixed lg:inset-y-0 lg:left-0 lg:w-60 lg:border-b-0 lg:border-r">
+      <header className={`sticky top-0 z-20 border-b border-cyan-300/15 bg-slate-950/95 shadow-2xl shadow-cyan-950/20 backdrop-blur lg:fixed lg:inset-y-0 lg:left-0 ${mainNavWidthClass} lg:border-b-0 lg:border-r lg:transition-[width] lg:duration-200`}>
         <div className="mx-auto flex max-w-7xl flex-col gap-3 px-5 py-3 lg:h-full lg:px-4 lg:py-5">
-          <div>
-            <p className="text-xs uppercase tracking-[0.35em] text-cyan-300/80">Megadoc</p>
-            <h1 className="text-lg font-semibold text-white">Console documentale</h1>
+          <div className={`flex items-start justify-between gap-2 ${isMainNavCollapsed ? 'lg:items-center lg:justify-center' : ''}`}>
+            <div className={isMainNavCollapsed ? 'lg:hidden' : ''}>
+              <p className="text-xs uppercase tracking-[0.35em] text-cyan-300/90">Megadoc</p>
+              <h1 className="text-lg font-semibold text-white">Console documentale</h1>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                const next = !isMainNavCollapsed;
+                setIsMainNavCollapsed(next);
+                window.localStorage.setItem('megadoc.mainNavCollapsed', String(next));
+              }}
+              title={isMainNavCollapsed ? 'Espandi menu' : 'Collassa menu'}
+              className="hidden rounded-xl border border-cyan-300/20 bg-cyan-300/10 px-2.5 py-2 text-sm text-cyan-100 transition hover:bg-cyan-300/20 lg:block"
+            >
+              {isMainNavCollapsed ? '»' : '«'}
+            </button>
           </div>
 
           <div className="flex flex-wrap items-center justify-end gap-3 lg:min-h-0 lg:flex-1 lg:flex-col lg:items-stretch lg:justify-start">
             <nav className="flex flex-wrap items-center gap-2 lg:flex-col lg:items-stretch">
               {[
-                { id: 'documents', label: 'Documenti' },
-                { id: 'knowledge', label: 'Conoscenza' },
-                { id: 'manual', label: 'Manuale' },
-                { id: 'upload', label: 'Caricamento' },
+                { id: 'documents', label: 'Documenti', short: 'D' },
+                { id: 'knowledge', label: 'Conoscenza', short: 'K' },
+                { id: 'manual', label: 'Manuale', short: 'M' },
+                { id: 'upload', label: 'Caricamento', short: 'U' },
               ].map((item) => (
                 <button
                   key={item.id}
                   onClick={() => openView(item.id as View)}
-                  className={`rounded-full px-4 py-2 text-sm font-medium transition lg:w-full lg:rounded-xl lg:text-left ${
+                  title={item.label}
+                  className={`rounded-full px-4 py-2 text-sm font-medium transition lg:w-full lg:rounded-xl ${
+                    isMainNavCollapsed ? 'lg:px-2 lg:text-center' : 'lg:text-left'
+                  } ${
                     activeView === item.id
-                      ? 'bg-cyan-400/15 text-cyan-200 border border-cyan-300/30'
-                      : 'bg-white/5 text-slate-300 border border-white/10 hover:bg-white/10'
+                      ? 'border border-cyan-300/50 bg-gradient-to-r from-cyan-400/20 to-indigo-400/20 text-cyan-100 shadow-lg shadow-cyan-950/25'
+                      : 'border border-white/10 bg-white/5 text-slate-300 hover:border-cyan-300/25 hover:bg-cyan-300/10 hover:text-white'
                   }`}
                 >
-                  {item.label}
+                  <span className={isMainNavCollapsed ? 'hidden lg:inline' : 'hidden'}>{item.short}</span>
+                  <span className={isMainNavCollapsed ? 'lg:hidden' : ''}>{item.label}</span>
                 </button>
               ))}
             </nav>
-            <SystemStatusButton />
+            <div className={isMainNavCollapsed ? 'lg:hidden' : ''}>
+              <SystemStatusButton />
+            </div>
           </div>
         </div>
       </header>
 
-      <main className="relative mx-auto max-w-7xl px-5 py-4 lg:ml-60 lg:max-w-none lg:px-4">
+      <main className={`relative mx-auto max-w-7xl px-5 py-4 ${mainContentOffsetClass} lg:max-w-none lg:px-4 lg:transition-[margin] lg:duration-200`}>
         {!route.selectedDoc && route.view !== 'knowledge' && (
-          <section className="mb-8 rounded-xl border border-slate-700 bg-slate-800 overflow-hidden">
+          <section className="mb-8 overflow-hidden rounded-xl border border-cyan-300/15 bg-slate-900/80 shadow-2xl shadow-cyan-950/20">
             <div className="grid gap-6 lg:grid-cols-[1.4fr_0.9fr] p-6 lg:p-8">
               <div>
-                <p className="text-sm text-cyan-200/80 mb-3">OCR, classificazione e consultazione.</p>
+                <p className="text-sm text-cyan-200/90 mb-3">OCR, classificazione e consultazione.</p>
                 <h2 className="text-3xl lg:text-4xl leading-tight font-semibold text-white">Archivio dei documenti</h2>
               </div>
               <div className="grid grid-cols-2 gap-3 text-sm">
-                <div className="rounded-2xl border border-cyan-300/15 bg-slate-900/45 p-4">
+                <div className="rounded-2xl border border-cyan-300/20 bg-cyan-400/10 p-4">
                   <p className="text-cyan-200/70">Mode</p>
                   <p className="mt-2 text-lg font-semibold text-white">{activeView}</p>
                 </div>
-                <div className="rounded-2xl border border-white/10 bg-slate-900/45 p-4">
-                  <p className="text-cyan-200/70">Route</p>
+                <div className="rounded-2xl border border-indigo-300/20 bg-indigo-400/10 p-4">
+                  <p className="text-indigo-200/80">Route</p>
                   <p className="mt-2 text-lg font-semibold text-white">{window.location.pathname}</p>
                 </div>
-                <div className="rounded-2xl border border-white/10 bg-slate-900/45 p-4 col-span-2">
-                  <p className="text-cyan-200/70">Usa direttamente</p>
+                <div className="rounded-2xl border border-emerald-300/20 bg-emerald-400/10 p-4 col-span-2">
+                  <p className="text-emerald-200/80">Usa direttamente</p>
                   <p className="mt-2 text-slate-200">
                     `/knowledge` now opens the human interface. API calls live under `/api/*`.
                   </p>

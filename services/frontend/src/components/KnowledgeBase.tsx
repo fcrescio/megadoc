@@ -25,6 +25,9 @@ function KnowledgeBase({ onOpenDocument }: Props) {
   const [panel, setPanel] = useState<Panel>('facts');
   const [searchInput, setSearchInput] = useState('');
   const [showProposals, setShowProposals] = useState(false);
+  const [isSideNavCollapsed, setIsSideNavCollapsed] = useState(() => {
+    return window.localStorage.getItem('megadoc.knowledgeNavCollapsed') === 'true';
+  });
   const deferredSearch = useDeferredValue(searchInput.trim());
 
   const topicsQuery = useKnowledgeTopics(false);
@@ -33,10 +36,12 @@ function KnowledgeBase({ onOpenDocument }: Props) {
   const proposals = useTopicProposals();
 
   const tabClass = (current: boolean) =>
-    `rounded-full border px-4 py-2 text-sm transition lg:w-full lg:rounded-xl lg:text-left ${
+    `rounded-full border px-4 py-2 text-sm transition lg:w-full lg:rounded-xl ${
+      isSideNavCollapsed ? 'lg:px-2 lg:text-center' : 'lg:text-left'
+    } ${
       current
-        ? 'border-cyan-300/35 bg-cyan-400/15 text-cyan-100'
-        : 'border-white/10 bg-white/5 text-slate-300 hover:bg-white/10'
+        ? 'border-cyan-300/50 bg-gradient-to-r from-cyan-400/20 to-indigo-400/20 text-cyan-100 shadow-lg shadow-cyan-950/20'
+        : 'border-white/10 bg-white/5 text-slate-300 hover:border-cyan-300/25 hover:bg-cyan-300/10 hover:text-white'
     }`;
 
   if (topicsQuery.isLoading) {
@@ -52,10 +57,26 @@ function KnowledgeBase({ onOpenDocument }: Props) {
   }
 
   return (
-    <div className="grid h-[calc(100vh-7.75rem)] min-h-[38rem] gap-3 lg:h-[calc(100vh-2rem)] lg:grid-cols-[18rem_minmax(0,1fr)]">
-      <aside className="flex min-h-0 flex-col rounded-lg border border-slate-700 bg-slate-800 p-4">
-        <div className="flex shrink-0 flex-wrap items-center gap-3 lg:block">
-          <div className="flex min-w-[16rem] flex-1 items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-2.5 lg:min-w-0">
+    <div
+      className={`grid h-[calc(100vh-7.75rem)] min-h-[38rem] gap-3 lg:h-[calc(100vh-2rem)] ${
+        isSideNavCollapsed ? 'lg:grid-cols-[4.75rem_minmax(0,1fr)]' : 'lg:grid-cols-[18rem_minmax(0,1fr)]'
+      } lg:transition-[grid-template-columns] lg:duration-200`}
+    >
+      <aside className="flex min-h-0 flex-col rounded-lg border border-cyan-300/15 bg-slate-900/85 p-4 shadow-2xl shadow-cyan-950/20">
+        <div className={`flex shrink-0 flex-wrap items-center gap-3 ${isSideNavCollapsed ? 'lg:justify-center' : 'lg:block'}`}>
+          <button
+            type="button"
+            onClick={() => {
+              const next = !isSideNavCollapsed;
+              setIsSideNavCollapsed(next);
+              window.localStorage.setItem('megadoc.knowledgeNavCollapsed', String(next));
+            }}
+            title={isSideNavCollapsed ? 'Espandi menu conoscenza' : 'Collassa menu conoscenza'}
+            className="hidden rounded-xl border border-cyan-300/20 bg-cyan-300/10 px-2.5 py-2 text-sm text-cyan-100 transition hover:bg-cyan-300/20 lg:block"
+          >
+            {isSideNavCollapsed ? '»' : '«'}
+          </button>
+          <div className={`flex min-w-[16rem] flex-1 items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-2.5 lg:min-w-0 ${isSideNavCollapsed ? 'lg:hidden' : ''}`}>
             <span className="text-cyan-200">⌕</span>
             <input
               value={searchInput}
@@ -69,11 +90,11 @@ function KnowledgeBase({ onOpenDocument }: Props) {
               </button>
             )}
           </div>
-          <div className="flex flex-wrap gap-2 text-xs lg:mt-3 lg:grid lg:grid-cols-2">
+          <div className={`flex flex-wrap gap-2 text-xs lg:mt-3 lg:grid lg:grid-cols-2 ${isSideNavCollapsed ? 'lg:hidden' : ''}`}>
             <span className="rounded-full border border-indigo-300/20 bg-indigo-400/10 px-3 py-2 text-indigo-100">
               {graphStats.data?.nodes ?? 0} nodi
             </span>
-            <span className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-slate-200">
+            <span className="rounded-full border border-emerald-300/20 bg-emerald-400/10 px-3 py-2 text-emerald-100">
               {graphStats.data?.assertions ?? 0} fatti
             </span>
             <span className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-slate-200">
@@ -86,22 +107,23 @@ function KnowledgeBase({ onOpenDocument }: Props) {
         </div>
         <nav className="mt-3 flex shrink-0 flex-wrap gap-2 lg:min-h-0 lg:flex-1 lg:flex-col lg:overflow-y-auto">
           {[
-            { id: 'facts' as Panel, label: 'Fatti' },
-            { id: 'agent' as Panel, label: 'Dialogo' },
-            { id: 'specialists' as Panel, label: 'Specialisti' },
-            { id: 'topics' as Panel, label: 'Topic' },
-            { id: 'entities' as Panel, label: 'Entità' },
-            { id: 'reviews' as Panel, label: 'Revisioni' },
-            { id: 'cleanup' as Panel, label: 'Cleanup' },
+            { id: 'facts' as Panel, label: 'Fatti', short: 'F' },
+            { id: 'agent' as Panel, label: 'Dialogo', short: 'D' },
+            { id: 'specialists' as Panel, label: 'Specialisti', short: 'S' },
+            { id: 'topics' as Panel, label: 'Topic', short: 'T' },
+            { id: 'entities' as Panel, label: 'Entità', short: 'E' },
+            { id: 'reviews' as Panel, label: 'Revisioni', short: 'R' },
+            { id: 'cleanup' as Panel, label: 'Cleanup', short: 'C' },
           ].map((tab) => (
-            <button key={tab.id} onClick={() => setPanel(tab.id)} className={tabClass(panel === tab.id)}>
-              {tab.label}
+            <button key={tab.id} onClick={() => setPanel(tab.id)} title={tab.label} className={tabClass(panel === tab.id)}>
+              <span className={isSideNavCollapsed ? 'hidden lg:inline' : 'hidden'}>{tab.short}</span>
+              <span className={isSideNavCollapsed ? 'lg:hidden' : ''}>{tab.label}</span>
             </button>
           ))}
         </nav>
       </aside>
 
-      <section className="min-h-0 overflow-hidden rounded-lg border border-slate-700 bg-slate-800 p-3 lg:p-4">
+      <section className="min-h-0 overflow-hidden rounded-lg border border-cyan-300/15 bg-slate-900/85 p-3 shadow-2xl shadow-cyan-950/20 lg:p-4">
         {panel === 'facts' && <FactsPanel onOpenDocument={onOpenDocument} deferredSearch={deferredSearch} />}
         {panel === 'agent' && <AgentPanel onOpenDocument={onOpenDocument} />}
         {panel === 'specialists' && <SpecialistsPanel onOpenDocument={onOpenDocument} deferredSearch={deferredSearch} />}
