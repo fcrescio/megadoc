@@ -46,8 +46,8 @@ function formatAssertionValue(assertion: KnowledgeAssertion) {
 const tabClass = (current: boolean) =>
   `rounded-full border px-4 py-2 text-sm transition ${
     current
-      ? 'border-cyan-300/35 bg-cyan-400/15 text-cyan-100'
-      : 'border-white/10 bg-white/5 text-slate-300 hover:bg-white/10'
+      ? 'border-amber-300/45 bg-amber-400/20 text-amber-50'
+      : 'border-sky-200/15 bg-indigo-900/45 text-sky-100 hover:border-amber-300/30 hover:bg-amber-300/15'
     }`;
 
 /* ── Agent Panel ── */
@@ -135,8 +135,8 @@ export function AgentPanel({ onOpenDocument }: AgentPanelProps) {
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col rounded-2xl border border-white/10 bg-slate-950/35">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 p-4">
+    <div className="flex h-full min-h-0 flex-col rounded-2xl border border-amber-300/20 bg-indigo-950/55">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-amber-300/15 bg-gradient-to-r from-indigo-900/70 via-sky-950/45 to-fuchsia-950/45 p-4">
         <div>
           <p className="text-sm font-semibold text-white">Dialogo con l'archivio</p>
           <p className="mt-1 text-xs text-slate-400">Chat continuativa con trace tool in tempo reale e fonti citate.</p>
@@ -151,7 +151,7 @@ export function AgentPanel({ onOpenDocument }: AgentPanelProps) {
               setStreamError(null);
             }}
             disabled={isStreaming || messages.length === 0}
-            className="rounded-full border border-white/10 px-4 py-2 text-sm text-slate-300 hover:bg-white/10 disabled:opacity-40"
+            className="rounded-full border border-sky-200/15 bg-indigo-900/40 px-4 py-2 text-sm text-sky-100 hover:bg-amber-300/15 disabled:opacity-40"
           >
             Nuova chat
           </button>
@@ -167,7 +167,7 @@ export function AgentPanel({ onOpenDocument }: AgentPanelProps) {
         <div className="flex min-h-0 flex-1 flex-col">
           <div className="min-h-0 flex-1 overflow-y-auto p-4">
             {messages.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.03] p-6 text-sm text-slate-400">
+              <div className="rounded-2xl border border-dashed border-amber-300/25 bg-amber-300/10 p-6 text-sm text-amber-50">
                 Fai una domanda. Le successive saranno inviate insieme al contesto della chat corrente.
               </div>
             ) : (
@@ -200,7 +200,7 @@ export function AgentPanel({ onOpenDocument }: AgentPanelProps) {
                 }
               }}
               placeholder="Scrivi un messaggio. Ctrl/Cmd+Invio per inviare."
-              className="min-h-[5.5rem] w-full resize-none rounded-2xl border border-white/10 bg-slate-900 p-3 text-sm text-white outline-none placeholder:text-slate-500"
+              className="min-h-[5.5rem] w-full resize-none rounded-2xl border border-sky-300/20 bg-sky-950/45 p-3 text-sm text-white outline-none placeholder:text-sky-300/45"
             />
             <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
               <label className="flex items-start gap-2 text-xs text-slate-300">
@@ -215,7 +215,7 @@ export function AgentPanel({ onOpenDocument }: AgentPanelProps) {
               <button
                 onClick={ask}
                 disabled={isStreaming || draft.trim().length < 3}
-                className="rounded-full border border-cyan-300/35 bg-cyan-400/15 px-5 py-2 text-sm text-cyan-100 disabled:opacity-40"
+                className="rounded-full border border-amber-300/45 bg-amber-400/20 px-5 py-2 text-sm text-amber-50 hover:bg-amber-400/30 disabled:opacity-40"
               >
                 {isStreaming ? 'Ragionamento in corso...' : 'Invia'}
               </button>
@@ -242,8 +242,8 @@ function ChatMessageCard({
       <div
         className={`max-w-[min(920px,92%)] rounded-2xl border p-4 ${
           message.role === 'user'
-            ? 'border-cyan-300/30 bg-cyan-400/15 text-cyan-50'
-            : 'border-white/10 bg-slate-900/80 text-slate-100'
+            ? 'border-amber-300/40 bg-amber-400/20 text-amber-50'
+            : 'border-sky-300/20 bg-sky-950/50 text-slate-100'
         }`}
       >
         <div className="mb-2 text-[11px] uppercase tracking-wide text-slate-400">

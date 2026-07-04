@@ -44,7 +44,7 @@ function parseRoute(): RouteState {
 
 function RouteFallback() {
   return (
-    <div className="rounded-3xl border border-white/10 bg-slate-950/40 p-6 text-sm text-slate-300">
+    <div className="rounded-3xl border border-sky-300/20 bg-indigo-950/50 p-6 text-sm text-sky-100">
       Caricamento...
     </div>
   );
@@ -102,14 +102,14 @@ function App() {
   const mainContentOffsetClass = isMainNavCollapsed ? 'lg:ml-20' : 'lg:ml-60';
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.18),transparent_34rem),radial-gradient(circle_at_bottom_right,rgba(129,140,248,0.16),transparent_32rem),linear-gradient(135deg,#020617_0%,#0f172a_48%,#111827_100%)] text-slate-100">
-      <div className="absolute inset-0 pointer-events-none opacity-25 bg-[linear-gradient(rgba(125,211,252,0.08)_1px,transparent_1px),linear-gradient(90deg,rgba(125,211,252,0.08)_1px,transparent_1px)] bg-[size:32px_32px]" />
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(251,191,36,0.20),transparent_28rem),radial-gradient(circle_at_top_right,rgba(34,211,238,0.22),transparent_34rem),radial-gradient(circle_at_bottom_right,rgba(168,85,247,0.22),transparent_34rem),linear-gradient(135deg,#050816_0%,#111342_42%,#172554_100%)] text-slate-100">
+      <div className="absolute inset-0 pointer-events-none opacity-30 bg-[linear-gradient(rgba(251,191,36,0.07)_1px,transparent_1px),linear-gradient(90deg,rgba(34,211,238,0.08)_1px,transparent_1px)] bg-[size:30px_30px]" />
 
-      <header className={`sticky top-0 z-20 border-b border-cyan-300/15 bg-slate-950/95 shadow-2xl shadow-cyan-950/20 backdrop-blur lg:fixed lg:inset-y-0 lg:left-0 ${mainNavWidthClass} lg:border-b-0 lg:border-r lg:transition-[width] lg:duration-200`}>
+      <header className={`sticky top-0 z-20 border-b border-amber-300/20 bg-indigo-950/95 shadow-2xl shadow-indigo-950/40 backdrop-blur lg:fixed lg:inset-y-0 lg:left-0 ${mainNavWidthClass} lg:border-b-0 lg:border-r lg:transition-[width] lg:duration-200`}>
         <div className="mx-auto flex max-w-7xl flex-col gap-3 px-5 py-3 lg:h-full lg:px-4 lg:py-5">
           <div className={`flex items-start justify-between gap-2 ${isMainNavCollapsed ? 'lg:items-center lg:justify-center' : ''}`}>
             <div className={isMainNavCollapsed ? 'lg:hidden' : ''}>
-              <p className="text-xs uppercase tracking-[0.35em] text-cyan-300/90">Megadoc</p>
+              <p className="text-xs uppercase tracking-[0.35em] text-amber-200">Megadoc</p>
               <h1 className="text-lg font-semibold text-white">Console documentale</h1>
             </div>
             <button
@@ -120,7 +120,7 @@ function App() {
                 window.localStorage.setItem('megadoc.mainNavCollapsed', String(next));
               }}
               title={isMainNavCollapsed ? 'Espandi menu' : 'Collassa menu'}
-              className="hidden rounded-xl border border-cyan-300/20 bg-cyan-300/10 px-2.5 py-2 text-sm text-cyan-100 transition hover:bg-cyan-300/20 lg:block"
+              className="hidden rounded-xl border border-amber-300/30 bg-amber-300/15 px-2.5 py-2 text-sm text-amber-100 transition hover:bg-amber-300/25 lg:block"
             >
               {isMainNavCollapsed ? '»' : '«'}
             </button>
@@ -142,8 +142,8 @@ function App() {
                     isMainNavCollapsed ? 'lg:px-2 lg:text-center' : 'lg:text-left'
                   } ${
                     activeView === item.id
-                      ? 'border border-cyan-300/50 bg-gradient-to-r from-cyan-400/20 to-indigo-400/20 text-cyan-100 shadow-lg shadow-cyan-950/25'
-                      : 'border border-white/10 bg-white/5 text-slate-300 hover:border-cyan-300/25 hover:bg-cyan-300/10 hover:text-white'
+                      ? 'border border-amber-300/55 bg-gradient-to-r from-amber-400/25 via-cyan-400/20 to-fuchsia-400/20 text-white shadow-lg shadow-amber-950/30'
+                      : 'border border-sky-200/15 bg-indigo-900/45 text-sky-100 hover:border-amber-300/35 hover:bg-amber-300/15 hover:text-white'
                   }`}
                 >
                   <span className={isMainNavCollapsed ? 'hidden lg:inline' : 'hidden'}>{item.short}</span>
@@ -160,10 +160,10 @@ function App() {
 
       <main className={`relative mx-auto max-w-7xl px-5 py-4 ${mainContentOffsetClass} lg:max-w-none lg:px-4 lg:transition-[margin] lg:duration-200`}>
         {!route.selectedDoc && route.view !== 'knowledge' && (
-          <section className="mb-8 overflow-hidden rounded-xl border border-cyan-300/15 bg-slate-900/80 shadow-2xl shadow-cyan-950/20">
-            <div className="grid gap-6 lg:grid-cols-[1.4fr_0.9fr] p-6 lg:p-8">
+          <section className="mb-8 overflow-hidden rounded-xl border border-amber-300/25 bg-indigo-950/75 shadow-2xl shadow-indigo-950/40">
+            <div className="grid gap-6 bg-gradient-to-br from-indigo-900/65 via-sky-950/45 to-fuchsia-950/45 p-6 lg:grid-cols-[1.4fr_0.9fr] lg:p-8">
               <div>
-                <p className="text-sm text-cyan-200/90 mb-3">OCR, classificazione e consultazione.</p>
+                <p className="mb-3 text-sm text-amber-100">OCR, classificazione e consultazione.</p>
                 <h2 className="text-3xl lg:text-4xl leading-tight font-semibold text-white">Archivio dei documenti</h2>
               </div>
               <div className="grid grid-cols-2 gap-3 text-sm">

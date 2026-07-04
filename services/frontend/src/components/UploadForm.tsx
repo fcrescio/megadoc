@@ -60,7 +60,7 @@ function UploadForm() {
   };
 
   return (
-    <div className="rounded-lg border border-slate-700 bg-slate-800 p-6 shadow">
+    <div className="rounded-lg border border-amber-300/20 bg-indigo-950/70 p-6 shadow-2xl shadow-indigo-950/30">
       <h2 className="mb-4 text-xl font-semibold text-slate-100">Caricamento Documento</h2>
 
       {message && (
@@ -86,14 +86,14 @@ function UploadForm() {
               setFiles(Array.from(e.target.files ?? []));
               setMessage(null);
             }}
-            className="block w-full rounded-md border border-slate-600 bg-slate-950 p-2 text-sm text-slate-100 file:mr-4 file:rounded-md file:border-0 file:bg-cyan-400/15 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-cyan-100 hover:file:bg-cyan-400/25"
+            className="block w-full rounded-md border border-sky-300/20 bg-sky-950/45 p-2 text-sm text-slate-100 file:mr-4 file:rounded-md file:border-0 file:bg-amber-400/20 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-amber-50 hover:file:bg-amber-400/30"
             required
           />
           <p className="mt-1 text-xs text-slate-400">
             Puoi selezionare più PDF dal selettore del sistema.
           </p>
           {files.length > 0 && (
-            <div className="mt-3 max-h-56 overflow-y-auto rounded-xl border border-white/10 bg-slate-950/45 p-2">
+            <div className="mt-3 max-h-56 overflow-y-auto rounded-xl border border-amber-300/20 bg-indigo-900/45 p-2">
               <div className="mb-2 flex items-center justify-between gap-2 px-1 text-xs text-slate-400">
                 <span>{files.length} file selezionati</span>
                 <button
@@ -109,12 +109,12 @@ function UploadForm() {
                 {files.map((selectedFile, index) => (
                   <div
                     key={`${selectedFile.name}-${selectedFile.size}-${index}`}
-                    className="flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm"
+                    className="flex items-center justify-between gap-3 rounded-lg border border-sky-300/15 bg-sky-950/35 px-3 py-2 text-sm"
                   >
                     <span className="min-w-0 flex-1 truncate text-slate-100">{selectedFile.name}</span>
                     <span className="shrink-0 text-xs text-slate-400">{formatBytes(selectedFile.size)}</span>
                     {uploadingIndex === index && (
-                      <span className="shrink-0 rounded-full border border-cyan-300/25 bg-cyan-400/15 px-2 py-0.5 text-xs text-cyan-100">
+                      <span className="shrink-0 rounded-full border border-amber-300/30 bg-amber-400/20 px-2 py-0.5 text-xs text-amber-50">
                         upload
                       </span>
                     )}
@@ -134,7 +134,7 @@ function UploadForm() {
             value={externalId}
             onChange={(e) => setExternalId(e.target.value)}
             placeholder="es. contratto-001"
-            className="block w-full rounded-md border border-slate-600 bg-slate-950 p-2 text-sm text-slate-100 placeholder:text-slate-500"
+            className="block w-full rounded-md border border-sky-300/20 bg-sky-950/45 p-2 text-sm text-slate-100 placeholder:text-sky-300/45"
           />
           <p className="mt-1 text-xs text-slate-400">
             Con più file viene usato come prefisso per generare ID distinti.

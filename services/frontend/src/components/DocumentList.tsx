@@ -36,11 +36,11 @@ const DocumentRow = memo(function DocumentRow({ doc, onSelect }: { doc: Document
   return (
     <button
       onClick={() => onSelect(doc.id)}
-      className="w-full p-4 hover:bg-slate-700 text-left border-b border-slate-700"
+      className="w-full border-b border-sky-300/10 p-4 text-left transition hover:bg-amber-300/10"
     >
       <div className="flex items-center justify-between">
         <div className="min-w-0">
-          <p className="font-medium text-slate-100 truncate">{doc.original_filename}</p>
+          <p className="truncate font-medium text-slate-50">{doc.original_filename}</p>
           {doc.external_id && (
             <p className="text-sm text-slate-400">ID: {doc.external_id}</p>
           )}
@@ -77,9 +77,9 @@ function DocumentList({ onSelectDocument }: Props) {
     return (
       <div className="mb-8">
         <div className="animate-pulse space-y-4">
-          <div className="h-4 bg-gray-200 rounded w-1/4"></div>
+          <div className="h-4 w-1/4 rounded bg-amber-300/20"></div>
           {[1, 2, 3].map((i) => (
-            <div key={i} className="h-16 bg-gray-200 rounded"></div>
+            <div key={i} className="h-16 rounded bg-indigo-900/55"></div>
           ))}
         </div>
       </div>
@@ -100,7 +100,7 @@ function DocumentList({ onSelectDocument }: Props) {
       {documents && documents.length === 0 ? (
         <p className="text-slate-400">Nessun documento trovato.</p>
       ) : (
-        <div className="border border-slate-700 rounded-lg bg-slate-800 overflow-hidden">
+        <div className="overflow-hidden rounded-lg border border-amber-300/20 bg-indigo-950/65 shadow-2xl shadow-indigo-950/30">
           <Virtuoso
             style={{ height: 'min(70vh, 600px)' }}
             totalCount={documents?.length ?? 0}

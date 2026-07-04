@@ -40,12 +40,12 @@ function KnowledgeBase({ onOpenDocument }: Props) {
       isSideNavCollapsed ? 'lg:px-2 lg:text-center' : 'lg:text-left'
     } ${
       current
-        ? 'border-cyan-300/50 bg-gradient-to-r from-cyan-400/20 to-indigo-400/20 text-cyan-100 shadow-lg shadow-cyan-950/20'
-        : 'border-white/10 bg-white/5 text-slate-300 hover:border-cyan-300/25 hover:bg-cyan-300/10 hover:text-white'
+        ? 'border-amber-300/55 bg-gradient-to-r from-amber-400/25 via-cyan-400/20 to-fuchsia-400/20 text-white shadow-lg shadow-amber-950/25'
+        : 'border-sky-200/15 bg-indigo-900/45 text-sky-100 hover:border-amber-300/35 hover:bg-amber-300/15 hover:text-white'
     }`;
 
   if (topicsQuery.isLoading) {
-    return <div className="h-[calc(100vh-9rem)] animate-pulse rounded-3xl border border-white/10 bg-white/5" />;
+    return <div className="h-[calc(100vh-9rem)] animate-pulse rounded-3xl border border-amber-300/20 bg-indigo-950/50" />;
   }
 
   if (topicsQuery.error) {
@@ -62,7 +62,7 @@ function KnowledgeBase({ onOpenDocument }: Props) {
         isSideNavCollapsed ? 'lg:grid-cols-[4.75rem_minmax(0,1fr)]' : 'lg:grid-cols-[18rem_minmax(0,1fr)]'
       } lg:transition-[grid-template-columns] lg:duration-200`}
     >
-      <aside className="flex min-h-0 flex-col rounded-lg border border-cyan-300/15 bg-slate-900/85 p-4 shadow-2xl shadow-cyan-950/20">
+      <aside className="flex min-h-0 flex-col rounded-lg border border-amber-300/20 bg-indigo-950/80 p-4 shadow-2xl shadow-indigo-950/40">
         <div className={`flex shrink-0 flex-wrap items-center gap-3 ${isSideNavCollapsed ? 'lg:justify-center' : 'lg:block'}`}>
           <button
             type="button"
@@ -72,12 +72,12 @@ function KnowledgeBase({ onOpenDocument }: Props) {
               window.localStorage.setItem('megadoc.knowledgeNavCollapsed', String(next));
             }}
             title={isSideNavCollapsed ? 'Espandi menu conoscenza' : 'Collassa menu conoscenza'}
-            className="hidden rounded-xl border border-cyan-300/20 bg-cyan-300/10 px-2.5 py-2 text-sm text-cyan-100 transition hover:bg-cyan-300/20 lg:block"
+            className="hidden rounded-xl border border-amber-300/30 bg-amber-300/15 px-2.5 py-2 text-sm text-amber-100 transition hover:bg-amber-300/25 lg:block"
           >
             {isSideNavCollapsed ? '»' : '«'}
           </button>
-          <div className={`flex min-w-[16rem] flex-1 items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-2.5 lg:min-w-0 ${isSideNavCollapsed ? 'lg:hidden' : ''}`}>
-            <span className="text-cyan-200">⌕</span>
+          <div className={`flex min-w-[16rem] flex-1 items-center gap-3 rounded-2xl border border-sky-300/20 bg-sky-950/35 px-4 py-2.5 lg:min-w-0 ${isSideNavCollapsed ? 'lg:hidden' : ''}`}>
+            <span className="text-amber-200">⌕</span>
             <input
               value={searchInput}
               onChange={(event) => setSearchInput(event.target.value)}
@@ -91,16 +91,16 @@ function KnowledgeBase({ onOpenDocument }: Props) {
             )}
           </div>
           <div className={`flex flex-wrap gap-2 text-xs lg:mt-3 lg:grid lg:grid-cols-2 ${isSideNavCollapsed ? 'lg:hidden' : ''}`}>
-            <span className="rounded-full border border-indigo-300/20 bg-indigo-400/10 px-3 py-2 text-indigo-100">
+            <span className="rounded-full border border-violet-300/25 bg-violet-400/15 px-3 py-2 text-violet-100">
               {graphStats.data?.nodes ?? 0} nodi
             </span>
             <span className="rounded-full border border-emerald-300/20 bg-emerald-400/10 px-3 py-2 text-emerald-100">
               {graphStats.data?.assertions ?? 0} fatti
             </span>
-            <span className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-slate-200">
+            <span className="rounded-full border border-sky-300/20 bg-sky-400/10 px-3 py-2 text-sky-100">
               {topics.length} topic
             </span>
-            <button onClick={() => setShowProposals(true)} className="rounded-full border border-amber-300/20 bg-amber-400/10 px-3 py-2 text-amber-100">
+            <button onClick={() => setShowProposals(true)} className="rounded-full border border-amber-300/30 bg-amber-400/15 px-3 py-2 text-amber-100 hover:bg-amber-400/25">
               {proposals.data?.length ?? 0} proposte
             </button>
           </div>
@@ -123,7 +123,7 @@ function KnowledgeBase({ onOpenDocument }: Props) {
         </nav>
       </aside>
 
-      <section className="min-h-0 overflow-hidden rounded-lg border border-cyan-300/15 bg-slate-900/85 p-3 shadow-2xl shadow-cyan-950/20 lg:p-4">
+      <section className="min-h-0 overflow-hidden rounded-lg border border-amber-300/20 bg-indigo-950/75 p-3 shadow-2xl shadow-indigo-950/40 lg:p-4">
         {panel === 'facts' && <FactsPanel onOpenDocument={onOpenDocument} deferredSearch={deferredSearch} />}
         {panel === 'agent' && <AgentPanel onOpenDocument={onOpenDocument} />}
         {panel === 'specialists' && <SpecialistsPanel onOpenDocument={onOpenDocument} deferredSearch={deferredSearch} />}
@@ -135,7 +135,7 @@ function KnowledgeBase({ onOpenDocument }: Props) {
 
       {showProposals && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/75 p-4" onClick={() => setShowProposals(false)}>
-          <div className="max-h-[88vh] w-full max-w-5xl overflow-y-auto rounded-3xl border border-amber-300/20 bg-slate-900 p-5 shadow-2xl" onClick={(event) => event.stopPropagation()}>
+          <div className="max-h-[88vh] w-full max-w-5xl overflow-y-auto rounded-3xl border border-amber-300/30 bg-indigo-950 p-5 shadow-2xl" onClick={(event) => event.stopPropagation()}>
             <ProposalList
               initialProposals={proposals.data}
               onClose={() => setShowProposals(false)}
