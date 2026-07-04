@@ -179,6 +179,7 @@ class KnowledgeAgentChatRequest(BaseModel):
     max_steps: int = Field(default=12, ge=1, le=20)
     allow_vision: bool = Field(default=False)
     history: list[KnowledgeAgentConversationMessage] = Field(default_factory=list, max_length=20)
+    selected_document_ids: list[str] = Field(default_factory=list, max_length=8)
 
 
 class KnowledgeAgentTraceStep(BaseModel):
@@ -2203,7 +2204,7 @@ def chat_with_knowledge_agent(
     if provider is None:
         raise HTTPException(status_code=503, detail="LLM backend is not configured")
 
-    messages = _build_knowledge_agent_messages(payload)
+    messages = _build_knowledge_agent_messages(payload, db)
     trace: list[KnowledgeAgentTraceStep] = []
     vision_requests: list[KnowledgeAgentVisionRequest] = []
     final_action: _KnowledgeAgentAction | None = None
@@ -2379,7 +2380,7 @@ def stream_knowledge_agent_chat(
 
     def event_stream():
         started = time.monotonic()
-        messages = _build_knowledge_agent_messages(payload)
+        messages = _build_knowledge_agent_messages(payload, db)
         trace: list[KnowledgeAgentTraceStep] = []
         vision_requests: list[KnowledgeAgentVisionRequest] = []
         final_action: _KnowledgeAgentAction | None = None
@@ -2558,7 +2559,7 @@ def _validate_knowledge_agent_final(
     return None
 
 
-def _build_knowledge_agent_messages(payload: KnowledgeAgentChatRequest) -> list[ChatMessage]:
+def _build_knowledge_agent_messages(payload: KnowledgeAgentChatRequest, db: Session | None = None) -> list[ChatMessage]:
     messages = [
         ChatMessage(
             role="system",
@@ -2571,6 +2572,8 @@ def _build_knowledge_agent_messages(payload: KnowledgeAgentChatRequest) -> list[
                 "invece di sfogliarlo pagina per pagina. "
                 "Non inventare mai document_id o document_unit_id da nomi descrittivi: usa solo id restituiti dai tool "
                 "o gia' presenti nella conversazione. "
+                "Se l'utente ha selezionato documenti, trattali come contesto iniziale forte ma non come vincolo: "
+                "puoi e devi usare comunque tutti i tool sull'intero archivio quando serve. "
                 "La final_answer deve includere answer non vuoto e citations con document_id, page_from/page_to "
                 "e quote breve per ogni affermazione documentale. Non mettere la risposta solo in reasoning. "
                 "Se il testo OCR non basta e servirebbe vedere la pagina, usa analyze_page_image quando vision e' consentita. "
@@ -2579,6 +2582,18 @@ def _build_knowledge_agent_messages(payload: KnowledgeAgentChatRequest) -> list[
             ),
         )
     ]
+    selected_context = _build_selected_document_context(db, payload.selected_document_ids)
+    if selected_context:
+        messages.append(
+            ChatMessage(
+                role="user",
+                content=(
+                    "Documenti selezionati dall'utente come contesto iniziale. "
+                    "Questo contesto non limita lo scope dei tool.\n\n"
+                    f"{selected_context}"
+                ),
+            )
+        )
     for item in payload.history[-12:]:
         messages.append(
             ChatMessage(
@@ -2597,6 +2612,81 @@ def _build_knowledge_agent_messages(payload: KnowledgeAgentChatRequest) -> list[
         )
     )
     return messages
+
+
+def _build_selected_document_context(db: Session | None, document_ids: list[str]) -> str:
+    if db is None or not document_ids:
+        return ""
+    unique_ids = list(dict.fromkeys(document_ids))[:8]
+    blocks: list[str] = []
+    for raw_id in unique_ids:
+        try:
+            doc_uuid = uuid.UUID(raw_id)
+        except ValueError:
+            blocks.append(f"Documento selezionato non valido: {raw_id}")
+            continue
+        document = db.get(Document, doc_uuid)
+        if document is None:
+            blocks.append(f"Documento selezionato non trovato: {raw_id}")
+            continue
+        ocr = db.execute(
+            select(OCRResult)
+            .where(OCRResult.document_id == doc_uuid)
+            .order_by(OCRResult.created_at.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+        units = db.execute(
+            select(DocumentUnit)
+            .join(ScanUnit, ScanUnit.id == DocumentUnit.scan_unit_id)
+            .where(ScanUnit.source_document_id == doc_uuid)
+            .options(
+                selectinload(DocumentUnit.document_type),
+                selectinload(DocumentUnit.topic_assignments).selectinload(DocumentUnitTopicAssignment.topic),
+            )
+            .order_by(DocumentUnit.ordinal)
+        ).scalars().all()
+
+        lines = [
+            "DOCUMENTO SELEZIONATO",
+            f"document_id: {document.id}",
+            f"filename: {document.original_filename}",
+            f"external_id: {document.external_id or 'n/d'}",
+            f"size_bytes: {document.size_bytes}",
+        ]
+        if ocr is not None:
+            lines.append(f"ocr_pages: {ocr.page_count}")
+        if units:
+            lines.append("document_units:")
+            for unit in units[:20]:
+                topic_titles = [
+                    assignment.topic.title
+                    for assignment in unit.topic_assignments
+                    if assignment.topic is not None
+                ]
+                unit_type = unit.document_type.code if unit.document_type is not None else "n/d"
+                lines.append(
+                    "- "
+                    f"document_unit_id={unit.id}; "
+                    f"title={unit.title or 'n/d'}; "
+                    f"type={unit_type}; "
+                    f"pages={unit.start_page}-{unit.end_page}; "
+                    f"topics={', '.join(topic_titles) if topic_titles else 'n/d'}; "
+                    f"summary={(unit.extracted_summary or 'n/d')[:900]}"
+                )
+        if ocr is None:
+            lines.append("ocr_text: n/d")
+        elif len(ocr.full_text) <= 12000:
+            lines.append("ocr_text_full:")
+            lines.append(ocr.full_text)
+        else:
+            lines.append(
+                "ocr_text_full: omesso per lunghezza; usa search_document_text e get_page_text per leggere pagine specifiche."
+            )
+            if not units:
+                lines.append("ocr_text_excerpt:")
+                lines.append(ocr.full_text[:3000])
+        blocks.append("\n".join(lines))
+    return "\n\n---\n\n".join(blocks)
 
 
 def _knowledge_agent_stream_event(event_type: str, payload: dict[str, Any]) -> str:

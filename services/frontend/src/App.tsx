@@ -16,6 +16,7 @@ interface RouteState {
   view: View;
   selectedDoc: string | null;
   initialTab: DocumentTab;
+  selectedChatDocumentIds: string[];
 }
 
 function parseRoute(): RouteState {
@@ -24,13 +25,18 @@ function parseRoute(): RouteState {
   const tab = (params.get('tab') as DocumentTab | null) ?? 'info';
 
   if (pathname === '/knowledge') {
-    return { view: 'knowledge', selectedDoc: null, initialTab: 'knowledge' };
+    return {
+      view: 'knowledge',
+      selectedDoc: null,
+      initialTab: 'knowledge',
+      selectedChatDocumentIds: params.getAll('document_id').filter(Boolean),
+    };
   }
   if (pathname === '/upload') {
-    return { view: 'upload', selectedDoc: null, initialTab: 'info' };
+    return { view: 'upload', selectedDoc: null, initialTab: 'info', selectedChatDocumentIds: [] };
   }
   if (pathname === '/manual') {
-    return { view: 'manual', selectedDoc: null, initialTab: 'info' };
+    return { view: 'manual', selectedDoc: null, initialTab: 'info', selectedChatDocumentIds: [] };
   }
   if (pathname.startsWith('/documents/')) {
     const documentId = pathname.replace('/documents/', '').trim();
@@ -38,9 +44,10 @@ function parseRoute(): RouteState {
       view: 'documents',
       selectedDoc: documentId || null,
       initialTab: tab,
+      selectedChatDocumentIds: [],
     };
   }
-  return { view: 'documents', selectedDoc: null, initialTab: 'info' };
+  return { view: 'documents', selectedDoc: null, initialTab: 'info', selectedChatDocumentIds: [] };
 }
 
 function RouteFallback() {
@@ -122,6 +129,11 @@ function App() {
     let url = '/';
     if (next.view === 'knowledge' && !next.selectedDoc) {
       url = '/knowledge';
+      if (next.selectedChatDocumentIds.length > 0) {
+        const params = new URLSearchParams();
+        next.selectedChatDocumentIds.forEach((documentId) => params.append('document_id', documentId));
+        url += `?${params.toString()}`;
+      }
     } else if (next.view === 'manual' && !next.selectedDoc) {
       url = '/manual';
     } else if (next.view === 'upload' && !next.selectedDoc) {
@@ -142,6 +154,7 @@ function App() {
       view,
       selectedDoc: null,
       initialTab: view === 'knowledge' ? 'knowledge' : 'info',
+      selectedChatDocumentIds: [],
     });
   };
 
@@ -150,6 +163,16 @@ function App() {
       view: 'documents',
       selectedDoc: documentId,
       initialTab,
+      selectedChatDocumentIds: [],
+    });
+  };
+
+  const openKnowledgeChatForDocuments = (documentIds: string[]) => {
+    navigate({
+      view: 'knowledge',
+      selectedDoc: null,
+      initialTab: 'knowledge',
+      selectedChatDocumentIds: documentIds,
     });
   };
 
@@ -250,11 +273,15 @@ function App() {
               documentId={route.selectedDoc}
               initialTab={route.initialTab}
               onBack={() => openView(route.initialTab === 'knowledge' ? 'knowledge' : 'documents')}
+              onAskDocument={(documentId) => openKnowledgeChatForDocuments([documentId])}
             />
           ) : route.view === 'upload' ? (
             <UploadForm />
           ) : route.view === 'knowledge' ? (
-            <KnowledgeBase onOpenDocument={(documentId) => openDocument(documentId, 'knowledge')} />
+            <KnowledgeBase
+              onOpenDocument={(documentId) => openDocument(documentId, 'knowledge')}
+              initialSelectedDocumentIds={route.selectedChatDocumentIds}
+            />
           ) : route.view === 'manual' ? (
             <ManualView />
           ) : (

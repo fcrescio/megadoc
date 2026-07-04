@@ -1,4 +1,4 @@
-import { useDeferredValue, useState } from 'react';
+import { useDeferredValue, useEffect, useState } from 'react';
 import {
   useKnowledgeGraphStats,
   useKnowledgeTopics,
@@ -17,6 +17,7 @@ import { TopicCleanupPanel } from './TopicCleanupPanel';
 
 interface Props {
   onOpenDocument: (documentId: string) => void;
+  initialSelectedDocumentIds?: string[];
 }
 
 type Panel = 'agent' | 'facts' | 'specialists' | 'topics' | 'entities' | 'reviews' | 'cleanup';
@@ -104,14 +105,20 @@ function PanelIcon({ icon }: { icon: Panel }) {
   );
 }
 
-function KnowledgeBase({ onOpenDocument }: Props) {
-  const [panel, setPanel] = useState<Panel>('facts');
+function KnowledgeBase({ onOpenDocument, initialSelectedDocumentIds = [] }: Props) {
+  const [panel, setPanel] = useState<Panel>(initialSelectedDocumentIds.length > 0 ? 'agent' : 'facts');
   const [searchInput, setSearchInput] = useState('');
   const [showProposals, setShowProposals] = useState(false);
   const [isSideNavCollapsed, setIsSideNavCollapsed] = useState(() => {
     return window.localStorage.getItem('megadoc.knowledgeNavCollapsed') === 'true';
   });
   const deferredSearch = useDeferredValue(searchInput.trim());
+
+  useEffect(() => {
+    if (initialSelectedDocumentIds.length > 0) {
+      setPanel('agent');
+    }
+  }, [initialSelectedDocumentIds.join('|')]);
 
   const topicsQuery = useKnowledgeTopics(false);
   const topics = topicsQuery.data ?? [];
@@ -210,7 +217,12 @@ function KnowledgeBase({ onOpenDocument }: Props) {
 
       <section className="min-h-0 overflow-hidden rounded-lg border border-cyan-300/15 bg-slate-900/85 p-3 shadow-2xl shadow-cyan-950/20 lg:p-4">
         {panel === 'facts' && <FactsPanel onOpenDocument={onOpenDocument} deferredSearch={deferredSearch} />}
-        {panel === 'agent' && <AgentPanel onOpenDocument={onOpenDocument} />}
+        {panel === 'agent' && (
+          <AgentPanel
+            onOpenDocument={onOpenDocument}
+            initialSelectedDocumentIds={initialSelectedDocumentIds}
+          />
+        )}
         {panel === 'specialists' && <SpecialistsPanel onOpenDocument={onOpenDocument} deferredSearch={deferredSearch} />}
         {panel === 'topics' && <TopicsPanel onOpenDocument={onOpenDocument} deferredSearch={deferredSearch} includeInactive={false} />}
         {panel === 'entities' && <EntitiesPanel onOpenDocument={onOpenDocument} deferredSearch={deferredSearch} />}

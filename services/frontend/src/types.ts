@@ -325,6 +325,7 @@ export interface KnowledgeAgentRequest {
   max_steps?: number;
   allow_vision?: boolean;
   history?: KnowledgeAgentConversationMessage[];
+  selected_document_ids?: string[];
 }
 
 export interface KnowledgeAgentConversationMessage {

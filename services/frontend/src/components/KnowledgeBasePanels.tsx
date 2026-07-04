@@ -1,6 +1,7 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { getKnowledgeAgentRun, streamKnowledgeAgent } from '../api/client';
 import {
+  useDocuments,
   useCanonicalEntities,
   useGraphConsolidationSuggestions,
   useKnowledgeAssertions,
@@ -54,10 +55,13 @@ const tabClass = (current: boolean) =>
 
 interface AgentPanelProps {
   onOpenDocument: (documentId: string) => void;
+  initialSelectedDocumentIds?: string[];
 }
 
-export function AgentPanel({ onOpenDocument }: AgentPanelProps) {
+export function AgentPanel({ onOpenDocument, initialSelectedDocumentIds = [] }: AgentPanelProps) {
   const [draft, setDraft] = useState('');
+  const [documentIdDraft, setDocumentIdDraft] = useState('');
+  const [selectedDocumentIds, setSelectedDocumentIds] = useState<string[]>(() => [...new Set(initialSelectedDocumentIds)]);
   const [allowVision, setAllowVision] = useState(false);
   const [activeTab, setActiveTab] = useState<'chat' | 'history'>('chat');
   const [messages, setMessages] = useState<Array<{ id: string; role: 'user' | 'assistant'; content: string; result?: KnowledgeAgentResponse | KnowledgeAgentRunDetail }>>([]);
@@ -65,11 +69,32 @@ export function AgentPanel({ onOpenDocument }: AgentPanelProps) {
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamError, setStreamError] = useState<string | null>(null);
   const runs = useKnowledgeAgentRuns(50);
+  const documentsQuery = useDocuments(200);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+
+  const documentById = useMemo(() => {
+    return new Map((documentsQuery.data ?? []).map((document) => [document.id, document]));
+  }, [documentsQuery.data]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [messages.length]);
+
+  useEffect(() => {
+    if (initialSelectedDocumentIds.length === 0) return;
+    setSelectedDocumentIds((current) => [...new Set([...current, ...initialSelectedDocumentIds])]);
+  }, [initialSelectedDocumentIds.join('|')]);
+
+  const addSelectedDocumentId = (documentId: string) => {
+    const normalized = documentId.trim();
+    if (!normalized) return;
+    setSelectedDocumentIds((current) => [...new Set([...current, normalized])]);
+    setDocumentIdDraft('');
+  };
+
+  const removeSelectedDocumentId = (documentId: string) => {
+    setSelectedDocumentIds((current) => current.filter((item) => item !== documentId));
+  };
 
   const ask = async () => {
     const question = draft.trim();
@@ -92,7 +117,7 @@ export function AgentPanel({ onOpenDocument }: AgentPanelProps) {
     ]);
     try {
       const response = await streamKnowledgeAgent(
-        { question, allow_vision: allowVision, max_steps: 16, history },
+        { question, allow_vision: allowVision, max_steps: 16, history, selected_document_ids: selectedDocumentIds },
         (event) => {
           if (event.type === 'step') {
             setLiveSteps((current) => [...current, event.payload as KnowledgeAgentTraceStep]);
@@ -139,7 +164,9 @@ export function AgentPanel({ onOpenDocument }: AgentPanelProps) {
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 p-4">
         <div>
           <p className="text-sm font-semibold text-white">Dialogo con l'archivio</p>
-          <p className="mt-1 text-xs text-slate-400">Chat continuativa con trace tool in tempo reale e fonti citate.</p>
+          <p className="mt-1 text-xs text-slate-400">
+            Chat continuativa con trace tool in tempo reale e fonti citate. I documenti selezionati entrano nel contesto, senza limitare i tool.
+          </p>
         </div>
         <div className="flex gap-2">
           <button onClick={() => setActiveTab('chat')} className={tabClass(activeTab === 'chat')}>Chat</button>
@@ -165,6 +192,61 @@ export function AgentPanel({ onOpenDocument }: AgentPanelProps) {
         />
       ) : (
         <div className="flex min-h-0 flex-1 flex-col">
+          <div className="border-b border-white/10 px-4 py-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs uppercase tracking-wide text-slate-400">Documenti nel contesto</span>
+              {selectedDocumentIds.length === 0 && (
+                <span className="text-xs text-slate-500">nessuno</span>
+              )}
+              {selectedDocumentIds.map((documentId) => {
+                const document = documentById.get(documentId);
+                return (
+                  <span
+                    key={documentId}
+                    className="inline-flex max-w-[24rem] items-center gap-2 rounded-full border border-cyan-300/25 bg-cyan-400/10 px-3 py-1 text-xs text-cyan-100"
+                    title={documentId}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => onOpenDocument(documentId)}
+                      className="truncate hover:text-white"
+                    >
+                      {document?.original_filename ?? documentId}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => removeSelectedDocumentId(documentId)}
+                      className="text-cyan-200/70 hover:text-white"
+                      title="Rimuovi dal contesto chat"
+                    >
+                      ×
+                    </button>
+                  </span>
+                );
+              })}
+            </div>
+            <form
+              className="mt-2 flex max-w-2xl gap-2"
+              onSubmit={(event) => {
+                event.preventDefault();
+                addSelectedDocumentId(documentIdDraft);
+              }}
+            >
+              <input
+                value={documentIdDraft}
+                onChange={(event) => setDocumentIdDraft(event.target.value)}
+                placeholder="Aggiungi document_id al contesto"
+                className="min-w-0 flex-1 rounded-full border border-white/10 bg-slate-900 px-3 py-2 text-xs text-white outline-none placeholder:text-slate-500"
+              />
+              <button
+                type="submit"
+                disabled={!documentIdDraft.trim()}
+                className="rounded-full border border-white/10 px-3 py-2 text-xs text-slate-300 hover:bg-white/10 disabled:opacity-40"
+              >
+                Aggiungi
+              </button>
+            </form>
+          </div>
           <div className="min-h-0 flex-1 overflow-y-auto p-4">
             {messages.length === 0 ? (
               <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.03] p-6 text-sm text-slate-400">

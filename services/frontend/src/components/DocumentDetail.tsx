@@ -24,6 +24,7 @@ import AccountingSpreadsheet from './AccountingSpreadsheet';
 interface Props {
   documentId: string;
   onBack: () => void;
+  onAskDocument: (documentId: string) => void;
   initialTab?: 'info' | 'pdf' | 'ocr' | 'knowledge' | 'versions' | 'assets';
 }
 
@@ -586,7 +587,7 @@ function TopicAssignmentManager({
 
 const TopicAssignmentManagerMemo = memo(TopicAssignmentManager);
 
-function DocumentDetail({ documentId, onBack, initialTab = 'info' }: Props) {
+function DocumentDetail({ documentId, onBack, onAskDocument, initialTab = 'info' }: Props) {
   const [activeTab, setActiveTab] = useState<'info' | 'pdf' | 'ocr' | 'knowledge' | 'versions' | 'assets' | 'bilancio'>(initialTab);
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
 
@@ -639,12 +640,20 @@ function DocumentDetail({ documentId, onBack, initialTab = 'info' }: Props) {
 
   return (
     <div>
-      <button
-        onClick={onBack}
-        className="mb-4 text-blue-600 hover:text-blue-800 flex items-center"
-      >
-        ← Back to documents
-      </button>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <button
+          onClick={onBack}
+          className="text-blue-600 hover:text-blue-800 flex items-center"
+        >
+          ← Back to documents
+        </button>
+        <button
+          onClick={() => onAskDocument(documentId)}
+          className="rounded-full border border-cyan-300/35 bg-cyan-400/15 px-4 py-2 text-sm font-medium text-cyan-100 hover:bg-cyan-400/25"
+        >
+          Chiedi in chat su questo documento
+        </button>
+      </div>
 
       <div className="bg-white rounded-lg shadow">
         <div className="border-b">
