@@ -2191,7 +2191,8 @@ def chat_with_knowledge_agent(
                 "Non inventare fatti: usa i tool per cercare documenti, topic, testo OCR e risultati specialistici. "
                 "Per domande naturali o concettuali usa semantic_search prima della ricerca keyword. "
                 "Prima di rispondere su un documento devi leggere il testo OCR con get_page_text per le pagine rilevanti. "
-                "La final_answer deve includere citations con document_id e pagina per ogni affermazione documentale. "
+                "La final_answer deve includere answer non vuoto e citations con document_id, page_from/page_to "
+                "e quote breve per ogni affermazione documentale. Non mettere la risposta solo in reasoning. "
                 "Se il testo OCR non basta e servirebbe vedere la pagina, usa request_page_vision. "
                 "La vision e' disponibile solo come richiesta strutturata: non fingere di aver visto immagini."
             ),
@@ -2229,6 +2230,7 @@ def chat_with_knowledge_agent(
             exclude_none=True,
         )
         if action.action == "final_answer":
+            action = _normalize_knowledge_agent_final(action)
             final_error = _validate_knowledge_agent_final(action, trace)
             if final_error:
                 trace.append(
@@ -2406,6 +2408,27 @@ def _validate_knowledge_agent_final(
         if not _trace_has_page_text_for_citation(trace, citation):
             return "each cited document/page must have been read with get_page_text before final_answer"
     return None
+
+
+def _normalize_knowledge_agent_final(action: _KnowledgeAgentAction) -> _KnowledgeAgentAction:
+    if action.action != "final_answer":
+        return action
+
+    patch: dict[str, Any] = {}
+    if (not action.answer or not action.answer.strip()) and action.reasoning.strip():
+        patch["answer"] = action.reasoning.strip()
+
+    if not action.citations and action.document_id and action.page_number is not None:
+        citation: dict[str, Any] = {
+            "document_id": action.document_id,
+            "page_from": action.page_number,
+            "page_to": action.page_number,
+        }
+        patch["citations"] = [citation]
+
+    if not patch:
+        return action
+    return action.model_copy(update=patch)
 
 
 def _trace_has_page_text_for_citation(
