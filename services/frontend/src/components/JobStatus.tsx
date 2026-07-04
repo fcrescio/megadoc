@@ -40,7 +40,7 @@ function JobStatus() {
       <div className="animate-pulse space-y-2">
         <div className="h-4 bg-gray-200 rounded w-1/4"></div>
         {[1, 2, 3].map((i) => (
-          <div key={i} className="h-10 rounded bg-indigo-900/55"></div>
+          <div key={i} className="h-10 bg-gray-200 rounded"></div>
         ))}
       </div>
     );
@@ -52,9 +52,9 @@ function JobStatus() {
       {jobs && jobs.length === 0 ? (
         <p className="text-slate-400">Nessun lavoro trovato.</p>
       ) : (
-        <div className="overflow-hidden rounded-lg border border-amber-300/20 bg-indigo-950/65 shadow-2xl shadow-indigo-950/30 divide-y divide-sky-300/10">
+        <div className="border border-slate-700 rounded-lg bg-slate-800 divide-y divide-slate-700 overflow-hidden">
           {jobs?.map((job: Job) => (
-            <div key={job.id} className="p-4 transition hover:bg-amber-300/10">
+            <div key={job.id} className="p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="font-mono text-sm text-slate-100">{job.id}</p>

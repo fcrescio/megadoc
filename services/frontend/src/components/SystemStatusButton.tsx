@@ -39,9 +39,9 @@ export default function SystemStatusButton() {
       </button>
 
       {open && (
-        <div className="absolute right-0 z-30 mt-3 w-[22rem] space-y-3 rounded-lg border border-amber-300/25 bg-indigo-950 p-4 shadow-2xl shadow-indigo-950/40">
+        <div className="absolute right-0 mt-3 w-[22rem] rounded-lg border border-slate-700 bg-slate-800 p-4 space-y-3 z-30">
           <div>
-            <p className="text-xs uppercase tracking-[0.28em] text-amber-200">Stato sistema</p>
+            <p className="text-xs uppercase tracking-[0.28em] text-cyan-300/75">Stato sistema</p>
             <p className="mt-1 text-sm text-slate-300">
               Se LLM o OCR remoto non rispondono, qui lo vedi subito. Il fallback non è più invisibile.
             </p>
@@ -60,7 +60,7 @@ export default function SystemStatusButton() {
               </div>
 
               {[data.ocr_backend, data.llm_backend].map((backend) => (
-                <div key={backend.name} className="rounded-2xl border border-sky-300/15 bg-sky-950/35 p-4">
+                <div key={backend.name} className="rounded-2xl border border-white/10 bg-white/5 p-4">
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <p className="text-sm font-semibold text-white">{backend.name}</p>
