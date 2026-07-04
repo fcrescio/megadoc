@@ -2301,6 +2301,11 @@ def chat_with_knowledge_agent(
         )
 
     if final_action is None:
+        final_action, final_step = _force_knowledge_agent_final_answer(provider, messages, trace, payload.max_steps + 1)
+        if final_step is not None:
+            trace.append(final_step)
+
+    if final_action is None:
         response = KnowledgeAgentChatResponse(
             status="incomplete",
             answer=(
@@ -2411,6 +2416,63 @@ def _validate_knowledge_agent_final(
         if not _trace_has_page_text_for_citation(trace, citation):
             return "each cited document/page must have been read with get_page_text before final_answer"
     return None
+
+
+def _force_knowledge_agent_final_answer(
+    provider: OpenAICompatibleProvider,
+    messages: list[ChatMessage],
+    trace: list[KnowledgeAgentTraceStep],
+    step: int,
+) -> tuple[_KnowledgeAgentAction | None, KnowledgeAgentTraceStep | None]:
+    forced_messages = [
+        *messages,
+        ChatMessage(
+            role="user",
+            content=(
+                "Il budget di tool e' esaurito. Non chiamare altri tool. "
+                "Se nel trace hai gia' letto pagine rilevanti con get_page_text, produci ora solo final_answer "
+                "con answer non vuoto e citations document_id/page_from/page_to. "
+                "Se non hai prove sufficienti, produci final_answer spiegando il limite e citando le pagine lette piu' rilevanti."
+            ),
+        ),
+    ]
+    try:
+        action, _ = provider.chat_with_json(forced_messages, _KnowledgeAgentAction, temperature=0.1, max_retries=2)
+        action = _KnowledgeAgentAction.model_validate(action)
+    except Exception as exc:
+        return None, KnowledgeAgentTraceStep(step=step, action="llm_error", error=str(exc))
+
+    action_input = action.model_dump(
+        mode="json",
+        exclude={"answer", "confidence", "citations"},
+        exclude_none=True,
+    )
+    if action.action != "final_answer":
+        return None, KnowledgeAgentTraceStep(
+            step=step,
+            action="invalid_final_answer",
+            reasoning=action.reasoning,
+            input=action_input,
+            error="forced finalization returned another tool action",
+        )
+
+    action = _normalize_knowledge_agent_final(action)
+    final_error = _validate_knowledge_agent_final(action, trace)
+    if final_error:
+        return None, KnowledgeAgentTraceStep(
+            step=step,
+            action="invalid_final_answer",
+            reasoning=action.reasoning,
+            input=action_input,
+            error=final_error,
+        )
+    return action, KnowledgeAgentTraceStep(
+        step=step,
+        action=action.action,
+        reasoning=action.reasoning,
+        input=action_input,
+        output={"answer": action.answer, "confidence": action.confidence},
+    )
 
 
 def _normalize_knowledge_agent_final(action: _KnowledgeAgentAction) -> _KnowledgeAgentAction:
