@@ -324,6 +324,12 @@ export interface KnowledgeAgentRequest {
   question: string;
   max_steps?: number;
   allow_vision?: boolean;
+  history?: KnowledgeAgentConversationMessage[];
+}
+
+export interface KnowledgeAgentConversationMessage {
+  role: 'user' | 'assistant';
+  content: string;
 }
 
 export interface KnowledgeAgentTraceStep {

@@ -14,7 +14,7 @@ from decimal import Decimal
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, or_, select, text
 from sqlalchemy.orm import Session, selectinload
@@ -163,10 +163,16 @@ class _KnowledgeAgentAction(BaseModel):
     citations: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class KnowledgeAgentConversationMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(..., min_length=1, max_length=8000)
+
+
 class KnowledgeAgentChatRequest(BaseModel):
     question: str = Field(..., min_length=3, max_length=4000)
     max_steps: int = Field(default=12, ge=1, le=20)
     allow_vision: bool = Field(default=False)
+    history: list[KnowledgeAgentConversationMessage] = Field(default_factory=list, max_length=20)
 
 
 class KnowledgeAgentTraceStep(BaseModel):
@@ -2184,31 +2190,7 @@ def chat_with_knowledge_agent(
     if provider is None:
         raise HTTPException(status_code=503, detail="LLM backend is not configured")
 
-    messages = [
-        ChatMessage(
-            role="system",
-            content=(
-                "Sei un agente read-only che interroga un archivio documentale tramite tool. "
-                "Non inventare fatti: usa i tool per cercare documenti, topic, testo OCR e risultati specialistici. "
-                "Per domande naturali o concettuali usa semantic_search prima della ricerca keyword. "
-                "Prima di rispondere su un documento devi leggere il testo OCR con get_page_text per le pagine rilevanti. "
-                "Dopo aver identificato un documento lungo, usa search_document_text per localizzare le pagine rilevanti "
-                "invece di sfogliarlo pagina per pagina. "
-                "La final_answer deve includere answer non vuoto e citations con document_id, page_from/page_to "
-                "e quote breve per ogni affermazione documentale. Non mettere la risposta solo in reasoning. "
-                "Se il testo OCR non basta e servirebbe vedere la pagina, usa request_page_vision. "
-                "La vision e' disponibile solo come richiesta strutturata: non fingere di aver visto immagini."
-            ),
-        ),
-        ChatMessage(
-            role="user",
-            content=(
-                f"Domanda utente: {payload.question}\n"
-                f"Vision consentita dall'utente: {payload.allow_vision}.\n"
-                "Scegli una sola azione JSON alla volta."
-            ),
-        ),
-    ]
+    messages = _build_knowledge_agent_messages(payload)
     trace: list[KnowledgeAgentTraceStep] = []
     vision_requests: list[KnowledgeAgentVisionRequest] = []
     final_action: _KnowledgeAgentAction | None = None
@@ -2373,6 +2355,151 @@ def get_knowledge_agent_run(
     return _serialize_knowledge_agent_run_detail(run)
 
 
+@router.post("/agent/chat/stream")
+def stream_knowledge_agent_chat(
+    payload: KnowledgeAgentChatRequest,
+    db: Session = Depends(get_db_session),
+):
+    provider = _knowledge_agent_provider()
+    if provider is None:
+        raise HTTPException(status_code=503, detail="LLM backend is not configured")
+
+    def event_stream():
+        started = time.monotonic()
+        messages = _build_knowledge_agent_messages(payload)
+        trace: list[KnowledgeAgentTraceStep] = []
+        vision_requests: list[KnowledgeAgentVisionRequest] = []
+        final_action: _KnowledgeAgentAction | None = None
+
+        yield _knowledge_agent_stream_event("status", {"status": "running", "model": provider.model_name})
+        for step in range(1, payload.max_steps + 1):
+            try:
+                action, _ = provider.chat_with_json(messages, _KnowledgeAgentAction, temperature=0.1, max_retries=2)
+                action = _KnowledgeAgentAction.model_validate(action)
+            except Exception as exc:
+                trace_step = KnowledgeAgentTraceStep(step=step, action="llm_error", error=str(exc))
+                trace.append(trace_step)
+                yield _knowledge_agent_stream_event("step", trace_step.model_dump(mode="json"))
+                break
+
+            action_input = action.model_dump(
+                mode="json",
+                exclude={"answer", "confidence", "citations"},
+                exclude_none=True,
+            )
+            if action.action == "final_answer":
+                action = _normalize_knowledge_agent_final(action)
+                final_error = _validate_knowledge_agent_final(action, trace)
+                if final_error:
+                    trace_step = KnowledgeAgentTraceStep(
+                        step=step,
+                        action="invalid_final_answer",
+                        reasoning=action.reasoning,
+                        input=action_input,
+                        error=final_error,
+                    )
+                    trace.append(trace_step)
+                    yield _knowledge_agent_stream_event("step", trace_step.model_dump(mode="json"))
+                    messages.append(ChatMessage(role="assistant", content=action.model_dump_json(exclude_none=True)))
+                    messages.append(
+                        ChatMessage(
+                            role="user",
+                            content=(
+                                f"La final_answer non e' valida: {final_error}. "
+                                "Prima leggi le pagine rilevanti con get_page_text se necessario, poi produci una "
+                                "final_answer con answer non vuoto e citations contenenti document_id, page_from/page_to "
+                                "e quote breve."
+                            ),
+                        )
+                    )
+                    continue
+                final_action = action
+                trace_step = KnowledgeAgentTraceStep(
+                    step=step,
+                    action=action.action,
+                    reasoning=action.reasoning,
+                    input=action_input,
+                    output={"answer": action.answer, "confidence": action.confidence},
+                )
+                trace.append(trace_step)
+                yield _knowledge_agent_stream_event("step", trace_step.model_dump(mode="json"))
+                break
+
+            tool_output: dict[str, Any] | list[Any]
+            error: str | None = None
+            try:
+                tool_output = _run_knowledge_agent_tool(db, action, allow_vision=payload.allow_vision)
+                if action.action == "request_page_vision" and isinstance(tool_output, dict):
+                    request = tool_output.get("vision_request")
+                    if isinstance(request, dict):
+                        vision_requests.append(KnowledgeAgentVisionRequest.model_validate(request))
+            except Exception as exc:
+                tool_output = {}
+                error = str(exc)
+
+            trace_step = KnowledgeAgentTraceStep(
+                step=step,
+                action=action.action,
+                reasoning=action.reasoning,
+                input=action_input,
+                output=tool_output,
+                error=error,
+            )
+            trace.append(trace_step)
+            yield _knowledge_agent_stream_event("step", trace_step.model_dump(mode="json"))
+            messages.append(ChatMessage(role="assistant", content=action.model_dump_json(exclude_none=True)))
+            messages.append(
+                ChatMessage(
+                    role="user",
+                    content=f"Risultato tool {action.action}: {tool_output if error is None else {'error': error}}",
+                )
+            )
+
+        if final_action is None:
+            final_action, final_step = _force_knowledge_agent_final_answer(provider, messages, trace, payload.max_steps + 1)
+            if final_step is not None:
+                trace.append(final_step)
+                yield _knowledge_agent_stream_event("step", final_step.model_dump(mode="json"))
+
+        if final_action is None:
+            response = KnowledgeAgentChatResponse(
+                status="incomplete",
+                answer=(
+                    "Non sono riuscito a produrre una risposta con fonti pagina verificabili. "
+                    "Controlla il trace: l'agente deve leggere le pagine con get_page_text prima di rispondere."
+                ),
+                confidence=None,
+                tool_trace=trace,
+                citations=[],
+                vision_requests=vision_requests,
+                model=provider.model_name,
+            )
+        else:
+            citations = [
+                KnowledgeAgentCitation.model_validate(item)
+                for item in final_action.citations
+                if isinstance(item, dict) and any(value is not None for value in item.values())
+            ]
+            response = KnowledgeAgentChatResponse(
+                status="answered",
+                answer=final_action.answer or "",
+                confidence=final_action.confidence,
+                tool_trace=trace,
+                citations=citations,
+                vision_requests=vision_requests,
+                model=provider.model_name,
+            )
+        response.run_id = _persist_knowledge_agent_run(
+            db,
+            payload=payload,
+            response=response,
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+        yield _knowledge_agent_stream_event("final", response.model_dump(mode="json"))
+
+    return StreamingResponse(event_stream(), media_type="application/x-ndjson")
+
+
 @router.get("/agent/search-index/stats", response_model=KnowledgeSearchIndexStats)
 def get_knowledge_search_index_stats(
     db: Session = Depends(get_db_session),
@@ -2416,6 +2543,48 @@ def _validate_knowledge_agent_final(
         if not _trace_has_page_text_for_citation(trace, citation):
             return "each cited document/page must have been read with get_page_text before final_answer"
     return None
+
+
+def _build_knowledge_agent_messages(payload: KnowledgeAgentChatRequest) -> list[ChatMessage]:
+    messages = [
+        ChatMessage(
+            role="system",
+            content=(
+                "Sei un agente read-only che interroga un archivio documentale tramite tool. "
+                "Non inventare fatti: usa i tool per cercare documenti, topic, testo OCR e risultati specialistici. "
+                "Per domande naturali o concettuali usa semantic_search prima della ricerca keyword. "
+                "Prima di rispondere su un documento devi leggere il testo OCR con get_page_text per le pagine rilevanti. "
+                "Dopo aver identificato un documento lungo, usa search_document_text per localizzare le pagine rilevanti "
+                "invece di sfogliarlo pagina per pagina. "
+                "La final_answer deve includere answer non vuoto e citations con document_id, page_from/page_to "
+                "e quote breve per ogni affermazione documentale. Non mettere la risposta solo in reasoning. "
+                "Se il testo OCR non basta e servirebbe vedere la pagina, usa request_page_vision. "
+                "La vision e' disponibile solo come richiesta strutturata: non fingere di aver visto immagini."
+            ),
+        )
+    ]
+    for item in payload.history[-12:]:
+        messages.append(
+            ChatMessage(
+                role=item.role,
+                content=f"Messaggio precedente ({item.role}): {item.content}",
+            )
+        )
+    messages.append(
+        ChatMessage(
+            role="user",
+            content=(
+                f"Domanda utente: {payload.question}\n"
+                f"Vision consentita dall'utente: {payload.allow_vision}.\n"
+                "Scegli una sola azione JSON alla volta."
+            ),
+        )
+    )
+    return messages
+
+
+def _knowledge_agent_stream_event(event_type: str, payload: dict[str, Any]) -> str:
+    return json.dumps({"type": event_type, "payload": payload}, default=str, ensure_ascii=False) + "\n"
 
 
 def _force_knowledge_agent_final_answer(

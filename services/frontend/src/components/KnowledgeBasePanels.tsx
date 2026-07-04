@@ -1,4 +1,5 @@
-import { memo, useEffect, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { getKnowledgeAgentRun, streamKnowledgeAgent } from '../api/client';
 import {
   useCanonicalEntities,
   useGraphConsolidationSuggestions,
@@ -8,8 +9,6 @@ import {
   useKnowledgeNode,
   useKnowledgeNodes,
   useKnowledgeSearch,
-  useKnowledgeAgentChat,
-  useKnowledgeAgentRun,
   useKnowledgeAgentRuns,
   useMergeCanonicalEntity,
   useKnowledgeTopic,
@@ -19,7 +18,7 @@ import {
   useSpecialistAccountingStatements,
   useSpecialistUtilityBills,
 } from '../hooks/useDocuments';
-import type { KnowledgeAssertion } from '../types';
+import type { KnowledgeAgentResponse, KnowledgeAgentRunDetail, KnowledgeAgentTraceStep, KnowledgeAssertion } from '../types';
 
 function formatDate(value: string | null | undefined) {
   if (!value) return 'n/d';
@@ -58,172 +57,342 @@ interface AgentPanelProps {
 }
 
 export function AgentPanel({ onOpenDocument }: AgentPanelProps) {
-  const [question, setQuestion] = useState('');
+  const [draft, setDraft] = useState('');
   const [allowVision, setAllowVision] = useState(false);
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
-  const agent = useKnowledgeAgentChat();
-  const runs = useKnowledgeAgentRuns(20);
-  const selectedRun = useKnowledgeAgentRun(selectedRunId);
-  const result = selectedRun.data ?? agent.data;
+  const [activeTab, setActiveTab] = useState<'chat' | 'history'>('chat');
+  const [messages, setMessages] = useState<Array<{ id: string; role: 'user' | 'assistant'; content: string; result?: KnowledgeAgentResponse | KnowledgeAgentRunDetail }>>([]);
+  const [liveSteps, setLiveSteps] = useState<KnowledgeAgentTraceStep[]>([]);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [streamError, setStreamError] = useState<string | null>(null);
+  const runs = useKnowledgeAgentRuns(50);
+  const bottomRef = useRef<HTMLDivElement | null>(null);
 
-  const ask = () => {
-    const trimmed = question.trim();
-    if (!trimmed) return;
-    setSelectedRunId(null);
-    agent.mutate({ question: trimmed, allow_vision: allowVision, max_steps: 12 });
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [messages, liveSteps.length, isStreaming]);
+
+  const ask = async () => {
+    const question = draft.trim();
+    if (!question || isStreaming) return;
+    const history = messages
+      .filter((message) => message.content.trim())
+      .slice(-10)
+      .map((message) => ({ role: message.role, content: message.content }));
+    const userMessage = { id: crypto.randomUUID(), role: 'user' as const, content: question };
+    const assistantId = crypto.randomUUID();
+    setDraft('');
+    setActiveTab('chat');
+    setStreamError(null);
+    setLiveSteps([]);
+    setIsStreaming(true);
+    setMessages((current) => [
+      ...current,
+      userMessage,
+      { id: assistantId, role: 'assistant', content: 'Sto interrogando l’archivio...', result: undefined },
+    ]);
+    try {
+      const response = await streamKnowledgeAgent(
+        { question, allow_vision: allowVision, max_steps: 16, history },
+        (event) => {
+          if (event.type === 'step') {
+            setLiveSteps((current) => [...current, event.payload as KnowledgeAgentTraceStep]);
+          }
+          if (event.type === 'final') {
+            const finalResponse = event.payload as KnowledgeAgentResponse;
+            setMessages((current) =>
+              current.map((message) =>
+                message.id === assistantId ? { ...message, content: finalResponse.answer, result: finalResponse } : message,
+              ),
+            );
+          }
+        },
+      );
+      setMessages((current) =>
+        current.map((message) =>
+          message.id === assistantId ? { ...message, content: response.answer, result: response } : message,
+        ),
+      );
+      runs.refetch();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setStreamError(message);
+      setMessages((current) =>
+        current.map((item) => (item.id === assistantId ? { ...item, content: `Errore: ${message}` } : item)),
+      );
+    } finally {
+      setIsStreaming(false);
+    }
+  };
+
+  const loadRunIntoChat = async (run: KnowledgeAgentRunDetail | undefined) => {
+    if (!run) return;
+    setActiveTab('chat');
+    setLiveSteps([]);
+    setMessages([
+      { id: `${run.id}-q`, role: 'user', content: run.question },
+      { id: `${run.id}-a`, role: 'assistant', content: run.answer, result: run },
+    ]);
   };
 
   return (
-    <div className="grid h-full min-h-0 gap-3 lg:grid-cols-[0.85fr_1.15fr]">
-      <div className="flex min-h-0 flex-col gap-3 rounded-2xl border border-white/10 bg-slate-950/35 p-4">
+    <div className="flex h-full min-h-0 flex-col rounded-2xl border border-white/10 bg-slate-950/35">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 p-4">
         <div>
           <p className="text-sm font-semibold text-white">Dialogo con l'archivio</p>
-          <p className="mt-1 text-xs text-slate-400">
-            L'agente usa tool read-only sulla base dati e restituisce traccia, citazioni e richieste vision.
-          </p>
+          <p className="mt-1 text-xs text-slate-400">Chat continuativa con trace tool in tempo reale e fonti citate.</p>
         </div>
-        <textarea
-          value={question}
-          onChange={(event) => setQuestion(event.target.value)}
-          placeholder="Esempio: quali documenti parlano dell'appartamento di Pisa e quali hanno tabelle contabili?"
-          className="min-h-[11rem] flex-1 resize-none rounded-2xl border border-white/10 bg-slate-900 p-3 text-sm text-white outline-none placeholder:text-slate-500"
-        />
-        <label className="flex items-start gap-2 text-xs text-slate-300">
-          <input
-            type="checkbox"
-            checked={allowVision}
-            onChange={(event) => setAllowVision(event.target.checked)}
-            className="mt-0.5"
-          />
-          <span>Consenti all'agente di chiedere pagine da analizzare con vision quando il testo OCR non basta.</span>
-        </label>
-        <button
-          onClick={ask}
-          disabled={agent.isPending || question.trim().length < 3}
-          className="rounded-full border border-cyan-300/35 bg-cyan-400/15 px-4 py-2 text-sm text-cyan-100 disabled:opacity-40"
-        >
-          {agent.isPending ? 'Interrogo...' : 'Chiedi'}
-        </button>
-        {agent.error && (
-          <p className="rounded-xl border border-rose-300/25 bg-rose-400/10 p-3 text-sm text-rose-100">
-            {(agent.error as Error).message}
-          </p>
-        )}
-        <div className="min-h-0 flex-1 overflow-y-auto rounded-2xl border border-white/10 bg-slate-900/70 p-3">
-          <div className="mb-2 flex items-center justify-between gap-2">
-            <p className="text-sm font-semibold text-white">Ultimi dialoghi</p>
-            <button
-              onClick={() => runs.refetch()}
-              className="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-300 hover:bg-white/10"
-            >
-              Aggiorna
-            </button>
-          </div>
-          {runs.isLoading ? (
-            <p className="text-xs text-slate-400">Caricamento storico...</p>
-          ) : runs.data?.length ? (
-            <div className="space-y-2">
-              {runs.data.map((run) => (
-                <button
-                  key={run.id}
-                  onClick={() => setSelectedRunId(run.id)}
-                  className={`w-full rounded-xl border p-3 text-left hover:bg-white/10 ${
-                    selectedRunId === run.id ? 'border-cyan-300/35 bg-cyan-400/10' : 'border-white/10 bg-white/5'
-                  }`}
-                >
-                  <p className="line-clamp-2 text-xs font-medium text-slate-100">{run.question}</p>
-                  <p className="mt-1 text-[11px] text-slate-500">
-                    {formatDateTime(run.created_at)} · {run.status} · {run.tool_step_count} tool · {run.citation_count} fonti
-                    {run.duration_ms !== null ? ` · ${run.duration_ms} ms` : ''}
-                  </p>
-                </button>
-              ))}
-            </div>
-          ) : (
-            <p className="text-xs text-slate-400">Nessun dialogo salvato.</p>
-          )}
+        <div className="flex gap-2">
+          <button onClick={() => setActiveTab('chat')} className={tabClass(activeTab === 'chat')}>Chat</button>
+          <button onClick={() => setActiveTab('history')} className={tabClass(activeTab === 'history')}>Storico</button>
+          <button
+            onClick={() => {
+              setMessages([]);
+              setLiveSteps([]);
+              setStreamError(null);
+            }}
+            disabled={isStreaming || messages.length === 0}
+            className="rounded-full border border-white/10 px-4 py-2 text-sm text-slate-300 hover:bg-white/10 disabled:opacity-40"
+          >
+            Nuova chat
+          </button>
         </div>
       </div>
 
-      <div className="min-h-0 overflow-y-auto rounded-2xl border border-white/10 bg-slate-950/35 p-4">
-        {selectedRun.isFetching && selectedRunId ? (
-          <p className="text-sm text-slate-400">Caricamento dialogo...</p>
-        ) : !result ? (
-          <p className="text-sm text-slate-400">Fai una domanda per vedere risposta e strumenti usati.</p>
-        ) : (
-          <div className="space-y-4">
-            <section className="rounded-2xl border border-cyan-300/20 bg-cyan-400/10 p-4">
-              <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-cyan-100">
-                <span>{result.status}</span>
-                {result.model && <span>modello: {result.model}</span>}
-                {result.confidence !== null && <span>{Math.round(result.confidence * 100)}% confidenza</span>}
-                {'run_id' in result && result.run_id && <span>run: {result.run_id}</span>}
-                {'id' in result && <span>run: {result.id}</span>}
+      {activeTab === 'history' ? (
+        <AgentHistoryPanel
+          runs={runs}
+          onLoad={loadRunIntoChat}
+        />
+      ) : (
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="min-h-0 flex-1 overflow-y-auto p-4">
+            {messages.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.03] p-6 text-sm text-slate-400">
+                Fai una domanda. Le successive saranno inviate insieme al contesto della chat corrente.
               </div>
-              {'question' in result && <p className="mb-3 text-sm text-cyan-50/80">Domanda: {result.question}</p>}
-              <p className="whitespace-pre-wrap text-sm leading-6 text-white">{result.answer}</p>
-            </section>
-
-            {result.citations.length > 0 && (
-              <section>
-                <p className="mb-2 text-sm font-semibold text-white">Fonti</p>
-                <div className="grid gap-2 md:grid-cols-2">
-                  {result.citations.map((citation, index) => (
-                    <button
-                      key={`${citation.document_unit_id ?? citation.document_id}-${index}`}
-                      onClick={() => citation.document_id && onOpenDocument(citation.document_id)}
-                      disabled={!citation.document_id}
-                      className="rounded-xl border border-white/10 bg-white/5 p-3 text-left text-sm hover:bg-white/10 disabled:opacity-60"
-                    >
-                      <p className="truncate text-cyan-200">{citation.title || citation.original_filename || 'Documento'}</p>
-                      <p className="mt-1 text-xs text-slate-400">
-                        Pagine {citation.page_from ?? '?'}-{citation.page_to ?? citation.page_from ?? '?'}
-                      </p>
-                      {citation.quote && <p className="mt-2 line-clamp-3 text-xs text-slate-300">{citation.quote}</p>}
-                    </button>
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {result.vision_requests.length > 0 && (
-              <section className="rounded-2xl border border-amber-300/20 bg-amber-400/10 p-3">
-                <p className="text-sm font-semibold text-amber-100">Pagine richieste per vision</p>
-                <div className="mt-2 space-y-2">
-                  {result.vision_requests.map((request) => (
-                    <button
-                      key={`${request.document_id}-${request.page_number}`}
-                      onClick={() => onOpenDocument(request.document_id)}
-                      className="block w-full rounded-xl border border-amber-300/15 bg-slate-950/25 p-3 text-left text-xs text-amber-50"
-                    >
-                      Documento {request.document_id}, pagina {request.page_number}
-                      {request.reason && <span className="mt-1 block text-amber-100/80">{request.reason}</span>}
-                    </button>
-                  ))}
-                </div>
-              </section>
-            )}
-
-            <section>
-              <p className="mb-2 text-sm font-semibold text-white">Trace tool</p>
-              <div className="space-y-2">
-                {result.tool_trace.map((step) => (
-                  <details key={step.step} className="rounded-xl border border-white/10 bg-white/5 p-3">
-                    <summary className="cursor-pointer text-sm text-slate-200">
-                      #{step.step} {step.action}
-                      {step.error && <span className="ml-2 text-rose-200">errore</span>}
-                    </summary>
-                    {step.reasoning && <p className="mt-2 text-xs text-slate-400">{step.reasoning}</p>}
-                    <pre className="mt-2 max-h-64 overflow-auto rounded-lg bg-slate-950/70 p-3 text-xs text-slate-300">
-                      {JSON.stringify({ input: step.input, output: step.output, error: step.error }, null, 2)}
-                    </pre>
-                  </details>
+            ) : (
+              <div className="space-y-4">
+                {messages.map((message, index) => (
+                  <ChatMessageCard
+                    key={message.id}
+                    message={message}
+                    liveSteps={index === messages.length - 1 && isStreaming ? liveSteps : []}
+                    onOpenDocument={onOpenDocument}
+                  />
                 ))}
               </div>
-            </section>
+            )}
+            {streamError && (
+              <p className="mt-3 rounded-xl border border-rose-300/25 bg-rose-400/10 p-3 text-sm text-rose-100">
+                {streamError}
+              </p>
+            )}
+            <div ref={bottomRef} />
           </div>
-        )}
+
+          <div className="border-t border-white/10 p-4">
+            <textarea
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                  ask();
+                }
+              }}
+              placeholder="Scrivi un messaggio. Ctrl/Cmd+Invio per inviare."
+              className="min-h-[5.5rem] w-full resize-none rounded-2xl border border-white/10 bg-slate-900 p-3 text-sm text-white outline-none placeholder:text-slate-500"
+            />
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+              <label className="flex items-start gap-2 text-xs text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={allowVision}
+                  onChange={(event) => setAllowVision(event.target.checked)}
+                  className="mt-0.5"
+                />
+                <span>Consenti richieste vision quando l'OCR non basta.</span>
+              </label>
+              <button
+                onClick={ask}
+                disabled={isStreaming || draft.trim().length < 3}
+                className="rounded-full border border-cyan-300/35 bg-cyan-400/15 px-5 py-2 text-sm text-cyan-100 disabled:opacity-40"
+              >
+                {isStreaming ? 'Ragionamento in corso...' : 'Invia'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ChatMessageCard({
+  message,
+  liveSteps,
+  onOpenDocument,
+}: {
+  message: { role: 'user' | 'assistant'; content: string; result?: KnowledgeAgentResponse | KnowledgeAgentRunDetail };
+  liveSteps: KnowledgeAgentTraceStep[];
+  onOpenDocument: (documentId: string) => void;
+}) {
+  const result = message.result;
+  return (
+    <div className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+      <div
+        className={`max-w-[min(920px,92%)] rounded-2xl border p-4 ${
+          message.role === 'user'
+            ? 'border-cyan-300/30 bg-cyan-400/15 text-cyan-50'
+            : 'border-white/10 bg-slate-900/80 text-slate-100'
+        }`}
+      >
+        <div className="mb-2 text-[11px] uppercase tracking-wide text-slate-400">
+          {message.role === 'user' ? 'Tu' : 'Agente'}
+          {result?.status && <span className="ml-2 normal-case text-slate-500">{result.status}</span>}
+          {result?.model && <span className="ml-2 normal-case text-slate-500">{result.model}</span>}
+        </div>
+        <p className="whitespace-pre-wrap text-sm leading-6">{message.content}</p>
+        {result && <AgentResultDetails result={result} onOpenDocument={onOpenDocument} />}
+        {liveSteps.length > 0 && <AgentTrace steps={liveSteps} compact />}
       </div>
+    </div>
+  );
+}
+
+function AgentResultDetails({
+  result,
+  onOpenDocument,
+}: {
+  result: KnowledgeAgentResponse | KnowledgeAgentRunDetail;
+  onOpenDocument: (documentId: string) => void;
+}) {
+  return (
+    <div className="mt-4 space-y-3">
+      {result.citations.length > 0 && (
+        <section>
+          <p className="mb-2 text-xs font-semibold text-white">Fonti</p>
+          <div className="grid gap-2 md:grid-cols-2">
+            {result.citations.map((citation, index) => (
+              <button
+                key={`${citation.document_unit_id ?? citation.document_id}-${index}`}
+                onClick={() => citation.document_id && onOpenDocument(citation.document_id)}
+                disabled={!citation.document_id}
+                className="rounded-xl border border-white/10 bg-white/5 p-3 text-left text-sm hover:bg-white/10 disabled:opacity-60"
+              >
+                <p className="truncate text-cyan-200">{citation.title || citation.original_filename || 'Documento'}</p>
+                <p className="mt-1 text-xs text-slate-400">
+                  Pagine {citation.page_from ?? '?'}-{citation.page_to ?? citation.page_from ?? '?'}
+                </p>
+                {citation.quote && <p className="mt-2 line-clamp-3 text-xs text-slate-300">{citation.quote}</p>}
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+      {result.vision_requests.length > 0 && (
+        <section className="rounded-2xl border border-amber-300/20 bg-amber-400/10 p-3">
+          <p className="text-sm font-semibold text-amber-100">Pagine richieste per vision</p>
+          <div className="mt-2 space-y-2">
+            {result.vision_requests.map((request) => (
+              <button
+                key={`${request.document_id}-${request.page_number}`}
+                onClick={() => onOpenDocument(request.document_id)}
+                className="block w-full rounded-xl border border-amber-300/15 bg-slate-950/25 p-3 text-left text-xs text-amber-50"
+              >
+                Documento {request.document_id}, pagina {request.page_number}
+                {request.reason && <span className="mt-1 block text-amber-100/80">{request.reason}</span>}
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+      <AgentTrace steps={result.tool_trace} />
+    </div>
+  );
+}
+
+function AgentTrace({ steps, compact = false }: { steps: KnowledgeAgentTraceStep[]; compact?: boolean }) {
+  if (steps.length === 0) return null;
+  return (
+    <section>
+      <p className="mb-2 text-xs font-semibold text-white">{compact ? 'Step in corso' : 'Trace tool'}</p>
+      <div className="space-y-2">
+        {steps.map((step) => (
+          <details key={`${step.step}-${step.action}`} className="rounded-xl border border-white/10 bg-white/5 p-3" open={compact}>
+            <summary className="cursor-pointer text-sm text-slate-200">
+              #{step.step} {step.action}
+              {step.error && <span className="ml-2 text-rose-200">errore</span>}
+            </summary>
+            {step.reasoning && <p className="mt-2 text-xs text-slate-400">{step.reasoning}</p>}
+            {!compact && (
+              <pre className="mt-2 max-h-64 overflow-auto rounded-lg bg-slate-950/70 p-3 text-xs text-slate-300">
+                {JSON.stringify({ input: step.input, output: step.output, error: step.error }, null, 2)}
+              </pre>
+            )}
+          </details>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function AgentHistoryPanel({
+  runs,
+  onLoad,
+}: {
+  runs: ReturnType<typeof useKnowledgeAgentRuns>;
+  onLoad: (run: KnowledgeAgentRunDetail | undefined) => void;
+}) {
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [loadingRunId, setLoadingRunId] = useState<string | null>(null);
+  const selectedRun = useMemo(
+    () => runs.data?.find((run) => run.id === selectedRunId),
+    [runs.data, selectedRunId],
+  );
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto p-4">
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <p className="text-sm font-semibold text-white">Ultimi dialoghi</p>
+        <button
+          onClick={() => runs.refetch()}
+          className="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-300 hover:bg-white/10"
+        >
+          Aggiorna
+        </button>
+      </div>
+      {runs.isLoading ? (
+        <p className="text-xs text-slate-400">Caricamento storico...</p>
+      ) : runs.data?.length ? (
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {runs.data.map((run) => (
+            <button
+              key={run.id}
+              onClick={async () => {
+                setSelectedRunId(run.id);
+                setLoadingRunId(run.id);
+                try {
+                  onLoad(await getKnowledgeAgentRun(run.id));
+                } finally {
+                  setLoadingRunId(null);
+                }
+              }}
+              className={`rounded-xl border p-3 text-left hover:bg-white/10 ${
+                selectedRun?.id === run.id ? 'border-cyan-300/35 bg-cyan-400/10' : 'border-white/10 bg-white/5'
+              }`}
+            >
+              <p className="line-clamp-3 text-sm font-medium text-slate-100">{run.question}</p>
+              <p className="mt-2 text-[11px] text-slate-500">
+                {formatDateTime(run.created_at)} · {run.status} · {run.tool_step_count} tool · {run.citation_count} fonti
+                {run.duration_ms !== null ? ` · ${run.duration_ms} ms` : ''}
+              </p>
+              {loadingRunId === run.id && <p className="mt-2 text-xs text-cyan-200">Apro dialogo...</p>}
+              <p className="mt-2 line-clamp-3 text-xs text-slate-400">{run.answer}</p>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <p className="text-xs text-slate-400">Nessun dialogo salvato.</p>
+      )}
     </div>
   );
 }

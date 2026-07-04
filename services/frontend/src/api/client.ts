@@ -180,6 +180,50 @@ export async function askKnowledgeAgent(payload: KnowledgeAgentRequest): Promise
   return handleResponse<KnowledgeAgentResponse>(response);
 }
 
+export async function streamKnowledgeAgent(
+  payload: KnowledgeAgentRequest,
+  onEvent: (event: { type: string; payload: unknown }) => void,
+): Promise<KnowledgeAgentResponse> {
+  const response = await fetch(`${API_BASE}/knowledge/agent/chat/stream`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok || !response.body) {
+    return handleResponse<KnowledgeAgentResponse>(response);
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let finalResponse: KnowledgeAgentResponse | null = null;
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      const event = JSON.parse(line) as { type: string; payload: unknown };
+      onEvent(event);
+      if (event.type === 'final') {
+        finalResponse = event.payload as KnowledgeAgentResponse;
+      }
+    }
+  }
+  if (buffer.trim()) {
+    const event = JSON.parse(buffer) as { type: string; payload: unknown };
+    onEvent(event);
+    if (event.type === 'final') {
+      finalResponse = event.payload as KnowledgeAgentResponse;
+    }
+  }
+  if (!finalResponse) {
+    throw new Error('La risposta streaming non contiene un evento finale');
+  }
+  return finalResponse;
+}
+
 export async function getKnowledgeAgentRuns(limit = 25): Promise<KnowledgeAgentRunSummary[]> {
   const params = new URLSearchParams();
   params.set('limit', String(limit));
