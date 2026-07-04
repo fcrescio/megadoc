@@ -146,6 +146,86 @@ class OpenAICompatibleProvider(LLMProvider):
 
         raise RuntimeError(f"Failed to get valid JSON after {max_retries} attempts")
 
+    def chat_with_image_json(
+        self,
+        messages: list[ChatMessage],
+        *,
+        image_base64: str,
+        image_media_type: str,
+        prompt: str,
+        schema: type[BaseModel],
+        temperature: float = 0.1,
+        max_retries: int = 2,
+    ) -> tuple[BaseModel, str]:
+        """Send text context plus one image and get structured JSON response."""
+        multimodal_messages: list[dict[str, Any]] = [
+            {"role": message.role, "content": message.content}
+            for message in messages
+        ]
+        multimodal_messages.append(
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:{image_media_type};base64,{image_base64}",
+                        },
+                    },
+                ],
+            }
+        )
+        response_format = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": schema.__name__,
+                "schema": schema.model_json_schema(),
+            },
+        }
+        use_response_format = True
+        for attempt in range(max_retries):
+            client = self._get_client()
+            payload: dict[str, Any] = {
+                "model": self._model,
+                "messages": multimodal_messages,
+                "temperature": temperature,
+                "chat_template_kwargs": {"enable_thinking": False},
+            }
+            if self.max_tokens is not None:
+                payload["max_tokens"] = self.max_tokens
+            if use_response_format:
+                payload["response_format"] = response_format
+            response: httpx.Response | None = None
+            try:
+                response = client.post("/chat/completions", json=payload)
+                response.raise_for_status()
+                data = response.json()
+                content = data["choices"][0]["message"]["content"]
+                parsed = schema.model_validate_json(self._extract_json_text(content))
+                return parsed, content
+            except httpx.HTTPStatusError:
+                if use_response_format and attempt < max_retries - 1:
+                    use_response_format = False
+                    continue
+                raise
+            except (ValidationError, json.JSONDecodeError, ValueError):
+                if attempt < max_retries - 1:
+                    use_response_format = False
+                    multimodal_messages.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                "Return only valid JSON matching this JSON Schema. "
+                                f"Schema:\n{json.dumps(schema.model_json_schema(), ensure_ascii=True)}"
+                            ),
+                        }
+                    )
+                    continue
+                raise
+
+        raise RuntimeError(f"Failed to get valid multimodal JSON after {max_retries} attempts")
+
     def embed(self, inputs: list[str] | str) -> list[list[float]]:
         """Create embeddings using an OpenAI-compatible /embeddings endpoint."""
         client = self._get_client()

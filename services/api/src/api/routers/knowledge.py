@@ -1,5 +1,6 @@
 """Knowledge classifier API router."""
 
+import base64
 import csv
 import hashlib
 import io
@@ -13,6 +14,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any, Literal
 
+import fitz
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field
@@ -42,6 +44,7 @@ from common.db.models import (
     KnowledgeContextAnchor,
     KnowledgeContextMembership,
     Document,
+    DocumentVersion,
     DocumentType,
     OCRResult,
     ScanUnit,
@@ -62,7 +65,9 @@ from common.db.models import (
     KnowledgeNode,
     KnowledgeNodeAlias,
 )
+from common.config import get_settings
 from common.db.session import SessionLocal, get_db_session
+from common.storage.backends import get_storage_backend
 from knowledge_classifier.schemas import (
     ConsolidationResponse,
     ScanUnitCreate,
@@ -148,6 +153,7 @@ class _KnowledgeAgentAction(BaseModel):
         "get_document",
         "search_document_text",
         "get_page_text",
+        "analyze_page_image",
         "request_page_vision",
         "final_answer",
     ]
@@ -198,6 +204,13 @@ class KnowledgeAgentVisionRequest(BaseModel):
     document_id: str
     page_number: int
     reason: str | None = None
+
+
+class _KnowledgeAgentVisionAnalysis(BaseModel):
+    page_summary: str
+    relevant_text: str | None = None
+    answer_hint: str | None = None
+    confidence: float | None = Field(default=None, ge=0, le=1)
 
 
 class KnowledgeAgentChatResponse(BaseModel):
@@ -2540,8 +2553,8 @@ def _validate_knowledge_agent_final(
             return "each citation requires document_id"
         if citation.page_from is None and citation.page_to is None:
             return "each citation requires page_from or page_to"
-        if not _trace_has_page_text_for_citation(trace, citation):
-            return "each cited document/page must have been read with get_page_text before final_answer"
+        if not _trace_has_page_evidence_for_citation(trace, citation):
+            return "each cited document/page must have been read with get_page_text or analyze_page_image before final_answer"
     return None
 
 
@@ -2556,10 +2569,13 @@ def _build_knowledge_agent_messages(payload: KnowledgeAgentChatRequest) -> list[
                 "Prima di rispondere su un documento devi leggere il testo OCR con get_page_text per le pagine rilevanti. "
                 "Dopo aver identificato un documento lungo, usa search_document_text per localizzare le pagine rilevanti "
                 "invece di sfogliarlo pagina per pagina. "
+                "Non inventare mai document_id o document_unit_id da nomi descrittivi: usa solo id restituiti dai tool "
+                "o gia' presenti nella conversazione. "
                 "La final_answer deve includere answer non vuoto e citations con document_id, page_from/page_to "
                 "e quote breve per ogni affermazione documentale. Non mettere la risposta solo in reasoning. "
-                "Se il testo OCR non basta e servirebbe vedere la pagina, usa request_page_vision. "
-                "La vision e' disponibile solo come richiesta strutturata: non fingere di aver visto immagini."
+                "Se il testo OCR non basta e servirebbe vedere la pagina, usa analyze_page_image quando vision e' consentita. "
+                "Se vision non e' consentita ma servirebbe, usa request_page_vision. "
+                "Non fingere di aver visto immagini: cita solo analisi prodotte dal tool analyze_page_image."
             ),
         )
     ]
@@ -2599,7 +2615,7 @@ def _force_knowledge_agent_final_answer(
             role="user",
             content=(
                 "Il budget di tool e' esaurito. Non chiamare altri tool. "
-                "Se nel trace hai gia' letto pagine rilevanti con get_page_text, produci ora solo final_answer "
+                "Se nel trace hai gia' letto pagine rilevanti con get_page_text o analyze_page_image, produci ora solo final_answer "
                 "con answer non vuoto e citations document_id/page_from/page_to. "
                 "Se non hai prove sufficienti, produci final_answer spiegando il limite e citando le pagine lette piu' rilevanti."
             ),
@@ -2665,7 +2681,7 @@ def _normalize_knowledge_agent_final(action: _KnowledgeAgentAction) -> _Knowledg
     return action.model_copy(update=patch)
 
 
-def _trace_has_page_text_for_citation(
+def _trace_has_page_evidence_for_citation(
     trace: list[KnowledgeAgentTraceStep],
     citation: KnowledgeAgentCitation,
 ) -> bool:
@@ -2675,7 +2691,7 @@ def _trace_has_page_text_for_citation(
         return False
 
     for step in trace:
-        if step.action != "get_page_text" or step.error:
+        if step.action not in {"get_page_text", "analyze_page_image"} or step.error:
             continue
         output = step.output
         if not isinstance(output, dict):
@@ -2684,8 +2700,14 @@ def _trace_has_page_text_for_citation(
             continue
         page_number = output.get("page_number")
         if isinstance(page_number, int) and page_from <= page_number <= page_to:
-            text = output.get("text")
-            return isinstance(text, str) and bool(text.strip())
+            if step.action == "get_page_text":
+                text = output.get("text")
+                return isinstance(text, str) and bool(text.strip())
+            analysis = output.get("analysis")
+            if not isinstance(analysis, dict):
+                return False
+            evidence = analysis.get("page_summary") or analysis.get("relevant_text") or analysis.get("answer_hint")
+            return isinstance(evidence, str) and bool(evidence.strip())
     return False
 
 
@@ -3267,6 +3289,12 @@ def _run_knowledge_agent_tool(
         if not action.document_id or action.page_number is None:
             raise ValueError("document_id and page_number are required")
         return _agent_page_text(db, action.document_id, action.page_number)
+    if action.action == "analyze_page_image":
+        if not allow_vision:
+            return {"status": "vision_not_allowed_by_user"}
+        if not action.document_id or action.page_number is None:
+            raise ValueError("document_id and page_number are required")
+        return _agent_analyze_page_image(db, action.document_id, action.page_number, action.reasoning)
     if action.action == "request_page_vision":
         if not allow_vision:
             return {"vision_request": None, "status": "vision_not_allowed_by_user"}
@@ -3409,6 +3437,101 @@ def _agent_page_text(db: Session, document_id: str, page_number: int) -> dict[st
         "page_number": page_number,
         "page_count": ocr.page_count,
         "text": _extract_ocr_page_text(ocr, page_number)[:5000],
+    }
+
+
+def _agent_analyze_page_image(
+    db: Session,
+    document_id: str,
+    page_number: int,
+    reason: str | None,
+) -> dict[str, Any]:
+    if page_number < 1:
+        raise ValueError("page_number must be >= 1")
+    provider = _knowledge_agent_provider()
+    if provider is None:
+        raise ValueError("LLM backend is not configured")
+    image_base64, render_info = _render_document_page_png_base64(db, document_id, page_number)
+    prompt = (
+        "Analizza l'immagine della pagina del documento per aiutare una risposta archivistica. "
+        "Trascrivi solo il testo visibile rilevante, segnala tabelle/importi/etichette se presenti, "
+        "e non inventare contenuti non leggibili.\n"
+        f"Documento: {document_id}\nPagina: {page_number}\n"
+        f"Motivo della richiesta: {reason or 'n/d'}"
+    )
+    parsed, _ = provider.chat_with_image_json(
+        [
+            ChatMessage(
+                role="system",
+                content=(
+                    "Sei un lettore visuale di pagine PDF. Rispondi solo con JSON valido. "
+                    "Se la pagina non e' leggibile, dichiaralo esplicitamente."
+                ),
+            )
+        ],
+        image_base64=image_base64,
+        image_media_type="image/png",
+        prompt=prompt,
+        schema=_KnowledgeAgentVisionAnalysis,
+        temperature=0.1,
+        max_retries=2,
+    )
+    analysis = _KnowledgeAgentVisionAnalysis.model_validate(parsed)
+    return {
+        "status": "vision_analyzed",
+        "document_id": document_id,
+        "page_number": page_number,
+        "rendered_page_number": render_info["rendered_page_number"],
+        "page_mapping": render_info,
+        "analysis": analysis.model_dump(mode="json"),
+    }
+
+
+def _render_document_page_png_base64(db: Session, document_id: str, page_number: int) -> tuple[str, dict[str, Any]]:
+    try:
+        doc_uuid = uuid.UUID(document_id)
+    except ValueError as exc:
+        raise ValueError("Invalid document_id") from exc
+    scan_unit = db.execute(
+        select(ScanUnit)
+        .where(ScanUnit.source_document_id == doc_uuid)
+        .order_by(ScanUnit.created_at.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    preflight = _load_preflight(scan_unit, db) if scan_unit is not None else None
+    rendered_page_number = page_number
+    rotation_degrees = 0
+    if scan_unit is not None and preflight:
+        if preflight.get("page_order_reversed"):
+            rendered_page_number = scan_unit.page_count - page_number + 1
+        rotation_applied = preflight.get("rotation_applied")
+        if isinstance(rotation_applied, int):
+            rotation_degrees = rotation_applied % 360
+    version = db.execute(
+        select(DocumentVersion)
+        .where(DocumentVersion.document_id == doc_uuid)
+        .order_by(DocumentVersion.version_number.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if version is None:
+        raise ValueError("Document version not found")
+    storage = get_storage_backend(get_settings())
+    pdf_bytes = storage.read_bytes(version.storage_bucket, version.storage_object_key)
+    with fitz.open(stream=pdf_bytes, filetype="pdf") as pdf:
+        if rendered_page_number < 1 or rendered_page_number > pdf.page_count:
+            raise ValueError("page_number exceeds document page count")
+        page = pdf.load_page(rendered_page_number - 1)
+        pixmap = page.get_pixmap(
+            matrix=fitz.Matrix(1.6, 1.6).prerotate(rotation_degrees),
+            alpha=False,
+        )
+        png_bytes = pixmap.tobytes("png")
+    return base64.b64encode(png_bytes).decode("ascii"), {
+        "requested_page_number": page_number,
+        "rendered_page_number": rendered_page_number,
+        "page_order_reversed": bool(preflight.get("page_order_reversed")) if preflight else False,
+        "rotation_applied": rotation_degrees,
+        "coordinate_space": "ocr_logical_page",
     }
 
 

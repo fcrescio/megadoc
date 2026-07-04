@@ -41,8 +41,30 @@ def test_normalized_final_answer_still_requires_read_page_trace():
     normalized = _normalize_knowledge_agent_final(action)
 
     assert _validate_knowledge_agent_final(normalized, []) == (
-        "each cited document/page must have been read with get_page_text before final_answer"
+        "each cited document/page must have been read with get_page_text or analyze_page_image before final_answer"
     )
+
+
+def test_final_answer_accepts_page_image_analysis_as_evidence():
+    action = _KnowledgeAgentAction(
+        action="final_answer",
+        answer="La pagina mostra una tabella leggibile.",
+        citations=[{"document_id": "doc-1", "page_from": 2, "page_to": 2}],
+    )
+    trace = [
+        KnowledgeAgentTraceStep(
+            step=1,
+            action="analyze_page_image",
+            input={"document_id": "doc-1", "page_number": 2},
+            output={
+                "document_id": "doc-1",
+                "page_number": 2,
+                "analysis": {"page_summary": "Tabella con importi e intestazioni visibili."},
+            },
+        )
+    ]
+
+    assert _validate_knowledge_agent_final(action, trace) is None
 
 
 def test_text_page_hit_scores_matching_query_terms():
