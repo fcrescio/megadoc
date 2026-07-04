@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     llm_temperature: float = Field(default=0.1, description="LLM temperature (low for deterministic)")
     llm_max_retries: int = Field(default=3, description="Max retries for LLM requests")
     llm_max_tokens: int = Field(default=4096, description="Max completion tokens per LLM request")
+    embedding_endpoint: str | None = Field(default=None, description="Embedding API endpoint")
+    embedding_model: str = Field(default="qwen3.6-A3B", description="Embedding model name")
+    embedding_timeout: int = Field(default=120, description="Embedding request timeout in seconds")
 
     # Prompt versions
     prompt_version_segmentation: str = Field(default="v1", description="Segmentation prompt version")

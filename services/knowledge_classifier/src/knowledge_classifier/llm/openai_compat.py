@@ -146,6 +146,28 @@ class OpenAICompatibleProvider(LLMProvider):
 
         raise RuntimeError(f"Failed to get valid JSON after {max_retries} attempts")
 
+    def embed(self, inputs: list[str] | str) -> list[list[float]]:
+        """Create embeddings using an OpenAI-compatible /embeddings endpoint."""
+        client = self._get_client()
+        payload = {
+            "model": self._model,
+            "input": inputs,
+        }
+        response: httpx.Response | None = None
+        try:
+            response = client.post("/embeddings", json=payload)
+            response.raise_for_status()
+            data = response.json()
+            rows = sorted(data.get("data", []), key=lambda item: item.get("index", 0))
+            return [row["embedding"] for row in rows]
+        except httpx.HTTPError as e:
+            logger.error(
+                "Embedding request failed: %s, response: %s",
+                e,
+                response.text[:500] if response is not None else "N/A",
+            )
+            raise
+
     def _normalize_usage(self, usage: Any) -> dict[str, Any] | None:
         """Normalize usage metadata from OpenAI-compatible providers."""
         if usage is None:

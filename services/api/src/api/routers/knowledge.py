@@ -1,7 +1,9 @@
 """Knowledge classifier API router."""
 
 import csv
+import hashlib
 import io
+import json
 import os
 import re
 import time
@@ -14,7 +16,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import delete, func, or_, select, text
 from sqlalchemy.orm import Session, selectinload
 
 from common.application.knowledge import (
@@ -140,6 +142,7 @@ class _AccountingAskPlan(BaseModel):
 class _KnowledgeAgentAction(BaseModel):
     action: Literal[
         "search_archive",
+        "semantic_search",
         "list_topics",
         "get_document_unit",
         "get_document",
@@ -221,6 +224,18 @@ class KnowledgeAgentRunDetail(KnowledgeAgentRunSummary):
     tool_trace: list[KnowledgeAgentTraceStep] = Field(default_factory=list)
     citations: list[KnowledgeAgentCitation] = Field(default_factory=list)
     vision_requests: list[KnowledgeAgentVisionRequest] = Field(default_factory=list)
+
+
+class KnowledgeSearchIndexStats(BaseModel):
+    total_chunks: int
+    by_source_type: dict[str, int] = Field(default_factory=dict)
+    embedding_models: list[str] = Field(default_factory=list)
+
+
+class KnowledgeSearchIndexRebuildResponse(KnowledgeSearchIndexStats):
+    status: str
+    chunks_indexed: int
+    chunks_skipped: int
 
 
 def _serialize_entity(entity: DocumentUnitEntity) -> dict[str, Any]:
@@ -2174,6 +2189,7 @@ def chat_with_knowledge_agent(
             content=(
                 "Sei un agente read-only che interroga un archivio documentale tramite tool. "
                 "Non inventare fatti: usa i tool per cercare documenti, topic, testo OCR e risultati specialistici. "
+                "Per domande naturali o concettuali usa semantic_search prima della ricerca keyword. "
                 "Prima di rispondere su un documento devi leggere il testo OCR con get_page_text per le pagine rilevanti. "
                 "La final_answer deve includere citations con document_id e pagina per ogni affermazione documentale. "
                 "Se il testo OCR non basta e servirebbe vedere la pagina, usa request_page_vision. "
@@ -2347,6 +2363,26 @@ def get_knowledge_agent_run(
     return _serialize_knowledge_agent_run_detail(run)
 
 
+@router.get("/agent/search-index/stats", response_model=KnowledgeSearchIndexStats)
+def get_knowledge_search_index_stats(
+    db: Session = Depends(get_db_session),
+):
+    return _knowledge_search_index_stats(db)
+
+
+@router.post("/agent/search-index/rebuild", response_model=KnowledgeSearchIndexRebuildResponse)
+def rebuild_knowledge_search_index(
+    db: Session = Depends(get_db_session),
+):
+    try:
+        return _rebuild_knowledge_search_index(db)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Embedding backend unavailable or incompatible: {exc}",
+        ) from exc
+
+
 def _validate_knowledge_agent_final(
     action: _KnowledgeAgentAction,
     trace: list[KnowledgeAgentTraceStep],
@@ -2460,6 +2496,328 @@ def _serialize_knowledge_agent_run_detail(run: KnowledgeAgentRun) -> KnowledgeAg
             if isinstance(item, dict)
         ],
     )
+
+
+def _embedding_provider() -> OpenAICompatibleProvider:
+    settings = get_knowledge_settings()
+    endpoint = (
+        os.getenv("KN_EMBEDDING_ENDPOINT")
+        or os.getenv("KN_WORKER_LLM_ENDPOINT")
+        or settings.embedding_endpoint
+        or settings.llm_endpoint
+    )
+    model = os.getenv("KN_EMBEDDING_MODEL", settings.embedding_model)
+    return OpenAICompatibleProvider(
+        base_url=endpoint,
+        model=model,
+        api_key=settings.llm_api_key,
+        timeout=max(settings.embedding_timeout, 120),
+        max_tokens=None,
+    )
+
+
+def _agent_semantic_search(db: Session, query: str, *, limit: int) -> dict[str, Any]:
+    if not query.strip():
+        return {"query": query, "results": [], "warning": "semantic_search requires a non-empty query"}
+    provider = _embedding_provider()
+    query_embedding = provider.embed(query)[0]
+    rows = db.execute(
+        text(
+            """
+            SELECT
+                source_type,
+                source_id::text AS source_id,
+                document_id::text AS document_id,
+                document_unit_id::text AS document_unit_id,
+                page_from,
+                page_to,
+                left(text, 900) AS snippet,
+                metadata_json,
+                embedding_model,
+                (embedding <=> CAST(:embedding AS vector)) AS distance
+            FROM knowledge_search_chunks
+            ORDER BY embedding <=> CAST(:embedding AS vector)
+            LIMIT :limit
+            """
+        ),
+        {"embedding": _vector_literal(query_embedding), "limit": limit},
+    ).mappings().all()
+    return {
+        "query": query,
+        "embedding_model": provider.model_name,
+        "results": [
+            {
+                "source_type": row["source_type"],
+                "source_id": row["source_id"],
+                "document_id": row["document_id"],
+                "document_unit_id": row["document_unit_id"],
+                "page_from": row["page_from"],
+                "page_to": row["page_to"],
+                "snippet": row["snippet"],
+                "metadata": row["metadata_json"],
+                "embedding_model": row["embedding_model"],
+                "distance": float(row["distance"]),
+                "score": max(0.0, 1.0 - float(row["distance"])),
+            }
+            for row in rows
+        ],
+    }
+
+
+def _knowledge_search_index_stats(db: Session) -> KnowledgeSearchIndexStats:
+    total = int(
+        db.execute(text("SELECT count(*) FROM knowledge_search_chunks")).scalar_one()
+    )
+    by_source = {
+        row["source_type"]: int(row["count"])
+        for row in db.execute(
+            text(
+                """
+                SELECT source_type, count(*) AS count
+                FROM knowledge_search_chunks
+                GROUP BY source_type
+                ORDER BY source_type
+                """
+            )
+        ).mappings()
+    }
+    models = [
+        row["embedding_model"]
+        for row in db.execute(
+            text(
+                """
+                SELECT DISTINCT embedding_model
+                FROM knowledge_search_chunks
+                ORDER BY embedding_model
+                """
+            )
+        ).mappings()
+    ]
+    return KnowledgeSearchIndexStats(total_chunks=total, by_source_type=by_source, embedding_models=models)
+
+
+def _rebuild_knowledge_search_index(db: Session) -> KnowledgeSearchIndexRebuildResponse:
+    provider = _embedding_provider()
+    chunks = _collect_knowledge_search_chunks(db)
+    db.execute(text("DELETE FROM knowledge_search_chunks WHERE embedding_model = :model"), {"model": provider.model_name})
+    chunks_indexed = 0
+    chunks_skipped = 0
+    batch_size = 12
+    for offset in range(0, len(chunks), batch_size):
+        batch = chunks[offset : offset + batch_size]
+        try:
+            embeddings = provider.embed([chunk["text"] for chunk in batch])
+        except Exception:
+            db.rollback()
+            raise
+        for chunk, embedding in zip(batch, embeddings, strict=False):
+            if not embedding:
+                chunks_skipped += 1
+                continue
+            db.execute(
+                text(
+                    """
+                    INSERT INTO knowledge_search_chunks (
+                        id,
+                        source_type,
+                        source_id,
+                        document_id,
+                        document_unit_id,
+                        page_from,
+                        page_to,
+                        text,
+                        text_hash,
+                        metadata_json,
+                        embedding,
+                        embedding_model
+                    )
+                    VALUES (
+                        :id,
+                        :source_type,
+                        CAST(:source_id AS uuid),
+                        CAST(:document_id AS uuid),
+                        CAST(:document_unit_id AS uuid),
+                        :page_from,
+                        :page_to,
+                        :text_value,
+                        :text_hash,
+                        CAST(:metadata_json AS json),
+                        CAST(:embedding AS vector),
+                        :embedding_model
+                    )
+                    ON CONFLICT (text_hash, embedding_model) DO NOTHING
+                    """
+                ),
+                {
+                    "id": str(uuid.uuid4()),
+                    "source_type": chunk["source_type"],
+                    "source_id": chunk.get("source_id"),
+                    "document_id": chunk.get("document_id"),
+                    "document_unit_id": chunk.get("document_unit_id"),
+                    "page_from": chunk.get("page_from"),
+                    "page_to": chunk.get("page_to"),
+                    "text_value": chunk["text"],
+                    "text_hash": chunk["text_hash"],
+                    "metadata_json": json.dumps(chunk.get("metadata", {}), ensure_ascii=True),
+                    "embedding": _vector_literal(embedding),
+                    "embedding_model": provider.model_name,
+                },
+            )
+            chunks_indexed += 1
+    db.commit()
+    stats = _knowledge_search_index_stats(db)
+    return KnowledgeSearchIndexRebuildResponse(
+        status="rebuilt",
+        chunks_indexed=chunks_indexed,
+        chunks_skipped=chunks_skipped,
+        **stats.model_dump(),
+    )
+
+
+def _collect_knowledge_search_chunks(db: Session) -> list[dict[str, Any]]:
+    chunks: list[dict[str, Any]] = []
+    topics = db.execute(
+        select(Topic)
+        .where(Topic.is_active.is_(True))
+        .options(selectinload(Topic.aliases))
+        .order_by(Topic.created_at.asc())
+    ).scalars().all()
+    for topic in topics:
+        aliases = [alias.alias for alias in topic.aliases]
+        text_value = "\n".join(
+            item
+            for item in [
+                f"Topic: {topic.title}",
+                f"Slug: {topic.slug}",
+                f"Classe: {topic.topic_class}",
+                f"Tipo: {topic.topic_kind}",
+                f"Alias: {', '.join(aliases)}" if aliases else "",
+                f"Descrizione: {topic.description}" if topic.description else "",
+            ]
+            if item
+        )
+        chunks.append(
+            _make_search_chunk(
+                source_type="topic",
+                source_id=str(topic.id),
+                document_id=None,
+                document_unit_id=None,
+                page_from=None,
+                page_to=None,
+                text_value=text_value,
+                metadata={"title": topic.title, "slug": topic.slug, "aliases": aliases},
+            )
+        )
+
+    units = db.execute(
+        select(DocumentUnit)
+        .options(
+            selectinload(DocumentUnit.scan_unit).selectinload(ScanUnit.document),
+            selectinload(DocumentUnit.document_type),
+            selectinload(DocumentUnit.topic_assignments).selectinload(DocumentUnitTopicAssignment.topic),
+        )
+        .order_by(DocumentUnit.created_at.asc())
+    ).scalars().all()
+    for unit in units:
+        document = unit.scan_unit.document if unit.scan_unit else None
+        topic_titles = [
+            assignment.topic.title
+            for assignment in unit.topic_assignments
+            if assignment.topic and assignment.topic.is_active
+        ]
+        text_value = "\n".join(
+            item
+            for item in [
+                f"Documento: {document.original_filename}" if document else "",
+                f"Unita: {unit.title}" if unit.title else "",
+                f"Tipo: {unit.document_type.code}" if unit.document_type else "",
+                f"Pagine: {unit.start_page}-{unit.end_page}",
+                f"Topic: {', '.join(topic_titles)}" if topic_titles else "",
+                f"Sommario: {unit.extracted_summary}" if unit.extracted_summary else "",
+            ]
+            if item
+        )
+        chunks.append(
+            _make_search_chunk(
+                source_type="document_unit",
+                source_id=str(unit.id),
+                document_id=str(document.id) if document else None,
+                document_unit_id=str(unit.id),
+                page_from=unit.start_page,
+                page_to=unit.end_page,
+                text_value=text_value,
+                metadata={
+                    "title": unit.title,
+                    "original_filename": document.original_filename if document else None,
+                    "document_type_code": unit.document_type.code if unit.document_type else None,
+                    "topic_titles": topic_titles,
+                },
+            )
+        )
+
+    latest_ocr_by_document: dict[uuid.UUID, OCRResult] = {}
+    for ocr in db.execute(select(OCRResult).order_by(OCRResult.created_at.asc())).scalars().all():
+        latest_ocr_by_document[ocr.document_id] = ocr
+    unit_by_document_page: dict[tuple[str, int], DocumentUnit] = {}
+    for unit in units:
+        document = unit.scan_unit.document if unit.scan_unit else None
+        if not document:
+            continue
+        for page_number in range(unit.start_page, unit.end_page + 1):
+            unit_by_document_page[(str(document.id), page_number)] = unit
+
+    for ocr in latest_ocr_by_document.values():
+        for page_number in range(1, max(ocr.page_count, 1) + 1):
+            page_text = _extract_ocr_page_text(ocr, page_number).strip()
+            if not page_text:
+                continue
+            unit = unit_by_document_page.get((str(ocr.document_id), page_number))
+            chunks.append(
+                _make_search_chunk(
+                    source_type="ocr_page",
+                    source_id=str(ocr.id),
+                    document_id=str(ocr.document_id),
+                    document_unit_id=str(unit.id) if unit else None,
+                    page_from=page_number,
+                    page_to=page_number,
+                    text_value=page_text[:3500],
+                    metadata={
+                        "page_number": page_number,
+                        "document_unit_title": unit.title if unit else None,
+                    },
+                )
+            )
+    return chunks
+
+
+def _make_search_chunk(
+    *,
+    source_type: str,
+    source_id: str | None,
+    document_id: str | None,
+    document_unit_id: str | None,
+    page_from: int | None,
+    page_to: int | None,
+    text_value: str,
+    metadata: dict[str, Any],
+) -> dict[str, Any]:
+    normalized_text = re.sub(r"\s+", " ", text_value).strip()
+    text_hash = hashlib.sha256(f"{source_type}\n{source_id}\n{normalized_text}".encode("utf-8")).hexdigest()
+    return {
+        "source_type": source_type,
+        "source_id": source_id,
+        "document_id": document_id,
+        "document_unit_id": document_unit_id,
+        "page_from": page_from,
+        "page_to": page_to,
+        "text": normalized_text,
+        "text_hash": text_hash,
+        "metadata": metadata,
+    }
+
+
+def _vector_literal(values: list[float]) -> str:
+    return "[" + ",".join(f"{float(value):.8f}" for value in values) + "]"
 
 
 @router.post("/accounting/ask", response_model=AccountingAskResponse)
@@ -2632,6 +2990,8 @@ def _run_knowledge_agent_tool(
     limit = max(1, min(action.limit or 8, 20))
     if action.action == "search_archive":
         return _agent_search_archive(db, action.query or "", limit=limit)
+    if action.action == "semantic_search":
+        return _agent_semantic_search(db, action.query or "", limit=limit)
     if action.action == "list_topics":
         return _agent_list_topics(db, action.query, limit=limit)
     if action.action == "get_document_unit":
