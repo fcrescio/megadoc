@@ -2780,7 +2780,7 @@ def _collect_knowledge_search_chunks(db: Session) -> list[dict[str, Any]]:
                     document_unit_id=str(unit.id) if unit else None,
                     page_from=page_number,
                     page_to=page_number,
-                    text_value=page_text[:3500],
+                    text_value=page_text[:600],
                     metadata={
                         "page_number": page_number,
                         "document_unit_title": unit.title if unit else None,
@@ -2801,7 +2801,7 @@ def _make_search_chunk(
     text_value: str,
     metadata: dict[str, Any],
 ) -> dict[str, Any]:
-    normalized_text = re.sub(r"\s+", " ", text_value).strip()
+    normalized_text = re.sub(r"\s+", " ", text_value).strip()[:600]
     text_hash = hashlib.sha256(f"{source_type}\n{source_id}\n{normalized_text}".encode("utf-8")).hexdigest()
     return {
         "source_type": source_type,
