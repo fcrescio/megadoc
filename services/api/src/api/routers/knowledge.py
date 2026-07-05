@@ -156,14 +156,22 @@ class _KnowledgeAgentAction(BaseModel):
         "get_page_text",
         "analyze_page_image",
         "request_page_vision",
+        "search_calendar_events",
         "final_answer",
     ]
     reasoning: str = Field(default="")
     query: str | None = Field(default=None)
+    supplier: str | None = Field(default=None)
     document_id: str | None = Field(default=None)
     document_unit_id: str | None = Field(default=None)
     topic_id: str | None = Field(default=None)
     page_number: int | None = Field(default=None)
+    date_from: date | None = Field(default=None)
+    date_to: date | None = Field(default=None)
+    amount_min: float | None = Field(default=None)
+    amount_max: float | None = Field(default=None)
+    status: str | None = Field(default=None)
+    review_status: str | None = Field(default=None)
     limit: int | None = Field(default=None)
     answer: str | None = Field(default=None)
     confidence: float | None = Field(default=None, ge=0, le=1)
@@ -2648,6 +2656,9 @@ def _build_knowledge_agent_messages(payload: KnowledgeAgentChatRequest, db: Sess
                 "Prima di rispondere su un documento devi leggere il testo OCR con get_page_text per le pagine rilevanti. "
                 "Dopo aver identificato un documento lungo, usa search_document_text per localizzare le pagine rilevanti "
                 "invece di sfogliarlo pagina per pagina. "
+                "Per domande su bollette da pagare, scadenze, fornitori, importi o calendari usa search_calendar_events: "
+                "supplier/query sono ricerche testuali substring case-insensitive, mentre date_from/date_to e "
+                "amount_min/amount_max sono filtri liberi su scadenza e importo. "
                 "Non inventare mai document_id o document_unit_id da nomi descrittivi: usa solo id restituiti dai tool "
                 "o gia' presenti nella conversazione. "
                 "Se l'utente ha selezionato documenti, trattali come contesto iniziale forte ma non come vincolo: "
@@ -3477,7 +3488,132 @@ def _run_knowledge_agent_tool(
             },
             "note": "Il provider chat corrente accetta solo testo; la richiesta e' esposta alla UI e alla futura esecuzione multimodale.",
         }
+    if action.action == "search_calendar_events":
+        return _agent_search_calendar_events(
+            db,
+            query=action.query,
+            supplier=action.supplier,
+            date_from=action.date_from,
+            date_to=action.date_to,
+            amount_min=action.amount_min,
+            amount_max=action.amount_max,
+            status=action.status,
+            review_status=action.review_status,
+            limit=limit,
+        )
     raise ValueError(f"Unsupported action: {action.action}")
+
+
+def _agent_search_calendar_events(
+    db: Session,
+    *,
+    query: str | None,
+    supplier: str | None,
+    date_from: date | None,
+    date_to: date | None,
+    amount_min: float | None,
+    amount_max: float | None,
+    status: str | None,
+    review_status: str | None,
+    limit: int,
+) -> dict[str, Any]:
+    statement = (
+        select(CalendarEvent)
+        .options(
+            selectinload(CalendarEvent.source_document_unit).selectinload(DocumentUnit.document_type),
+            selectinload(CalendarEvent.source_document_unit)
+            .selectinload(DocumentUnit.scan_unit)
+            .selectinload(ScanUnit.document),
+        )
+        .order_by(CalendarEvent.due_date.asc(), CalendarEvent.created_at.desc())
+    )
+    if date_from is not None:
+        statement = statement.where(CalendarEvent.due_date >= date_from)
+    if date_to is not None:
+        statement = statement.where(CalendarEvent.due_date <= date_to)
+    if amount_min is not None:
+        statement = statement.where(CalendarEvent.amount >= amount_min)
+    if amount_max is not None:
+        statement = statement.where(CalendarEvent.amount <= amount_max)
+    if status and status != "all":
+        statement = statement.where(CalendarEvent.status == status)
+    if review_status and review_status != "all":
+        statement = statement.where(CalendarEvent.review_status == review_status)
+
+    normalized_query = _normalize_search_value(query)
+    normalized_supplier = _normalize_search_value(supplier)
+    items: list[dict[str, Any]] = []
+    scanned = 0
+    for event in db.execute(statement.limit(max(limit * 5, 50))).scalars().all():
+        scanned += 1
+        item = _agent_calendar_event_summary(event)
+        text_haystack = _normalize_search_value(
+            " ".join(
+                str(item.get(field) or "")
+                for field in (
+                    "title",
+                    "subject",
+                    "supplier",
+                    "original_filename",
+                    "document_unit_title",
+                    "document_type_code",
+                )
+            )
+        )
+        supplier_haystack = _normalize_search_value(
+            " ".join(str(value or "") for value in (item.get("supplier"), item.get("title"), item.get("subject")))
+        )
+        if normalized_query and normalized_query not in text_haystack:
+            continue
+        if normalized_supplier and normalized_supplier not in supplier_haystack:
+            continue
+        items.append(item)
+        if len(items) >= limit:
+            break
+    return {
+        "total_returned": len(items),
+        "scanned_after_structured_filters": scanned,
+        "filters": {
+            "query": query,
+            "supplier": supplier,
+            "date_from": date_from.isoformat() if date_from else None,
+            "date_to": date_to.isoformat() if date_to else None,
+            "amount_min": amount_min,
+            "amount_max": amount_max,
+            "status": status,
+            "review_status": review_status,
+        },
+        "events": items,
+    }
+
+
+def _agent_calendar_event_summary(event: CalendarEvent) -> dict[str, Any]:
+    document_unit = event.source_document_unit
+    document = document_unit.scan_unit.document if document_unit is not None and document_unit.scan_unit else None
+    evidence = event.evidence_json or {}
+    supplier = evidence.get("issuer") if isinstance(evidence, dict) else None
+    return {
+        "calendar_event_id": str(event.id),
+        "event_type": event.event_type,
+        "title": event.title,
+        "subject": event.subject,
+        "supplier": supplier,
+        "amount": float(event.amount) if event.amount is not None else None,
+        "currency": event.currency,
+        "due_date": event.due_date.isoformat(),
+        "status": event.status,
+        "review_status": event.review_status,
+        "confidence": event.confidence,
+        "document_id": str(document.id) if document else None,
+        "document_unit_id": str(event.source_document_unit_id),
+        "document_unit_title": document_unit.title if document_unit else None,
+        "document_type_code": document_unit.document_type.code if document_unit and document_unit.document_type else None,
+        "original_filename": document.original_filename if document else None,
+        "page_from": document_unit.start_page if document_unit else None,
+        "page_to": document_unit.end_page if document_unit else None,
+        "source_specialist_result_id": str(event.source_specialist_result_id) if event.source_specialist_result_id else None,
+        "issues": evidence.get("issues", []) if isinstance(evidence, dict) else [],
+    }
 
 
 def _agent_search_archive(db: Session, query: str, *, limit: int) -> dict[str, Any]:
