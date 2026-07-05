@@ -61,6 +61,7 @@ from common.db.models import (
     SpecialistResult,
     DocumentUnitLink,
     DocumentUnitMention,
+    CalendarEvent,
     KnowledgeAssertion,
     KnowledgeNode,
     KnowledgeNodeAlias,
@@ -1702,6 +1703,83 @@ def list_specialist_utility_bills(
             due_date = item.get("due_date")
             if not isinstance(due_date, str) or due_date >= today or item.get("payment_status") == "paid":
                 continue
+        items.append(item)
+        if len(items) >= limit:
+            break
+    return {"total": len(items), "items": items}
+
+
+def _serialize_calendar_event(event: CalendarEvent) -> dict[str, Any]:
+    document_unit = event.source_document_unit
+    document = None
+    if document_unit is not None and document_unit.scan_unit is not None:
+        document = document_unit.scan_unit.document
+    return {
+        "id": str(event.id),
+        "event_type": event.event_type,
+        "title": event.title,
+        "subject": event.subject,
+        "amount": float(event.amount) if event.amount is not None else None,
+        "currency": event.currency,
+        "due_date": event.due_date.isoformat(),
+        "status": event.status,
+        "confidence": event.confidence,
+        "review_status": event.review_status,
+        "source_document_unit_id": str(event.source_document_unit_id),
+        "source_specialist_result_id": str(event.source_specialist_result_id) if event.source_specialist_result_id else None,
+        "document_id": str(document.id) if document is not None else None,
+        "original_filename": document.original_filename if document is not None else None,
+        "document_unit_title": document_unit.title if document_unit is not None else None,
+        "document_type_code": (
+            document_unit.document_type.code
+            if document_unit is not None and document_unit.document_type is not None
+            else None
+        ),
+        "evidence": event.evidence_json or {},
+        "created_at": event.created_at.isoformat(),
+        "updated_at": event.updated_at.isoformat() if event.updated_at else None,
+    }
+
+
+@router.get("/calendar-events")
+def list_calendar_events(
+    q: str | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    status_filter: str | None = Query(default=None, alias="status"),
+    review_status: str | None = None,
+    limit: int = Query(default=100, ge=1, le=500),
+    db: Session = Depends(get_db_session),
+) -> dict[str, Any]:
+    statement = (
+        select(CalendarEvent)
+        .options(
+            selectinload(CalendarEvent.source_document_unit).selectinload(DocumentUnit.document_type),
+            selectinload(CalendarEvent.source_document_unit)
+            .selectinload(DocumentUnit.scan_unit)
+            .selectinload(ScanUnit.document),
+        )
+        .order_by(CalendarEvent.due_date.asc(), CalendarEvent.created_at.desc())
+    )
+    if date_from is not None:
+        statement = statement.where(CalendarEvent.due_date >= date_from)
+    if date_to is not None:
+        statement = statement.where(CalendarEvent.due_date <= date_to)
+    if status_filter and status_filter != "all":
+        statement = statement.where(CalendarEvent.status == status_filter)
+    if review_status and review_status != "all":
+        statement = statement.where(CalendarEvent.review_status == review_status)
+
+    normalized_query = _normalize_search_value(q)
+    items: list[dict[str, Any]] = []
+    for event in db.execute(statement.limit(limit * 2)).scalars().all():
+        item = _serialize_calendar_event(event)
+        haystack = " ".join(
+            str(item.get(field) or "")
+            for field in ("title", "subject", "original_filename", "document_unit_title", "document_type_code")
+        )
+        if normalized_query and normalized_query not in _normalize_search_value(haystack):
+            continue
         items.append(item)
         if len(items) >= limit:
             break

@@ -49,7 +49,7 @@ def route_specialists_for_document_unit(document_unit: DocumentUnit, segment_tex
     # Specialist dispatch is based only on the LLM-assigned document type.
     # Text markers are deliberately ignored here: ambiguous semantic routing
     # must be handled by classification/review, not by keyword promotion.
-    if doc_type == "bolletta":
+    if doc_type in {"bolletta", "fattura"}:
         specialists.append("utility_bill")
 
     if doc_type in {"rendiconto_contabile", "riparto_spese", "preventivo"}:

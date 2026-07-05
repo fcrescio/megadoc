@@ -12,6 +12,7 @@ import type {
   KnowledgeSearchResult,
   SpecialistAccountingStatementSummary,
   SpecialistUtilityBillSummary,
+  CalendarEventSummary,
   KnowledgeEntitySummary,
   KnowledgeEntityDetail,
   CanonicalEntitySummary,
@@ -65,6 +66,7 @@ import {
   searchKnowledge,
   getSpecialistUtilityBills,
   getSpecialistAccountingStatements,
+  getCalendarEvents,
   getKnowledgeEntities,
   getKnowledgeEntityDetail,
   getCanonicalEntities,
@@ -187,6 +189,9 @@ export function useEnsureDocumentSpecialists() {
     onSuccess: (_, documentId) => {
       queryClient.invalidateQueries({ queryKey: ['knowledge', documentId] });
       queryClient.invalidateQueries({ queryKey: ['knowledge'] });
+      queryClient.invalidateQueries({ queryKey: ['calendar-events'] });
+      queryClient.invalidateQueries({ queryKey: ['specialist-utility-bills'] });
+      queryClient.invalidateQueries({ queryKey: ['specialist-accounting-statements'] });
     },
   });
 }
@@ -272,6 +277,21 @@ export function useSpecialistAccountingStatements(options?: {
   return useQuery<{ total: number; items: SpecialistAccountingStatementSummary[] }>({
     queryKey: ['specialist-accounting-statements', options?.query, options?.statementType, options?.checkStatus, options?.limit],
     queryFn: () => getSpecialistAccountingStatements(options),
+    enabled,
+  });
+}
+
+export function useCalendarEvents(options?: {
+  query?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  status?: string;
+  reviewStatus?: string;
+  limit?: number;
+}, enabled = true) {
+  return useQuery<{ total: number; items: CalendarEventSummary[] }>({
+    queryKey: ['calendar-events', options?.query, options?.dateFrom, options?.dateTo, options?.status, options?.reviewStatus, options?.limit],
+    queryFn: () => getCalendarEvents(options),
     enabled,
   });
 }

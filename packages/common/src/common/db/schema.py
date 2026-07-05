@@ -286,6 +286,28 @@ def ensure_knowledge_schema(engine) -> None:
         "CREATE INDEX IF NOT EXISTS ix_accounting_facts_account_type ON accounting_facts(account_id, fact_type)",
         "CREATE INDEX IF NOT EXISTS ix_accounting_facts_unit_type ON accounting_facts(document_unit_id, fact_type)",
         "CREATE INDEX IF NOT EXISTS ix_accounting_facts_category ON accounting_facts(category_key)",
+        """CREATE TABLE IF NOT EXISTS calendar_events (
+            id UUID PRIMARY KEY,
+            source_document_unit_id UUID NOT NULL REFERENCES document_units(id) ON DELETE CASCADE,
+            source_specialist_result_id UUID NULL REFERENCES specialist_results(id) ON DELETE CASCADE,
+            event_type VARCHAR(64) NOT NULL,
+            title VARCHAR(512) NOT NULL,
+            subject TEXT NULL,
+            amount NUMERIC(12, 2) NULL,
+            currency VARCHAR(8) NULL,
+            due_date DATE NOT NULL,
+            status VARCHAR(32) NOT NULL DEFAULT 'unknown',
+            confidence DOUBLE PRECISION NULL,
+            review_status VARCHAR(32) NOT NULL DEFAULT 'needs_review',
+            evidence_json JSON NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NULL,
+            CONSTRAINT uq_calendar_events_result_type UNIQUE (source_specialist_result_id, event_type)
+        )""",
+        "CREATE INDEX IF NOT EXISTS ix_calendar_events_due_date ON calendar_events(due_date)",
+        "CREATE INDEX IF NOT EXISTS ix_calendar_events_status ON calendar_events(status)",
+        "CREATE INDEX IF NOT EXISTS ix_calendar_events_review_status ON calendar_events(review_status)",
+        "CREATE INDEX IF NOT EXISTS ix_calendar_events_document_unit ON calendar_events(source_document_unit_id)",
         """DO $$
         BEGIN
             IF to_regclass('public.specialist_results') IS NOT NULL

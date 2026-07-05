@@ -12,6 +12,7 @@ import type {
   KnowledgeSearchResult,
   SpecialistAccountingStatementSummary,
   SpecialistUtilityBillSummary,
+  CalendarEventSummary,
   KnowledgeEntitySummary,
   KnowledgeEntityDetail,
   CanonicalEntitySummary,
@@ -265,6 +266,25 @@ export async function getSpecialistAccountingStatements(options?: {
   if (options?.checkStatus && options.checkStatus !== 'all') params.set('check_status', options.checkStatus);
   if (options?.limit) params.set('limit', String(options.limit));
   const response = await fetch(`${API_BASE}/knowledge/specialists/accounting-statements?${params.toString()}`);
+  return handleResponse(response);
+}
+
+export async function getCalendarEvents(options?: {
+  query?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  status?: string;
+  reviewStatus?: string;
+  limit?: number;
+}): Promise<{ total: number; items: CalendarEventSummary[] }> {
+  const params = new URLSearchParams();
+  if (options?.query) params.set('q', options.query);
+  if (options?.dateFrom) params.set('date_from', options.dateFrom);
+  if (options?.dateTo) params.set('date_to', options.dateTo);
+  if (options?.status && options.status !== 'all') params.set('status', options.status);
+  if (options?.reviewStatus && options.reviewStatus !== 'all') params.set('review_status', options.reviewStatus);
+  if (options?.limit) params.set('limit', String(options.limit));
+  const response = await fetch(`${API_BASE}/knowledge/calendar-events?${params.toString()}`);
   return handleResponse(response);
 }
 

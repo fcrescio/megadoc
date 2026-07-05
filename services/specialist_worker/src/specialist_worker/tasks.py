@@ -11,6 +11,7 @@ from common.application.accounting import (
     project_accounting_result,
     reapply_manual_accounting_corrections,
 )
+from common.application.calendar import project_utility_bill_calendar_event
 from common.application.graph import project_document_unit
 from common.application.specialists import extract_document_unit_text
 from common.db.models import (
@@ -157,6 +158,8 @@ def process_specialist_job(self, specialist_job_id: str):
             project_document_unit(session, projection_unit)
             if specialist_job.specialist_type == "accounting_statement":
                 project_accounting_result(session, projection_unit, specialist_result)
+            elif specialist_job.specialist_type == "utility_bill":
+                project_utility_bill_calendar_event(session, projection_unit, specialist_result)
             session.commit()
             _update_specialist_job(engine, specialist_job_id, status="succeeded", finished_at=_utcnow(), error_message=None)
             return {"specialist_job_id": specialist_job_id, "status": "succeeded", "specialist_type": specialist_job.specialist_type}

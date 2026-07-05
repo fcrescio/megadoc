@@ -296,6 +296,9 @@ class DocumentUnit(Base):
     accounting_facts: Mapped[list["AccountingFact"]] = relationship(
         back_populates="document_unit", cascade="all, delete-orphan"
     )
+    calendar_events: Mapped[list["CalendarEvent"]] = relationship(
+        back_populates="source_document_unit", cascade="all, delete-orphan"
+    )
     outgoing_links: Mapped[list["DocumentUnitLink"]] = relationship(
         foreign_keys="DocumentUnitLink.source_document_unit_id",
         back_populates="source_document_unit",
@@ -372,6 +375,7 @@ class SpecialistResult(Base):
     document_unit: Mapped["DocumentUnit"] = relationship(back_populates="specialist_results")
     assertions: Mapped[list["KnowledgeAssertion"]] = relationship(back_populates="specialist_result")
     accounting_facts: Mapped[list["AccountingFact"]] = relationship(back_populates="specialist_result")
+    calendar_events: Mapped[list["CalendarEvent"]] = relationship(back_populates="source_specialist_result")
 
 
 class DocumentUnitLink(Base):
@@ -681,6 +685,40 @@ class DocumentUnitMention(Base):
 
     document_unit: Mapped["DocumentUnit"] = relationship(back_populates="mentions")
     node: Mapped["KnowledgeNode"] = relationship(back_populates="mentions")
+
+
+class CalendarEvent(Base):
+    __tablename__ = "calendar_events"
+    __table_args__ = (
+        UniqueConstraint("source_specialist_result_id", "event_type", name="uq_calendar_events_result_type"),
+        Index("ix_calendar_events_due_date", "due_date"),
+        Index("ix_calendar_events_status", "status"),
+        Index("ix_calendar_events_review_status", "review_status"),
+        Index("ix_calendar_events_document_unit", "source_document_unit_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    source_document_unit_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("document_units.id", ondelete="CASCADE"), nullable=False
+    )
+    source_specialist_result_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("specialist_results.id", ondelete="CASCADE"), nullable=True
+    )
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    title: Mapped[str] = mapped_column(String(512), nullable=False)
+    subject: Mapped[str | None] = mapped_column(Text, nullable=True)
+    amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    currency: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    due_date: Mapped[date] = mapped_column(Date, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="unknown")
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    review_status: Mapped[str] = mapped_column(String(32), nullable=False, default="needs_review")
+    evidence_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    source_document_unit: Mapped["DocumentUnit"] = relationship(back_populates="calendar_events")
+    source_specialist_result: Mapped["SpecialistResult | None"] = relationship(back_populates="calendar_events")
 
 
 class KnowledgeAssertion(Base):

@@ -12,6 +12,7 @@ import {
   EntitiesPanel,
   ReviewsPanel,
   AgentPanel,
+  CalendarPanel,
 } from './KnowledgeBasePanels';
 import { TopicCleanupPanel } from './TopicCleanupPanel';
 
@@ -20,7 +21,7 @@ interface Props {
   initialSelectedDocumentIds?: string[];
 }
 
-type Panel = 'agent' | 'facts' | 'specialists' | 'topics' | 'entities' | 'reviews' | 'cleanup';
+type Panel = 'agent' | 'facts' | 'calendar' | 'specialists' | 'topics' | 'entities' | 'reviews' | 'cleanup';
 
 function PanelIcon({ icon }: { icon: Panel }) {
   const common = {
@@ -65,6 +66,21 @@ function PanelIcon({ icon }: { icon: Panel }) {
         <circle cx="12" cy="12" r="4.5" />
         <path d="m8.8 8.8 6.4 6.4" />
         <path d="m15.2 8.8-6.4 6.4" />
+      </svg>
+    );
+  }
+  if (icon === 'calendar') {
+    return (
+      <svg {...common}>
+        <path d="M7 3.5v3" />
+        <path d="M17 3.5v3" />
+        <path d="M4.5 9h15" />
+        <rect x="4.5" y="5.5" width="15" height="15" rx="2.5" />
+        <path d="M8 13h.01" />
+        <path d="M12 13h.01" />
+        <path d="M16 13h.01" />
+        <path d="M8 17h.01" />
+        <path d="M12 17h.01" />
       </svg>
     );
   }
@@ -199,6 +215,7 @@ function KnowledgeBase({ onOpenDocument, initialSelectedDocumentIds = [] }: Prop
           {[
             { id: 'facts' as Panel, label: 'Fatti' },
             { id: 'agent' as Panel, label: 'Dialogo' },
+            { id: 'calendar' as Panel, label: 'Calendario' },
             { id: 'specialists' as Panel, label: 'Specialisti' },
             { id: 'topics' as Panel, label: 'Topic' },
             { id: 'entities' as Panel, label: 'Entità' },
@@ -223,6 +240,7 @@ function KnowledgeBase({ onOpenDocument, initialSelectedDocumentIds = [] }: Prop
             initialSelectedDocumentIds={initialSelectedDocumentIds}
           />
         )}
+        {panel === 'calendar' && <CalendarPanel onOpenDocument={onOpenDocument} deferredSearch={deferredSearch} />}
         {panel === 'specialists' && <SpecialistsPanel onOpenDocument={onOpenDocument} deferredSearch={deferredSearch} />}
         {panel === 'topics' && <TopicsPanel onOpenDocument={onOpenDocument} deferredSearch={deferredSearch} includeInactive={false} />}
         {panel === 'entities' && <EntitiesPanel onOpenDocument={onOpenDocument} deferredSearch={deferredSearch} />}

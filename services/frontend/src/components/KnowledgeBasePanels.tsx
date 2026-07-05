@@ -16,6 +16,7 @@ import {
   useKnowledgeTopics,
   useReviewGraphConsolidationSuggestion,
   useRunKnowledgeConsolidation,
+  useCalendarEvents,
   useSpecialistAccountingStatements,
   useSpecialistUtilityBills,
 } from '../hooks/useDocuments';
@@ -580,6 +581,88 @@ export const FactsPanel = memo(function FactsPanel({ onOpenDocument, deferredSea
 });
 
 /* ── Specialists Panel ── */
+
+interface CalendarPanelProps {
+  onOpenDocument: (documentId: string) => void;
+  deferredSearch: string;
+}
+
+export const CalendarPanel = memo(function CalendarPanel({ onOpenDocument, deferredSearch }: CalendarPanelProps) {
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [reviewFilter, setReviewFilter] = useState('all');
+  const events = useCalendarEvents({
+    query: deferredSearch || undefined,
+    status: statusFilter,
+    reviewStatus: reviewFilter,
+    limit: 120,
+  });
+
+  return (
+    <div className="flex h-full flex-col gap-3">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-white">Calendario operativo</p>
+          <p className="mt-1 text-xs text-slate-400">Scadenze estratte dagli specialisti, con importi e stato di revisione.</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="rounded-full border border-white/10 bg-slate-950 px-3 py-2 text-sm">
+            <option value="all">Tutti gli stati</option>
+            <option value="due">Da pagare</option>
+            <option value="paid">Pagate</option>
+            <option value="unknown">Ignoto</option>
+          </select>
+          <select value={reviewFilter} onChange={(e) => setReviewFilter(e.target.value)} className="rounded-full border border-white/10 bg-slate-950 px-3 py-2 text-sm">
+            <option value="all">Tutte le review</option>
+            <option value="auto_accepted">Auto accettate</option>
+            <option value="needs_review">Da verificare</option>
+          </select>
+        </div>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto rounded-2xl border border-white/10 bg-slate-950/35 p-3">
+        {events.isLoading ? (
+          <p className="text-sm text-slate-400">Caricamento calendario...</p>
+        ) : events.data?.items.length ? (
+          <div className="grid gap-3 xl:grid-cols-2">
+            {events.data.items.map((event) => (
+              <article key={event.id} className="rounded-xl border border-white/10 bg-white/5 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="font-medium text-white">{event.title}</p>
+                    <p className="mt-1 line-clamp-2 text-sm text-slate-300">{event.subject ?? 'Oggetto non disponibile'}</p>
+                    <p className="mt-1 truncate text-xs text-slate-500">{event.original_filename}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-semibold text-white">{formatCurrency(event.amount)}</p>
+                    <p className="mt-1 text-xs text-slate-400">{formatDate(event.due_date)}</p>
+                  </div>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                  <span className="rounded-full border border-white/10 bg-slate-950/60 px-2 py-1 text-slate-200">{event.status}</span>
+                  <span className={event.review_status === 'needs_review' ? 'rounded-full border border-amber-300/20 bg-amber-400/10 px-2 py-1 text-amber-100' : 'rounded-full border border-emerald-300/20 bg-emerald-400/10 px-2 py-1 text-emerald-100'}>
+                    {event.review_status}
+                  </span>
+                  {event.confidence !== null && (
+                    <span className="rounded-full border border-white/10 bg-slate-950/60 px-2 py-1 text-slate-300">
+                      {(event.confidence * 100).toFixed(0)}%
+                    </span>
+                  )}
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {event.document_id && <button onClick={() => onOpenDocument(event.document_id!)} className={tabClass(false)}>Documento</button>}
+                  {event.source_specialist_result_id && (
+                    <a href={`/api/knowledge/specialist-results/${event.source_specialist_result_id}/export?format=json`} target="_blank" rel="noreferrer" className={tabClass(false)}>JSON fonte</a>
+                  )}
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-slate-400">Nessuna scadenza trovata.</p>
+        )}
+      </div>
+    </div>
+  );
+});
 
 interface SpecialistsPanelProps {
   onOpenDocument: (documentId: string) => void;

@@ -418,6 +418,28 @@ export interface SpecialistUtilityBillSummary {
   created_at: string;
 }
 
+export interface CalendarEventSummary {
+  id: string;
+  event_type: string;
+  title: string;
+  subject: string | null;
+  amount: number | null;
+  currency: string | null;
+  due_date: string;
+  status: string;
+  confidence: number | null;
+  review_status: string;
+  source_document_unit_id: string;
+  source_specialist_result_id: string | null;
+  document_id: string | null;
+  original_filename: string | null;
+  document_unit_title: string | null;
+  document_type_code: string | null;
+  evidence: Record<string, unknown>;
+  created_at: string;
+  updated_at: string | null;
+}
+
 export interface SpecialistAccountingStatementSummary {
   result_id: string;
   document_unit_id: string;

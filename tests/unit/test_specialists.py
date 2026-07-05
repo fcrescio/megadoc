@@ -75,3 +75,12 @@ def test_route_specialists_accepts_llm_classified_utility_bill():
     specialists = route_specialists_for_document_unit(document_unit, "numero cliente rif.bolletta acqua")
 
     assert specialists == ["utility_bill"]
+
+
+def test_route_specialists_accepts_llm_classified_invoice_for_utility_worker():
+    document_unit = _document_unit(1, 1)
+    document_unit.document_type = DocumentType(code="fattura", name="Fattura")
+
+    specialists = route_specialists_for_document_unit(document_unit, "")
+
+    assert specialists == ["utility_bill"]

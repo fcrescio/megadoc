@@ -49,6 +49,13 @@ function formatDate(value: unknown) {
   return parsed.toLocaleDateString('it-IT');
 }
 
+function specialistJobClass(status: string) {
+  if (status === 'succeeded') return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+  if (status === 'failed') return 'border-rose-200 bg-rose-50 text-rose-700';
+  if (status === 'processing') return 'border-cyan-200 bg-cyan-50 text-cyan-700';
+  return 'border-amber-200 bg-amber-50 text-amber-700';
+}
+
 function formatCurrency(value: unknown) {
   if (typeof value !== 'number') {
     return 'n/d';
@@ -590,6 +597,7 @@ const TopicAssignmentManagerMemo = memo(TopicAssignmentManager);
 function DocumentDetail({ documentId, onBack, onAskDocument, initialTab = 'info' }: Props) {
   const [activeTab, setActiveTab] = useState<'info' | 'pdf' | 'ocr' | 'knowledge' | 'versions' | 'assets' | 'bilancio'>(initialTab);
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
+  const [specialistLaunchSummary, setSpecialistLaunchSummary] = useState<string | null>(null);
 
   const { data: docData, isLoading: docLoading } = useDocument(documentId);
   const { data: versions } = useDocumentVersions(documentId);
@@ -610,7 +618,41 @@ function DocumentDetail({ documentId, onBack, onAskDocument, initialTab = 'info'
 
   useEffect(() => {
     setSelectedVersionId(null);
+    setSpecialistLaunchSummary(null);
   }, [documentId]);
+
+  const specialistSummary = useMemo(() => {
+    const jobs = knowledge?.scan_units.flatMap((scanUnit) =>
+      scanUnit.document_units.flatMap((unit) => unit.specialist_jobs),
+    ) ?? [];
+    const results = knowledge?.scan_units.flatMap((scanUnit) =>
+      scanUnit.document_units.flatMap((unit) => unit.specialist_results),
+    ) ?? [];
+    return {
+      total: jobs.length,
+      queued: jobs.filter((job) => job.status === 'queued' || job.status === 'pending').length,
+      processing: jobs.filter((job) => job.status === 'processing').length,
+      succeeded: jobs.filter((job) => job.status === 'succeeded').length,
+      failed: jobs.filter((job) => job.status === 'failed').length,
+      results: results.length,
+    };
+  }, [knowledge]);
+
+  const launchSpecialists = () => {
+    setSpecialistLaunchSummary(null);
+    ensureSpecialists.mutate(documentId, {
+      onSuccess: (response) => {
+        setSpecialistLaunchSummary(
+          response.created_jobs > 0
+            ? `Creati ${response.created_jobs} job specialistici.`
+            : `Nessun nuovo job creato: ${response.jobs.length} job gia presenti.`,
+        );
+      },
+      onError: (error) => {
+        setSpecialistLaunchSummary(error instanceof Error ? error.message : String(error));
+      },
+    });
+  };
 
   if (docLoading) {
     return (
@@ -882,14 +924,33 @@ function DocumentDetail({ documentId, onBack, onAskDocument, initialTab = 'info'
                 </div>
               ) : knowledge && knowledge.scan_units.length > 0 ? (
                 <div className="space-y-6">
-                  <div className="flex items-center justify-end">
-                    <button
-                      onClick={() => ensureSpecialists.mutate(documentId)}
-                      disabled={ensureSpecialists.isPending}
-                      className="px-3 py-2 rounded-md border border-slate-300 text-slate-700 text-sm hover:bg-slate-50 disabled:opacity-60"
-                    >
-                      {ensureSpecialists.isPending ? 'Specialisti in coda...' : 'Estrazione specialistica'}
-                    </button>
+                  <div className="rounded-xl border border-cyan-200 bg-cyan-50 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-cyan-950">Estrazione specialistica</p>
+                        <p className="mt-1 text-xs text-cyan-800">
+                          Lancia i worker di dominio per document unit riconosciute, ad esempio bollette o bilanci.
+                        </p>
+                      </div>
+                      <button
+                        onClick={launchSpecialists}
+                        disabled={ensureSpecialists.isPending}
+                        className="px-3 py-2 rounded-md bg-cyan-700 text-white text-sm hover:bg-cyan-800 disabled:opacity-60"
+                      >
+                        {ensureSpecialists.isPending ? 'Lancio specialisti...' : 'Lancia / aggiorna specialisti'}
+                      </button>
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                      <span className="rounded-full border border-cyan-200 bg-white px-2 py-1 text-cyan-900">{specialistSummary.total} job</span>
+                      <span className="rounded-full border border-amber-200 bg-white px-2 py-1 text-amber-700">{specialistSummary.queued} in coda</span>
+                      <span className="rounded-full border border-cyan-200 bg-white px-2 py-1 text-cyan-700">{specialistSummary.processing} in corso</span>
+                      <span className="rounded-full border border-emerald-200 bg-white px-2 py-1 text-emerald-700">{specialistSummary.succeeded} completati</span>
+                      <span className="rounded-full border border-rose-200 bg-white px-2 py-1 text-rose-700">{specialistSummary.failed} falliti</span>
+                      <span className="rounded-full border border-slate-200 bg-white px-2 py-1 text-slate-700">{specialistSummary.results} risultati</span>
+                    </div>
+                    {specialistLaunchSummary && (
+                      <p className="mt-3 text-xs text-cyan-900">{specialistLaunchSummary}</p>
+                    )}
                   </div>
                   {knowledge.scan_units.map((scanUnit) => (
                     <div key={scanUnit.id} className="border rounded-lg overflow-hidden">
@@ -1043,11 +1104,25 @@ function DocumentDetail({ documentId, onBack, onAskDocument, initialTab = 'info'
                                 </p>
                                 <div className="flex flex-wrap gap-2">
                                   {unit.specialist_jobs.map((job) => (
-                                    <span key={job.id} className="px-2 py-1 rounded-full bg-slate-100 text-slate-700 text-xs">
+                                    <span
+                                      key={job.id}
+                                      className={`px-2 py-1 rounded-full border text-xs ${specialistJobClass(job.status)}`}
+                                      title={job.error_message ?? `Tentativi: ${job.attempt_count}`}
+                                    >
                                       {job.specialist_type}: {job.status}
+                                      {job.attempt_count > 0 ? ` · try ${job.attempt_count}` : ''}
                                     </span>
                                   ))}
                                 </div>
+                                {unit.specialist_jobs.some((job) => job.error_message) && (
+                                  <div className="mt-2 space-y-1">
+                                    {unit.specialist_jobs.filter((job) => job.error_message).map((job) => (
+                                      <p key={`${job.id}-error`} className="text-xs text-rose-700">
+                                        {job.specialist_type}: {job.error_message}
+                                      </p>
+                                    ))}
+                                  </div>
+                                )}
                               </div>
                             )}
 
