@@ -2294,6 +2294,7 @@ def chat_with_knowledge_agent(
     trace: list[KnowledgeAgentTraceStep] = []
     vision_requests: list[KnowledgeAgentVisionRequest] = []
     final_action: _KnowledgeAgentAction | None = None
+    seen_tool_signatures: set[str] = set()
 
     for step in range(1, payload.max_steps + 1):
         try:
@@ -2355,11 +2356,19 @@ def chat_with_knowledge_agent(
         tool_output: dict[str, Any] | list[Any]
         error: str | None = None
         try:
-            tool_output = _run_knowledge_agent_tool(db, action, allow_vision=payload.allow_vision)
-            if action.action == "request_page_vision" and isinstance(tool_output, dict):
-                request = tool_output.get("vision_request")
-                if isinstance(request, dict):
-                    vision_requests.append(KnowledgeAgentVisionRequest.model_validate(request))
+            signature = _knowledge_agent_tool_signature(action)
+            if signature in seen_tool_signatures:
+                tool_output = {
+                    "status": "repeated_tool_skipped",
+                    "message": "Identical tool call already executed in this run; choose a different query/tool or finalize.",
+                }
+            else:
+                seen_tool_signatures.add(signature)
+                tool_output = _run_knowledge_agent_tool(db, action, allow_vision=payload.allow_vision)
+                if action.action == "request_page_vision" and isinstance(tool_output, dict):
+                    request = tool_output.get("vision_request")
+                    if isinstance(request, dict):
+                        vision_requests.append(KnowledgeAgentVisionRequest.model_validate(request))
         except Exception as exc:
             tool_output = {}
             error = str(exc)
@@ -2470,6 +2479,7 @@ def stream_knowledge_agent_chat(
         trace: list[KnowledgeAgentTraceStep] = []
         vision_requests: list[KnowledgeAgentVisionRequest] = []
         final_action: _KnowledgeAgentAction | None = None
+        seen_tool_signatures: set[str] = set()
 
         yield _knowledge_agent_stream_event("status", {"status": "running", "model": provider.model_name})
         for step in range(1, payload.max_steps + 1):
@@ -2528,11 +2538,19 @@ def stream_knowledge_agent_chat(
             tool_output: dict[str, Any] | list[Any]
             error: str | None = None
             try:
-                tool_output = _run_knowledge_agent_tool(db, action, allow_vision=payload.allow_vision)
-                if action.action == "request_page_vision" and isinstance(tool_output, dict):
-                    request = tool_output.get("vision_request")
-                    if isinstance(request, dict):
-                        vision_requests.append(KnowledgeAgentVisionRequest.model_validate(request))
+                signature = _knowledge_agent_tool_signature(action)
+                if signature in seen_tool_signatures:
+                    tool_output = {
+                        "status": "repeated_tool_skipped",
+                        "message": "Identical tool call already executed in this run; choose a different query/tool or finalize.",
+                    }
+                else:
+                    seen_tool_signatures.add(signature)
+                    tool_output = _run_knowledge_agent_tool(db, action, allow_vision=payload.allow_vision)
+                    if action.action == "request_page_vision" and isinstance(tool_output, dict):
+                        request = tool_output.get("vision_request")
+                        if isinstance(request, dict):
+                            vision_requests.append(KnowledgeAgentVisionRequest.model_validate(request))
             except Exception as exc:
                 tool_output = {}
                 error = str(exc)
@@ -2633,6 +2651,8 @@ def _validate_knowledge_agent_final(
         if isinstance(item, dict) and any(value is not None for value in item.values())
     ]
     if not citations:
+        if _is_supported_no_evidence_answer(action, trace):
+            return None
         return "final_answer requires at least one citation"
 
     for citation in citations:
@@ -2656,6 +2676,10 @@ def _build_knowledge_agent_messages(payload: KnowledgeAgentChatRequest, db: Sess
                 "Prima di rispondere su un documento devi leggere il testo OCR con get_page_text per le pagine rilevanti. "
                 "Dopo aver identificato un documento lungo, usa search_document_text per localizzare le pagine rilevanti "
                 "invece di sfogliarlo pagina per pagina. "
+                "search_document_text puo' cercare nell'intero archivio se non conosci ancora document_id; quando hai "
+                "un document_id, usalo per restringere la ricerca al documento. "
+                "Non ripetere la stessa azione con gli stessi parametri se il risultato precedente non era utile: "
+                "allarga la query, leggi una pagina candidata, oppure produci una final_answer negativa se non ci sono prove. "
                 "Per domande su bollette da pagare, scadenze, fornitori, importi o calendari usa search_calendar_events: "
                 "supplier/query sono ricerche testuali substring case-insensitive, mentre date_from/date_to e "
                 "amount_min/amount_max sono filtri liberi su scadenza e importo. "
@@ -2680,6 +2704,18 @@ def _build_knowledge_agent_messages(payload: KnowledgeAgentChatRequest, db: Sess
                     "Documenti selezionati dall'utente come contesto iniziale. "
                     "Questo contesto non limita lo scope dei tool.\n\n"
                     f"{selected_context}"
+                ),
+            )
+        )
+    presearch_context = _build_question_presearch_context(db, payload.question)
+    if presearch_context:
+        messages.append(
+            ChatMessage(
+                role="user",
+                content=(
+                    "Ricerca keyword OCR preliminare sulla domanda. "
+                    "Usala solo come orientamento: prima di citarla nella risposta devi leggere la pagina con get_page_text.\n\n"
+                    f"{presearch_context}"
                 ),
             )
         )
@@ -2778,6 +2814,60 @@ def _build_selected_document_context(db: Session | None, document_ids: list[str]
     return "\n\n---\n\n".join(blocks)
 
 
+def _build_question_presearch_context(db: Session | None, question: str) -> str:
+    if db is None:
+        return ""
+    collected: list[dict[str, Any]] = []
+    seen: set[tuple[str | None, int | None]] = set()
+    for query in _presearch_query_variants(question):
+        try:
+            result = _agent_search_document_text(db, None, query, limit=5)
+        except Exception:
+            continue
+        hits = result.get("hits") if isinstance(result, dict) else None
+        if not isinstance(hits, list):
+            continue
+        for hit in hits:
+            key = (hit.get("document_id"), hit.get("page_number"))
+            if key in seen:
+                continue
+            seen.add(key)
+            collected.append({**hit, "matched_query": query})
+            if len(collected) >= 8:
+                break
+        if len(collected) >= 8:
+            break
+    if not collected:
+        return ""
+    lines = ["PAGINE CANDIDATE DA VERIFICARE:"]
+    for hit in collected[:8]:
+        lines.append(
+            "- "
+            f"query={hit.get('matched_query')}; "
+            f"document_id={hit.get('document_id')}; "
+            f"filename={hit.get('original_filename') or 'n/d'}; "
+            f"page={hit.get('page_number')}; "
+            f"score={hit.get('score')}; "
+            f"snippet={hit.get('snippet')}"
+        )
+    return "\n".join(lines)
+
+
+def _presearch_query_variants(question: str) -> list[str]:
+    variants: list[str] = []
+    normalized = _normalize_search_text(question)
+    years = re.findall(r"\b(?:19|20)\d{2}\b", question)
+    if (
+        ("imposta" in normalized or "tassa" in normalized or "tribut" in normalized)
+        and ("casa" in normalized or "immobil" in normalized or "abitaz" in normalized)
+    ):
+        suffix = f" {' '.join(years)}" if years else ""
+        variants.append(f"ICI imposta comunale immobili{suffix}")
+        variants.append(f"quietanza pagamento ICI{suffix}")
+    variants.append(question)
+    return list(dict.fromkeys(item.strip() for item in variants if item.strip()))
+
+
 def _knowledge_agent_stream_event(event_type: str, payload: dict[str, Any]) -> str:
     return json.dumps({"type": event_type, "payload": payload}, default=str, ensure_ascii=False) + "\n"
 
@@ -2796,7 +2886,8 @@ def _force_knowledge_agent_final_answer(
                 "Il budget di tool e' esaurito. Non chiamare altri tool. "
                 "Se nel trace hai gia' letto pagine rilevanti con get_page_text o analyze_page_image, produci ora solo final_answer "
                 "con answer non vuoto e citations document_id/page_from/page_to. "
-                "Se non hai prove sufficienti, produci final_answer spiegando il limite e citando le pagine lette piu' rilevanti."
+                "Se non hai trovato prove dopo ricerche reali, produci final_answer negativa spiegando che non ci sono "
+                "fonti disponibili nel trace e lascia citations vuoto."
             ),
         ),
     ]
@@ -2888,6 +2979,32 @@ def _trace_has_page_evidence_for_citation(
             evidence = analysis.get("page_summary") or analysis.get("relevant_text") or analysis.get("answer_hint")
             return isinstance(evidence, str) and bool(evidence.strip())
     return False
+
+
+def _is_supported_no_evidence_answer(
+    action: _KnowledgeAgentAction,
+    trace: list[KnowledgeAgentTraceStep],
+) -> bool:
+    text = f"{action.answer or ''} {action.reasoning or ''}".lower()
+    no_evidence_markers = (
+        "non ho trovato",
+        "non sono stati trovati",
+        "nessun documento",
+        "nessuna fonte",
+        "nessuna evidenza",
+        "non risultano",
+        "non e' possibile fornire",
+        "non è possibile fornire",
+    )
+    if not any(marker in text for marker in no_evidence_markers):
+        return False
+    searched_steps = 0
+    for step in trace:
+        if step.error:
+            continue
+        if step.action in {"search_archive", "semantic_search", "search_document_text", "search_calendar_events", "list_topics"}:
+            searched_steps += 1
+    return searched_steps >= 2
 
 
 def _persist_knowledge_agent_run(
@@ -3461,8 +3578,6 @@ def _run_knowledge_agent_tool(
             raise ValueError("document_id is required")
         return _agent_document(db, action.document_id)
     if action.action == "search_document_text":
-        if not action.document_id:
-            raise ValueError("document_id is required")
         return _agent_search_document_text(db, action.document_id, action.query or "", limit=limit)
     if action.action == "get_page_text":
         if not action.document_id or action.page_number is None:
@@ -3502,6 +3617,18 @@ def _run_knowledge_agent_tool(
             limit=limit,
         )
     raise ValueError(f"Unsupported action: {action.action}")
+
+
+def _knowledge_agent_tool_signature(action: _KnowledgeAgentAction) -> str:
+    payload = action.model_dump(
+        mode="json",
+        exclude={"reasoning", "answer", "confidence", "citations"},
+        exclude_none=True,
+    )
+    for key, value in list(payload.items()):
+        if isinstance(value, str):
+            payload[key] = " ".join(value.strip().lower().split())
+    return json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
 
 
 def _agent_search_calendar_events(
@@ -3839,43 +3966,69 @@ def _render_document_page_png_base64(db: Session, document_id: str, page_number:
     }
 
 
-def _agent_search_document_text(db: Session, document_id: str, query: str, *, limit: int) -> dict[str, Any]:
+def _agent_search_document_text(db: Session, document_id: str | None, query: str, *, limit: int) -> dict[str, Any]:
     if not query.strip():
         return {"document_id": document_id, "query": query, "hits": [], "warning": "query is empty"}
-    try:
-        doc_uuid = uuid.UUID(document_id)
-    except ValueError as exc:
-        raise ValueError("Invalid document_id") from exc
-    ocr = db.execute(
-        select(OCRResult)
-        .where(OCRResult.document_id == doc_uuid)
-        .order_by(OCRResult.created_at.desc())
-        .limit(1)
-    ).scalar_one_or_none()
-    if ocr is None:
-        raise ValueError("OCR result not found")
 
     terms = [term for term in re.split(r"\W+", query.lower()) if len(term) >= 3]
-    hits: list[dict[str, Any]] = []
-    for page_number in range(1, max(ocr.page_count, 1) + 1):
-        page_text = _extract_ocr_page_text(ocr, page_number)
-        if not page_text.strip():
-            continue
-        hit = _text_page_hit(page_text, terms)
-        if hit is None:
-            continue
-        start, end, score = hit
-        snippet = page_text[max(0, start - 180) : min(len(page_text), end + 180)]
-        hits.append(
-            {
-                "document_id": document_id,
-                "page_number": page_number,
-                "score": score,
-                "snippet": " ".join(snippet.split()),
-            }
+    if not terms:
+        return {"document_id": document_id, "query": query, "hits": [], "warning": "query has no searchable terms"}
+
+    ocr_rows: list[OCRResult]
+    if document_id:
+        try:
+            doc_uuid = uuid.UUID(document_id)
+        except ValueError as exc:
+            raise ValueError("Invalid document_id") from exc
+        ocr = db.execute(
+            select(OCRResult)
+            .where(OCRResult.document_id == doc_uuid)
+            .order_by(OCRResult.created_at.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+        if ocr is None:
+            raise ValueError("OCR result not found")
+        ocr_rows = [ocr]
+    else:
+        latest_ocr_ids = (
+            select(func.max(OCRResult.created_at).label("created_at"), OCRResult.document_id.label("document_id"))
+            .group_by(OCRResult.document_id)
+            .subquery()
         )
+        ocr_rows = db.execute(
+            select(OCRResult)
+            .join(
+                latest_ocr_ids,
+                (OCRResult.document_id == latest_ocr_ids.c.document_id)
+                & (OCRResult.created_at == latest_ocr_ids.c.created_at),
+            )
+            .options(selectinload(OCRResult.document))
+            .order_by(OCRResult.created_at.desc())
+        ).scalars().all()
+
+    hits: list[dict[str, Any]] = []
+    for ocr in ocr_rows:
+        document = ocr.document
+        for page_number in range(1, max(ocr.page_count, 1) + 1):
+            page_text = _extract_ocr_page_text(ocr, page_number)
+            if not page_text.strip():
+                continue
+            hit = _text_page_hit(page_text, terms)
+            if hit is None:
+                continue
+            start, end, score = hit
+            snippet = page_text[max(0, start - 180) : min(len(page_text), end + 180)]
+            hits.append(
+                {
+                    "document_id": str(ocr.document_id),
+                    "original_filename": document.original_filename if document else None,
+                    "page_number": page_number,
+                    "score": score,
+                    "snippet": " ".join(snippet.split()),
+                }
+            )
     hits.sort(key=lambda item: (-item["score"], item["page_number"]))
-    return {"document_id": document_id, "query": query, "hits": hits[:limit]}
+    return {"document_id": document_id, "query": query, "scope": "document" if document_id else "archive", "hits": hits[:limit]}
 
 
 def _text_page_hit(text: str, terms: list[str]) -> tuple[int, int, int] | None:

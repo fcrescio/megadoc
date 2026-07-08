@@ -1,10 +1,13 @@
 from api.routers.knowledge import (
+    _agent_search_document_text,
     _KnowledgeAgentAction,
     _normalize_knowledge_agent_final,
+    _build_question_presearch_context,
     _text_page_hit,
     _validate_knowledge_agent_final,
     KnowledgeAgentTraceStep,
 )
+from common.db.models import Document, DocumentVersion, OCRResult
 
 
 def test_normalizes_final_answer_reasoning_and_top_level_page_reference():
@@ -75,3 +78,107 @@ def test_text_page_hit_scores_matching_query_terms():
 
     assert hit is not None
     assert hit[2] == 3
+
+
+def test_final_answer_allows_supported_no_evidence_result():
+    action = _KnowledgeAgentAction(
+        action="final_answer",
+        answer="Non ho trovato documenti che riportino il pagamento dell'imposta sulla casa nel 2007.",
+    )
+    trace = [
+        KnowledgeAgentTraceStep(
+            step=1,
+            action="search_calendar_events",
+            input={"query": "imposta casa", "date_from": "2007-01-01", "date_to": "2007-12-31"},
+            output={"events": []},
+        ),
+        KnowledgeAgentTraceStep(
+            step=2,
+            action="search_document_text",
+            input={"query": "ICI 2007 imposta casa"},
+            output={"hits": []},
+        ),
+    ]
+
+    assert _validate_knowledge_agent_final(action, trace) is None
+
+
+def test_global_document_text_search_returns_citable_pages(db_session):
+    document = Document(
+        original_filename="ici.pdf",
+        mime_type="application/pdf",
+        sha256="1" * 64,
+        size_bytes=10,
+        source_type="upload",
+    )
+    db_session.add(document)
+    db_session.flush()
+    version = DocumentVersion(
+        document_id=document.id,
+        version_number=1,
+        storage_bucket="documents",
+        storage_object_key="ici.pdf",
+    )
+    db_session.add(version)
+    db_session.flush()
+    db_session.add(
+        OCRResult(
+            document_id=document.id,
+            document_version_id=version.id,
+            engine_name="fake",
+            engine_version="test",
+            pipeline_version="test",
+            status="succeeded",
+            full_text="",
+            markdown_text="",
+            structured_json={"pages": [{"page_number": 1, "text": "Ricevuta pagamento ICI anno 2007 euro 123,45"}]},
+            page_count=1,
+        )
+    )
+    db_session.commit()
+
+    result = _agent_search_document_text(db_session, None, "ICI 2007", limit=5)
+
+    assert result["scope"] == "archive"
+    assert result["hits"][0]["document_id"] == str(document.id)
+    assert result["hits"][0]["page_number"] == 1
+
+
+def test_question_presearch_context_lists_candidate_pages(db_session):
+    document = Document(
+        original_filename="sepi.pdf",
+        mime_type="application/pdf",
+        sha256="2" * 64,
+        size_bytes=10,
+        source_type="upload",
+    )
+    db_session.add(document)
+    db_session.flush()
+    version = DocumentVersion(
+        document_id=document.id,
+        version_number=1,
+        storage_bucket="documents",
+        storage_object_key="sepi.pdf",
+    )
+    db_session.add(version)
+    db_session.flush()
+    db_session.add(
+        OCRResult(
+            document_id=document.id,
+            document_version_id=version.id,
+            engine_name="fake",
+            engine_version="test",
+            pipeline_version="test",
+            status="succeeded",
+            full_text="",
+            markdown_text="",
+            structured_json={"pages": [{"page_number": 1, "text": "Imposta Comunale Immobili Anno 2007 E. 664,67"}]},
+            page_count=1,
+        )
+    )
+    db_session.commit()
+
+    context = _build_question_presearch_context(db_session, "quanto ho pagato di imposta sulla casa nel 2007?")
+
+    assert str(document.id) in context
+    assert "page=1" in context
