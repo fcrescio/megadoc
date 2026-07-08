@@ -2,6 +2,7 @@ import { Suspense, lazy, useEffect, useState } from 'react';
 import DocumentList from './components/DocumentList';
 import JobStatus from './components/JobStatus';
 import SystemStatusButton from './components/SystemStatusButton';
+import BackgroundActivityButton from './components/BackgroundActivityButton';
 
 const DocumentDetail = lazy(() => import('./components/DocumentDetail'));
 const UploadForm = lazy(() => import('./components/UploadForm'));
@@ -232,6 +233,9 @@ function App() {
                 </button>
               ))}
             </nav>
+            <div className={isMainNavCollapsed ? 'lg:hidden' : ''}>
+              <BackgroundActivityButton />
+            </div>
             <div className={isMainNavCollapsed ? 'lg:hidden' : ''}>
               <SystemStatusButton />
             </div>

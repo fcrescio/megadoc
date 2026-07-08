@@ -4,6 +4,7 @@ import type {
   DocumentAsset,
   OCRResult,
   Job,
+  BackgroundActivity,
   SystemStatus,
   UploadResponse,
   DocumentKnowledge,
@@ -569,6 +570,11 @@ export async function uploadDocument(file: File, externalId?: string, autoSubmit
 export async function getJobs(limit = 100): Promise<Job[]> {
   const response = await fetch(`${API_BASE}/jobs?limit=${limit}`);
   return handleResponse<Job[]>(response);
+}
+
+export async function getBackgroundActivity(): Promise<BackgroundActivity> {
+  const response = await fetch(`${API_BASE}/jobs/background-activity`);
+  return handleResponse<BackgroundActivity>(response);
 }
 
 export async function getJob(id: string): Promise<Job> {

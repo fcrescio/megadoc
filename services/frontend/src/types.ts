@@ -99,6 +99,51 @@ export interface SystemStatus {
   llm_backend: RemoteBackendStatus;
 }
 
+export interface BackgroundActivityJob {
+  pipeline: 'ingestion' | 'knowledge' | 'specialists' | string;
+  id: string;
+  status: string;
+  job_type: string;
+  label: string;
+  attempt_count: number;
+  error_message: string | null;
+  document_id: string | null;
+  scan_unit_id: string | null;
+  document_unit_id: string | null;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  age_seconds: number;
+  is_possibly_stale: boolean;
+  stale_reason: string | null;
+}
+
+export interface BackgroundActivityPipeline {
+  total: number;
+  active: number;
+  possibly_stale: number;
+  failed: number;
+  done: number;
+  by_status: Record<string, number>;
+}
+
+export interface BackgroundActivity {
+  status: 'idle' | 'active' | string;
+  is_idle: boolean;
+  active_count: number;
+  possibly_stale_count: number;
+  failed_count: number;
+  updated_at: string;
+  pipelines: {
+    ingestion: BackgroundActivityPipeline;
+    knowledge: BackgroundActivityPipeline;
+    specialists: BackgroundActivityPipeline;
+  };
+  active_jobs: BackgroundActivityJob[];
+  possibly_stale_jobs: BackgroundActivityJob[];
+  recent_jobs: BackgroundActivityJob[];
+}
+
 export interface UploadResponse {
   document_id: string;
   version_id: string;

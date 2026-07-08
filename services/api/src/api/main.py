@@ -40,7 +40,17 @@ from common.application.repositories import (
 )
 from common.application.services import DocumentService, JobService, persist_upload_to_temp
 from common.config import Settings, get_settings
-from common.db.models import DocumentAsset, DocumentUnit, IngestionJob, ManualComment, OCRResult, ScanUnit, TopicProposal
+from common.db.models import (
+    DocumentAsset,
+    DocumentUnit,
+    IngestionJob,
+    KnowledgeJob,
+    ManualComment,
+    OCRResult,
+    ScanUnit,
+    SpecialistJob,
+    TopicProposal,
+)
 from common.db.schema import ensure_knowledge_schema
 from common.db.session import engine, get_db_session
 from common.domain.enums import AssetType, SourceType
@@ -216,6 +226,11 @@ def list_jobs(
     return [_serialize_job(row, session) for row in rows]
 
 
+@app.get("/jobs/background-activity")
+def background_activity(session: Session = Depends(db_session_dep)) -> dict:
+    return _background_activity(session)
+
+
 @app.get("/jobs/{job_id}", response_model=JobResponse)
 def get_job(job_id: uuid.UUID, session: Session = Depends(db_session_dep)) -> JobResponse:
     JobService(session).reconcile_stale_jobs()
@@ -223,6 +238,191 @@ def get_job(job_id: uuid.UUID, session: Session = Depends(db_session_dep)) -> Jo
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found.")
     return _serialize_job(job, session)
+
+
+def _background_activity(session: Session) -> dict:
+    now = datetime.now(timezone.utc)
+    active_statuses = {"queued", "pending", "processing", "running"}
+    terminal_statuses = {"succeeded", "failed", "completed"}
+
+    ingestion_jobs = session.execute(
+        select(IngestionJob).order_by(IngestionJob.created_at.desc()).limit(80)
+    ).scalars().all()
+    knowledge_jobs = session.execute(
+        select(KnowledgeJob).order_by(KnowledgeJob.created_at.desc()).limit(120)
+    ).scalars().all()
+    specialist_jobs = session.execute(
+        select(SpecialistJob).order_by(SpecialistJob.created_at.desc()).limit(120)
+    ).scalars().all()
+
+    ingestion_items = [_activity_item_from_ingestion(job, session, now) for job in ingestion_jobs]
+    knowledge_items = [_activity_item_from_knowledge(job, now) for job in knowledge_jobs]
+    specialist_items = [_activity_item_from_specialist(job, session, now) for job in specialist_jobs]
+    all_items = ingestion_items + knowledge_items + specialist_items
+
+    active_items = [
+        item for item in all_items
+        if item["status"] in active_statuses and not item["is_possibly_stale"]
+    ]
+    stale_items = [
+        item for item in all_items
+        if item["status"] in active_statuses and item["is_possibly_stale"]
+    ]
+    failed_items = [item for item in all_items if item["status"] == "failed"]
+    recent_items = sorted(
+        all_items,
+        key=lambda item: item.get("started_at") or item.get("created_at") or "",
+        reverse=True,
+    )[:30]
+
+    return {
+        "status": "idle" if not active_items else "active",
+        "is_idle": not active_items,
+        "active_count": len(active_items),
+        "possibly_stale_count": len(stale_items),
+        "failed_count": len(failed_items),
+        "updated_at": now.isoformat(),
+        "pipelines": {
+            "ingestion": _activity_pipeline_summary(ingestion_items, active_statuses, terminal_statuses),
+            "knowledge": _activity_pipeline_summary(knowledge_items, active_statuses, terminal_statuses),
+            "specialists": _activity_pipeline_summary(specialist_items, active_statuses, terminal_statuses),
+        },
+        "active_jobs": sorted(
+            active_items,
+            key=lambda item: item.get("started_at") or item.get("created_at") or "",
+            reverse=True,
+        )[:20],
+        "possibly_stale_jobs": sorted(
+            stale_items,
+            key=lambda item: item.get("started_at") or item.get("created_at") or "",
+            reverse=True,
+        )[:20],
+        "recent_jobs": recent_items,
+    }
+
+
+def _activity_pipeline_summary(items: list[dict], active_statuses: set[str], terminal_statuses: set[str]) -> dict:
+    by_status: dict[str, int] = {}
+    for item in items:
+        by_status[item["status"]] = by_status.get(item["status"], 0) + 1
+    return {
+        "total": len(items),
+        "active": sum(1 for item in items if item["status"] in active_statuses and not item["is_possibly_stale"]),
+        "possibly_stale": sum(1 for item in items if item["status"] in active_statuses and item["is_possibly_stale"]),
+        "failed": by_status.get("failed", 0),
+        "done": sum(count for status, count in by_status.items() if status in terminal_statuses),
+        "by_status": by_status,
+    }
+
+
+def _activity_item_base(
+    *,
+    pipeline: str,
+    job_id: uuid.UUID,
+    status: str,
+    job_type: str,
+    attempt_count: int,
+    error_message: str | None,
+    created_at: datetime,
+    started_at: datetime | None,
+    finished_at: datetime | None,
+    now: datetime,
+    stale_after_seconds: int,
+) -> dict:
+    anchor = started_at or created_at
+    if anchor.tzinfo is None:
+        anchor = anchor.replace(tzinfo=timezone.utc)
+    age_seconds = int((now - anchor).total_seconds())
+    return {
+        "pipeline": pipeline,
+        "id": str(job_id),
+        "status": status,
+        "job_type": job_type,
+        "attempt_count": attempt_count,
+        "error_message": error_message,
+        "created_at": created_at.isoformat(),
+        "started_at": started_at.isoformat() if started_at else None,
+        "finished_at": finished_at.isoformat() if finished_at else None,
+        "age_seconds": max(0, age_seconds),
+        "is_possibly_stale": status in {"queued", "pending", "processing", "running"} and age_seconds > stale_after_seconds,
+    }
+
+
+def _activity_item_from_ingestion(job: IngestionJob, session: Session, now: datetime) -> dict:
+    item = _activity_item_base(
+        pipeline="ingestion",
+        job_id=job.id,
+        status=job.status,
+        job_type=job.job_type,
+        attempt_count=job.attempt_count,
+        error_message=job.error_message,
+        created_at=job.created_at,
+        started_at=job.started_at,
+        finished_at=job.finished_at,
+        now=now,
+        stale_after_seconds=20 * 60,
+    )
+    is_stale, stale_reason = JobService(session).is_job_stale(job)
+    item.update({
+        "document_id": str(job.document_id),
+        "scan_unit_id": None,
+        "document_unit_id": None,
+        "label": f"Ingestione {job.job_type}",
+        "is_possibly_stale": bool(is_stale or item["is_possibly_stale"]),
+        "stale_reason": stale_reason,
+    })
+    return item
+
+
+def _activity_item_from_knowledge(job: KnowledgeJob, now: datetime) -> dict:
+    item = _activity_item_base(
+        pipeline="knowledge",
+        job_id=job.id,
+        status=job.status,
+        job_type=job.job_type,
+        attempt_count=job.attempt_count,
+        error_message=job.error_message,
+        created_at=job.created_at,
+        started_at=job.started_at,
+        finished_at=job.finished_at,
+        now=now,
+        stale_after_seconds=20 * 60,
+    )
+    scan_unit = job.scan_unit
+    item.update({
+        "document_id": str(scan_unit.source_document_id) if scan_unit else None,
+        "scan_unit_id": str(job.scan_unit_id),
+        "document_unit_id": None,
+        "label": f"Knowledge {job.job_type}",
+        "stale_reason": "Knowledge job attivo da molto tempo." if item["is_possibly_stale"] else None,
+    })
+    return item
+
+
+def _activity_item_from_specialist(job: SpecialistJob, session: Session, now: datetime) -> dict:
+    item = _activity_item_base(
+        pipeline="specialists",
+        job_id=job.id,
+        status=job.status,
+        job_type=job.specialist_type,
+        attempt_count=job.attempt_count,
+        error_message=job.error_message,
+        created_at=job.created_at,
+        started_at=job.started_at,
+        finished_at=job.finished_at,
+        now=now,
+        stale_after_seconds=30 * 60,
+    )
+    document_unit = session.get(DocumentUnit, job.document_unit_id)
+    scan_unit = document_unit.scan_unit if document_unit else None
+    item.update({
+        "document_id": str(scan_unit.source_document_id) if scan_unit else None,
+        "scan_unit_id": str(document_unit.scan_unit_id) if document_unit else None,
+        "document_unit_id": str(job.document_unit_id),
+        "label": f"Specialista {job.specialist_type}",
+        "stale_reason": "Specialist job attivo da molto tempo." if item["is_possibly_stale"] else None,
+    })
+    return item
 
 
 @app.get("/documents", response_model=list[DocumentResponse])
