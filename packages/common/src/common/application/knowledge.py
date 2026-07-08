@@ -43,8 +43,10 @@ def ensure_scan_unit_for_ocr_result(
     knowledge_job = session.execute(
         select(KnowledgeJob)
         .where(KnowledgeJob.scan_unit_id == scan_unit.id)
+        .where(KnowledgeJob.job_type == "full_processing")
         .order_by(KnowledgeJob.created_at.desc())
-    ).scalar_one_or_none()
+        .limit(1)
+    ).scalars().first()
 
     should_dispatch = False
     if knowledge_job is None:
@@ -90,6 +92,7 @@ def get_dispatchable_knowledge_scan_unit_ids(session: Session) -> list[uuid.UUID
     rows = session.execute(
         select(KnowledgeJob)
         .where(KnowledgeJob.status == "queued")
+        .where(KnowledgeJob.job_type == "full_processing")
         .order_by(KnowledgeJob.created_at.desc())
     ).scalars().all()
 
@@ -109,8 +112,10 @@ def mark_knowledge_job_pending_dispatch(session: Session, scan_unit_id: str | uu
     knowledge_job = session.execute(
         select(KnowledgeJob)
         .where(KnowledgeJob.scan_unit_id == parsed_scan_unit_id)
+        .where(KnowledgeJob.job_type == "full_processing")
         .order_by(KnowledgeJob.created_at.desc())
-    ).scalar_one_or_none()
+        .limit(1)
+    ).scalars().first()
     if knowledge_job is None:
         return False
     if knowledge_job.status != "queued":

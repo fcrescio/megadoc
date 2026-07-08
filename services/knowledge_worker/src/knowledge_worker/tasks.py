@@ -74,7 +74,7 @@ def process_scan_unit_task(self, scan_unit_id: str):
     with Session(engine) as gate_session:
         if has_active_ingestion_jobs(gate_session):
             logger.info("knowledge_deferred_until_ocr_drain", extra={"scan_unit_id": scan_unit_id})
-            latest_job = _get_latest_knowledge_job(gate_session, scan_unit_id)
+            latest_job = _get_latest_knowledge_job(gate_session, scan_unit_id, job_type="full_processing")
             if latest_job is not None:
                 latest_job.status = "pending"
                 gate_session.commit()
@@ -260,7 +260,7 @@ def _get_latest_knowledge_job(session: Session, scan_unit_id: str, job_type: str
     )
     if job_type is not None:
         query = query.where(KnowledgeJob.job_type == job_type)
-    return session.execute(query).scalar_one_or_none()
+    return session.execute(query.limit(1)).scalars().first()
 
 
 def _ensure_topic_finalization_job(engine, scan_unit_id: str) -> None:
@@ -289,7 +289,7 @@ def _update_knowledge_job(
     error_message: str | None = None,
 ) -> None:
     with Session(engine) as status_session:
-        knowledge_job = _get_latest_knowledge_job(status_session, scan_unit_id)
+        knowledge_job = _get_latest_knowledge_job(status_session, scan_unit_id, job_type="full_processing")
         if knowledge_job is None:
             return
         knowledge_job.status = status
