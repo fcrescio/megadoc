@@ -5,6 +5,7 @@ import {
   useRejectTopicProposal,
   useTopicProposals,
 } from '../hooks/useDocuments';
+import { getDocumentDownloadUrl } from '../api/client';
 import type { KnowledgeTopicProposal, KnowledgeTopicSummary, TopicCreatePayload } from '../types';
 
 interface Props {
@@ -65,6 +66,7 @@ const ProposalCard = memo(function ProposalCard({
   const [newKind, setNewKind] = useState(proposal.proposed_topic_kind);
   const [description, setDescription] = useState(proposal.description ?? '');
   const [confirmReject, setConfirmReject] = useState(false);
+  const [showSourcePreview, setShowSourcePreview] = useState(false);
 
   const filteredTopicOptions = useMemo(() => {
     const query = topicSearch.trim().toLowerCase();
@@ -83,6 +85,10 @@ const ProposalCard = memo(function ProposalCard({
   const targetTopicSelectionIsValid =
     mode === 'approve_new_topic'
     || selectedTopic !== null;
+  const sourcePage = proposal.source_start_page ?? proposal.source_end_page;
+  const sourcePdfUrl = proposal.source_document_id
+    ? `${getDocumentDownloadUrl(proposal.source_document_id, undefined, 'inline')}${sourcePage ? `#page=${sourcePage}` : ''}`
+    : null;
 
   const handleApprove = () => {
     if (mode === 'merge_into_existing' || mode === 'add_secondary_topic') {
@@ -133,12 +139,62 @@ const ProposalCard = memo(function ProposalCard({
           </div>
           <p className="text-sm text-slate-400 mt-1">slug: {proposal.proposed_slug}</p>
           {proposal.source_document_filename && (
-            <p className="text-sm text-slate-300 mt-2">
-              Source: {proposal.source_document_filename}
-              {proposal.source_start_page !== null && proposal.source_end_page !== null
-                ? ` · pages ${proposal.source_start_page}-${proposal.source_end_page}`
-                : ''}
-            </p>
+            <div className="mt-2 rounded-xl border border-white/10 bg-white/5">
+              <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+                <p className="min-w-0 text-sm text-slate-300">
+                  <span className="text-slate-400">Source:</span>{' '}
+                  <span className="break-all">{proposal.source_document_filename}</span>
+                  {proposal.source_start_page !== null && proposal.source_end_page !== null
+                    ? ` · pages ${proposal.source_start_page}-${proposal.source_end_page}`
+                    : ''}
+                </p>
+                <div className="flex shrink-0 flex-wrap gap-2">
+                  {sourcePdfUrl && (
+                    <button
+                      type="button"
+                      onClick={() => setShowSourcePreview((value) => !value)}
+                      className="rounded-full border border-cyan-300/25 bg-cyan-400/10 px-3 py-1.5 text-xs font-medium text-cyan-100 hover:bg-cyan-400/20"
+                    >
+                      {showSourcePreview ? 'Nascondi PDF' : 'Vedi PDF'}
+                    </button>
+                  )}
+                  {proposal.source_document_id && (
+                    <a
+                      href={`/documents/${proposal.source_document_id}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-slate-200 hover:bg-white/10"
+                    >
+                      Apri documento
+                    </a>
+                  )}
+                </div>
+              </div>
+              {showSourcePreview && sourcePdfUrl && (
+                <div className="border-t border-white/10 bg-slate-950">
+                  <div className="flex items-center justify-between px-3 py-2 text-xs text-slate-400">
+                    <span>
+                      Preview PDF originale
+                      {sourcePage ? ` · pagina ${sourcePage}` : ''}
+                    </span>
+                    <a
+                      href={sourcePdfUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-cyan-200 hover:text-cyan-100"
+                    >
+                      Apri in nuova scheda
+                    </a>
+                  </div>
+                  <iframe
+                    key={sourcePdfUrl}
+                    src={sourcePdfUrl}
+                    title={`Source PDF ${proposal.source_document_filename}`}
+                    className="h-[62vh] w-full bg-white"
+                  />
+                </div>
+              )}
+            </div>
           )}
           {proposal.description && <p className="text-sm text-slate-300 mt-2">{proposal.description}</p>}
           {proposal.rationale && (
