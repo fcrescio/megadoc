@@ -130,13 +130,14 @@ def project_document_unit(
         surface_text = _navigable_label(entity.entity_value)
         if surface_text is None:
             continue
-        label, canonical_key, review_status = _entity_node_identity(session, entity)
+        label, canonical_key, review_status, canonical_entity_id = _entity_node_identity(session, entity)
         node = _get_or_create_node(
             session,
             node_kind=node_kind,
             label=label,
             canonical_key=canonical_key,
             review_status=review_status,
+            canonical_entity_id=canonical_entity_id,
         )
         _ensure_alias(session, node, surface_text)
         mentioned_nodes.setdefault(node_kind, []).append(node)
@@ -150,7 +151,10 @@ def project_document_unit(
                 confidence=entity.confidence,
                 page_from=entity.page_from,
                 page_to=entity.page_to,
-                evidence_json={"entity_type": entity.entity_type},
+                evidence_json={
+                    "entity_type": entity.entity_type,
+                    "canonical_entity_id": str(canonical_entity_id) if canonical_entity_id else None,
+                },
             )
         )
 
@@ -304,6 +308,7 @@ def _get_or_create_node(
     label: str,
     canonical_key: str | None = None,
     review_status: str = "auto",
+    canonical_entity_id: Any | None = None,
 ) -> KnowledgeNode:
     safe_label = _bounded_text(label, MAX_NODE_TEXT_LENGTH) or "unknown"
     normalized_key = _normalize_key(canonical_key or safe_label)
@@ -315,6 +320,7 @@ def _get_or_create_node(
     ).scalar_one_or_none()
     if node is None:
         node = KnowledgeNode(
+            canonical_entity_id=canonical_entity_id,
             node_kind=node_kind,
             canonical_key=normalized_key,
             label=safe_label,
@@ -324,11 +330,13 @@ def _get_or_create_node(
         session.flush()
     elif review_status != "auto" and node.review_status == "auto":
         node.review_status = review_status
+    if canonical_entity_id is not None and node.canonical_entity_id is None:
+        node.canonical_entity_id = canonical_entity_id
     _ensure_alias(session, node, safe_label)
     return node
 
 
-def _entity_node_identity(session: Session, entity: DocumentUnitEntity) -> tuple[str, str, str]:
+def _entity_node_identity(session: Session, entity: DocumentUnitEntity) -> tuple[str, str, str, Any | None]:
     entity_key = (entity.normalized_value or entity.entity_value).strip().lower()
     canonical = session.execute(
         select(CanonicalEntity)
@@ -339,8 +347,8 @@ def _entity_node_identity(session: Session, entity: DocumentUnitEntity) -> tuple
         )
     ).scalar_one_or_none()
     if canonical is not None:
-        return canonical.display_value, canonical.canonical_value, canonical.review_status
-    return entity.entity_value, entity.entity_value, "auto"
+        return canonical.display_value, canonical.canonical_value, canonical.review_status, canonical.id
+    return entity.entity_value, entity.entity_value, "auto", None
 
 
 def _ensure_alias(session: Session, node: KnowledgeNode, alias: str) -> None:

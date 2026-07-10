@@ -693,6 +693,7 @@ export interface KnowledgeGraphStats {
 
 export interface KnowledgeNodeSummary {
   id: string;
+  canonical_entity_id: string | null;
   node_kind: string;
   canonical_key: string;
   label: string;

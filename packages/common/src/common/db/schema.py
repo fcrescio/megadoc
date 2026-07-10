@@ -177,6 +177,7 @@ def ensure_knowledge_schema(engine) -> None:
         "CREATE INDEX IF NOT EXISTS ix_document_unit_links_target_type ON document_unit_links(target_document_unit_id, link_type)",
         """CREATE TABLE IF NOT EXISTS knowledge_nodes (
             id UUID PRIMARY KEY,
+            canonical_entity_id UUID NULL REFERENCES canonical_entities(id) ON DELETE SET NULL,
             node_kind VARCHAR(32) NOT NULL,
             canonical_key VARCHAR(512) NOT NULL,
             label VARCHAR(512) NOT NULL,
@@ -186,6 +187,21 @@ def ensure_knowledge_schema(engine) -> None:
             updated_at TIMESTAMPTZ NULL,
             CONSTRAINT uq_knowledge_nodes_kind_key UNIQUE (node_kind, canonical_key)
         )""",
+        "ALTER TABLE knowledge_nodes ADD COLUMN IF NOT EXISTS canonical_entity_id UUID NULL",
+        """DO $$
+        BEGIN
+            IF to_regclass('public.canonical_entities') IS NOT NULL
+               AND NOT EXISTS (
+                   SELECT 1 FROM pg_constraint
+                   WHERE conname = 'fk_knowledge_nodes_canonical_entity'
+               )
+            THEN
+                ALTER TABLE knowledge_nodes
+                ADD CONSTRAINT fk_knowledge_nodes_canonical_entity
+                FOREIGN KEY (canonical_entity_id) REFERENCES canonical_entities(id) ON DELETE SET NULL;
+            END IF;
+        END $$""",
+        "CREATE INDEX IF NOT EXISTS ix_knowledge_nodes_canonical_entity ON knowledge_nodes(canonical_entity_id)",
         "CREATE INDEX IF NOT EXISTS ix_knowledge_nodes_kind_label ON knowledge_nodes(node_kind, label)",
         """CREATE TABLE IF NOT EXISTS knowledge_node_aliases (
             id UUID PRIMARY KEY,

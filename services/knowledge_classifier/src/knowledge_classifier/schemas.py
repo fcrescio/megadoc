@@ -525,6 +525,7 @@ class KnowledgeGraphStatsResponse(BaseModel):
 
 class KnowledgeNodeSummaryResponse(BaseModel):
     id: str
+    canonical_entity_id: Optional[str] = None
     node_kind: str
     canonical_key: str
     label: str

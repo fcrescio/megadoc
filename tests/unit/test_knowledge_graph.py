@@ -177,8 +177,39 @@ def test_projection_respects_reviewed_canonical_entity_variants(db_session):
 
     node = db_session.query(KnowledgeNode).filter_by(canonical_key="condominio_studiati").one()
     assert node.label == "Condominio Studiati"
+    assert node.canonical_entity_id == canonical.id
     assert node.review_status == "human_reviewed"
     assert {alias.alias for alias in node.aliases} >= {"Condominio Studiati", "Condominio Via Roma"}
+    mention = next(mention for mention in node.mentions if mention.surface_text == "Condominio Via Roma")
+    assert mention.evidence_json["canonical_entity_id"] == str(canonical.id)
+
+
+def test_graph_api_exposes_canonical_entity_id_for_reconciled_nodes(db_session):
+    unit = _make_utility_unit(db_session)
+    canonical = CanonicalEntity(
+        entity_type="organizzazione",
+        canonical_value="condominio_studiati",
+        display_value="Condominio Studiati",
+        review_status="human_reviewed",
+    )
+    canonical.variants.append(
+        CanonicalEntityVariant(
+            entity_type="organizzazione",
+            entity_key="condominio_via_roma",
+            display_value="Condominio Via Roma",
+            review_status="human_reviewed",
+        )
+    )
+    db_session.add(canonical)
+    db_session.flush()
+
+    project_document_unit(db_session, unit)
+    db_session.flush()
+
+    node = db_session.query(KnowledgeNode).filter_by(canonical_key="condominio_studiati").one()
+    detail = get_knowledge_node(node.id, db=db_session)
+
+    assert detail.node.canonical_entity_id == str(canonical.id)
 
 
 def test_accounting_projection_does_not_promote_allocation_people_to_nodes(db_session):

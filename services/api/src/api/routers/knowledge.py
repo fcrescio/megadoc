@@ -824,6 +824,7 @@ def _serialize_knowledge_node_summary(node: KnowledgeNode) -> KnowledgeNodeSumma
     }
     return KnowledgeNodeSummaryResponse(
         id=str(node.id),
+        canonical_entity_id=str(node.canonical_entity_id) if node.canonical_entity_id else None,
         node_kind=node.node_kind,
         canonical_key=node.canonical_key,
         label=node.label,

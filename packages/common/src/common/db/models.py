@@ -426,6 +426,7 @@ class CanonicalEntity(Base):
     context_anchors: Mapped[list["KnowledgeContextAnchor"]] = relationship(
         back_populates="canonical_entity", cascade="all, delete-orphan"
     )
+    projected_nodes: Mapped[list["KnowledgeNode"]] = relationship(back_populates="canonical_entity")
 
 
 class CanonicalEntityVariant(Base):
@@ -527,6 +528,9 @@ class KnowledgeNode(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    canonical_entity_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("canonical_entities.id", ondelete="SET NULL"), nullable=True
+    )
     node_kind: Mapped[str] = mapped_column(String(32), nullable=False)
     canonical_key: Mapped[str] = mapped_column(String(512), nullable=False)
     label: Mapped[str] = mapped_column(String(512), nullable=False)
@@ -535,6 +539,7 @@ class KnowledgeNode(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    canonical_entity: Mapped["CanonicalEntity | None"] = relationship(back_populates="projected_nodes")
     aliases: Mapped[list["KnowledgeNodeAlias"]] = relationship(back_populates="node", cascade="all, delete-orphan")
     mentions: Mapped[list["DocumentUnitMention"]] = relationship(back_populates="node", cascade="all, delete-orphan")
     subject_assertions: Mapped[list["KnowledgeAssertion"]] = relationship(
