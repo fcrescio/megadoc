@@ -430,8 +430,10 @@ def test_consolidate_financial_topics_merges_same_vendor_proposals(db_session):
     )
 
     assert len(proposals) == 1
+    assert proposals[0].proposed_topic_kind == "family"
     assert len(assignments) == 2
     assert assignments[0].topic_id == assignments[1].topic_id
+    assert {assignment.assignment_role for assignment in assignments} == {"document_family"}
 
 
 def test_attach_to_context_proposal_creates_reviewable_proposal(db_session):

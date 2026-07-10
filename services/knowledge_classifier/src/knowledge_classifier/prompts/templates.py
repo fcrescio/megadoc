@@ -235,7 +235,7 @@ Topic classes:
 - other: Other
 
 Proposal action (required when action is propose_new or needs_review):
-- create_topic: The document represents a stable practice/matter that deserves its own canonical topic. Use for ongoing legal matters, case files, recurring issues, condominium administration topics.
+- create_topic: The document represents a stable practice/matter that deserves its own curated archive collection. Use for ongoing legal matters, case files, recurring issues, condominium administration topics.
 - attach_to_context: The document is a routine/repetitive document (single bill, invoice, payment, notice) that does NOT need its own topic. It should be findable through its entities, context, and facts instead.
 - attach_to_existing_topic: The document matches an existing topic (same as assign_existing).
 - needs_review: Uncertain which action applies.
@@ -253,12 +253,13 @@ Rules:
 - Confidence < 0.6 means needs_review
 - Be conservative with duplicate topic proposals, but never merge different buildings, addresses, periods, meetings, or legal matters
 - Write rationale, proposed_title, and description in the source document language
-- Keep topic_ids, slugs, and topic_class values canonical
+- Keep topic_ids, slugs, and topic_class values stable
+- Do not use topic_kind="entity". Global identities such as people, organizations, vendors, and buildings belong to entities/canonical_entities. Topics group documents as family, issue, project, or context.
 
 CRITICAL — Topic creation policy:
 - Do NOT propose a new topic (proposal_action = "create_topic") for single utility bills, single invoices, single payments, or single-date documents.
 - These routine/repetitive documents should use proposal_action = "attach_to_context" instead.
-- Only propose "create_topic" when the document represents a stable, ongoing practice, matter, case file, or recurring administrative context.
+- Only propose "create_topic" when the document represents a stable, ongoing practice, matter, case file, recurring administrative context, or document family.
 - Examples that deserve a topic: a legal dispute, a condominium administration file, a recurring building maintenance issue, a multi-year vendor relationship.
 - Examples that do NOT deserve a topic: a single electricity bill, a single water bill, a single invoice for goods, a single payment receipt, a single notice.
 """

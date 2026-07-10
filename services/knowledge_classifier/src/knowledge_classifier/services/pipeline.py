@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, selectinload
 from common.application.knowledge import upsert_document_unit_topic_assignment
 from common.application.graph import project_document_unit
 from common.application.contexts import rebuild_knowledge_contexts
+from common.application.topic_policy import assignment_role_for_topic_kind, collection_topic_kind
 from common.db.models import (
     DocumentUnit as DBDocumentUnit,
     DocumentUnitEntity as DBDocumentUnitEntity,
@@ -640,8 +641,8 @@ class KnowledgePipelineService:
                     # (e.g. a context_membership proposal) that doesn't create a topic at all.
                     # The current approach is a pragmatic middle ground: the proposal appears in the
                     # review list, the user can see the recommended_action=attach_to_context, and
-                    # on approval the document can be attached to a context without creating a
-                    # canonical topic. A future refactor should introduce a dedicated review table
+                    # on approval the document can be attached to a context without creating an
+                    # active curated collection. A future refactor should introduce a dedicated review table
                     # for context attachments.
                     self._ensure_attach_context_proposed_topic(decision, doc_unit)
                     self._create_topic_proposal(scan_unit, doc_unit, decision, entities, candidates_result.candidates)
@@ -886,29 +887,10 @@ class KnowledgePipelineService:
         return payload
 
     def _infer_topic_kind(self, topic_kind: str | None, topic_class: str) -> str:
-        if topic_kind:
-            return topic_kind
-        mapping = {
-            "vendor_relationship": "entity",
-            "financial_period": "family",
-            "meeting": "family",
-            "general_administration": "family",
-            "building_issue": "issue",
-            "case_file": "project",
-            "legal_matter": "issue",
-            "other": "context",
-        }
-        return mapping.get(topic_class, "entity")
+        return collection_topic_kind(topic_kind, topic_class)
 
     def _default_assignment_role_for_topic_kind(self, topic_kind: str) -> str:
-        mapping = {
-            "entity": "subject",
-            "family": "document_family",
-            "issue": "case_or_issue",
-            "project": "case_or_issue",
-            "context": "person_or_org_context",
-        }
-        return mapping.get(topic_kind, "secondary")
+        return assignment_role_for_topic_kind(topic_kind)
 
     def _normalize_assignment_role(self, role: str) -> str:
         aliases = {

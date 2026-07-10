@@ -403,15 +403,15 @@ context     -> contesto persona/organizzazione
 Esempi:
 
 ```text
-topic_kind=entity:
-- Lavastoviglie
-- Acque S.p.A.
-- Condominio Via Roma 10
+topic_kind=entity (legacy, non usare per nuovi dati):
+- Le identità globali ora vivono in canonical_entities, non nei topic.
+- Vecchi topic entity devono essere migrati verso family/issue/project/context.
 
 topic_kind=family:
 - Rendiconti Condominiali - Condominio X
 - Verbali Assemblea - Condominio X
 - Bollette Utenze
+- Rapporti documentali con fornitore X
 
 topic_kind=issue/project:
 - Infiltrazione tetto scala B

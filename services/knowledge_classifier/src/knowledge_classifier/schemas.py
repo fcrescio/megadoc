@@ -206,7 +206,7 @@ class TopicProposalResponse(BaseModel):
     proposed_slug: str
     proposed_title: str
     topic_class: str
-    proposed_topic_kind: str = TopicKind.ENTITY.value
+    proposed_topic_kind: str = TopicKind.CONTEXT.value
     description: Optional[str] = None
     proposal_status: str
     matched_existing_topic_id: Optional[str] = None
@@ -228,7 +228,7 @@ class TopicSummaryResponse(BaseModel):
     slug: str
     title: str
     topic_class: str
-    topic_kind: str = TopicKind.ENTITY.value
+    topic_kind: str = TopicKind.CONTEXT.value
     description: Optional[str] = None
     canonical: bool
     is_active: bool
@@ -618,7 +618,7 @@ class TopicResponse(BaseModel):
     slug: str
     title: str
     topic_class: str
-    topic_kind: str = TopicKind.ENTITY.value
+    topic_kind: str = TopicKind.CONTEXT.value
     description: Optional[str] = None
     canonical: bool
     is_active: bool
@@ -631,7 +631,7 @@ class TopicCreate(BaseModel):
     slug: str
     title: str
     topic_class: str
-    topic_kind: str = TopicKind.ENTITY.value
+    topic_kind: str = TopicKind.CONTEXT.value
     description: Optional[str] = None
     aliases: list[str] = Field(default_factory=list)
 

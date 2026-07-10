@@ -38,6 +38,7 @@ from common.application.accounting import (
 )
 from common.application.specialists import ensure_specialist_jobs_for_scan_unit
 from common.application.page_artifacts import get_page_artifact_text
+from common.application.topic_policy import collection_topic_kind
 from common.db.models import (
     CanonicalEntity,
     CanonicalEntityVariant,
@@ -915,11 +916,12 @@ def _get_or_create_topic_from_payload(
     payload: TopicCreate,
     db: Session,
 ) -> Topic:
+    topic_kind = collection_topic_kind(payload.topic_kind, payload.topic_class)
     existing = db.execute(select(Topic).where(Topic.slug == payload.slug)).scalar_one_or_none()
     if existing is not None:
         existing.title = payload.title
         existing.topic_class = payload.topic_class
-        existing.topic_kind = payload.topic_kind
+        existing.topic_kind = topic_kind
         existing.description = payload.description
         existing.canonical = True
         existing.is_active = True
@@ -930,7 +932,7 @@ def _get_or_create_topic_from_payload(
             slug=payload.slug,
             title=payload.title,
             topic_class=payload.topic_class,
-            topic_kind=payload.topic_kind,
+            topic_kind=topic_kind,
             description=payload.description,
             canonical=True,
             is_active=True,
