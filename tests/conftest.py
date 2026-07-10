@@ -11,6 +11,7 @@ os.environ["STORAGE_BACKEND"] = "filesystem"
 os.environ["LOCAL_STORAGE_PATH"] = "/tmp/megadoc-test-storage"
 os.environ["OCR_BACKEND"] = "fake"
 os.environ["CELERY_TASK_ALWAYS_EAGER"] = "false"
+os.environ["MEGADOC_SKIP_STARTUP_SCHEMA"] = "1"
 
 import api.main as api_main  # noqa: E402
 from api.main import app, db_session_dep  # noqa: E402
@@ -50,7 +51,7 @@ def client(db_session):
 
     app.dependency_overrides[db_session_dep] = override_db
     original_dispatch = api_main.dispatch_ingestion_job
-    api_main.dispatch_ingestion_job = lambda job_id: None
+    api_main.dispatch_ingestion_job = lambda job_id, ocr_backend=None: None
     with TestClient(app) as test_client:
         yield test_client
     api_main.dispatch_ingestion_job = original_dispatch

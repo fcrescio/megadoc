@@ -38,8 +38,6 @@ class ClassificationService:
         Returns:
             ClassificationResult with primary type and alternatives
         """
-        if available_types is None:
-            available_types = self._get_active_document_types()
         language_code = language_code or detect_document_language(document_text)
         
         # Truncate text if too long

@@ -91,6 +91,8 @@ def _serialize_job(job, session: Session) -> JobResponse:
 
 @app.on_event("startup")
 def ensure_database_schema() -> None:
+    if os.getenv("MEGADOC_SKIP_STARTUP_SCHEMA") == "1":
+        return
     ensure_knowledge_schema(engine)
     with Session(engine) as session:
         JobService(session).reconcile_stale_jobs()

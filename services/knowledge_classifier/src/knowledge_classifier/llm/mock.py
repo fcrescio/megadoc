@@ -157,6 +157,44 @@ class MockDeterministicProvider(LLMProvider):
                 "signals": [],
             }
 
+        if schema.__name__ == "ClassificationResult":
+            lower_text = user_text.lower()
+            if "document content to classify:" in lower_text:
+                lower_text = lower_text.split("document content to classify:", 1)[1].split("output json schema:", 1)[0]
+            candidates = [
+                ("bolletta", ("bolletta", "fornitura", "servizio idrico", "pod", "pdr")),
+                ("regolamento_condominiale", ("regolamento", "art.", "articolo")),
+                ("verbale_assemblea", ("verbale", "assemblea", "deliberazioni", "presenti")),
+                ("rendiconto_contabile", ("rendiconto", "bilancio consuntivo", "consuntivo gestione")),
+                ("riparto_spese", ("riparto", "ripartizioni", "ripartizione")),
+                ("fattura", ("fattura", "imponibile", "iva", "totale documento")),
+                ("preventivo", ("preventivo", "offerta", "stima")),
+                ("lettera", ("spett.le", "cordiali saluti", "oggetto")),
+                ("contratto", ("contratto", "accordo", "condizioni")),
+                ("allegato_tecnico", ("relazione tecnica", "scia", "dia", "computo")),
+            ]
+            for type_code, signals in candidates:
+                matched = [signal for signal in signals if signal in lower_text]
+                if matched:
+                    return {
+                        "primary_type": {
+                            "type_code": type_code,
+                            "confidence": 0.9,
+                            "salient_features": matched[:3],
+                        },
+                        "alternatives": [],
+                        "rationale": f"Mock classification based on {', '.join(matched[:2])}.",
+                    }
+            return {
+                "primary_type": {
+                    "type_code": "altro",
+                    "confidence": 0.62,
+                    "salient_features": [],
+                },
+                "alternatives": [],
+                "rationale": "Mock classification did not find a specific document family.",
+            }
+
         mock_data: dict[str, Any] = {}
         
         for field_name, field_info in schema.model_fields.items():

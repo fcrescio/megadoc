@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "description": "Minimal gold corpus for stable document-family, routing, and accounting extraction checks.",
+  "cases": [
+    {
+      "id": "condominium_regulation_it",
+      "family": "normative",
+      "text": "REGOLAMENTO DEL CONDOMINIO\\nArt. 1 - Parti comuni. Sono comuni il suolo, le fondazioni, le scale e il tetto.\\nArt. 2 - Assemblea. L'assemblea delibera secondo le maggioranze previste dal codice civile.\\nArt. 3 - Amministratore. L'amministratore cura l'esecuzione del regolamento.",
+      "expect": {
+        "classification": {
+          "primary_type": "regolamento_condominiale",
+          "min_confidence": 0.7
+        },
+        "routing": {
+          "pipeline_id": "normative_pipeline",
+          "family": "normative"
+        }
+      }
+    },
+    {
+      "id": "utility_bill_it",
+      "family": "utility_vendor",
+      "text": "BOLLETTA ACQUA\\nAzienda Servizi Idrici S.p.A.\\nSpett.le Condominio Via Roma 10\\nPeriodo: Gennaio - Marzo 2024\\nImporto da pagare: euro 85,50\\nScadenza: 31/01/2024\\nCodice fornitura: 123456789",
+      "expect": {
+        "classification": {
+          "primary_type": "bolletta",
+          "min_confidence": 0.7
+        },
+        "routing": {
+          "pipeline_id": "utility_vendor_pipeline",
+          "family": "utility_vendor"
+        }
+      }
+    },
+    {
+      "id": "accounting_composite_it",
+      "family": "financial",
+      "text": "Rendiconto consuntivo gestione\\nPeriodo: 01/07/2022 - 30/06/2023\\n| Voce | Importo |\\n| --- | ---: |\\n| Entrate ordinarie | 10.000,00 |\\n\\nConsuntivo ripartizioni per unita\\nPeriodo: 01/07/2022 - 30/06/2023\\n| Unita | Nominativo | Totale gestione | Saldo finale |\\n| --- | --- | ---: | ---: |\\n| B11 | BONACCI FABIO | -1.419,21 | 636,41 |\\n\\nBilancio preventivo gestione\\nPeriodo: 01/07/2023 - 30/06/2024\\n| Voce | Importo |\\n| --- | ---: |\\n| Spese generali | 10.000,00 |\\n\\nPreventivo ripartizioni per unita\\nPeriodo: 01/07/2023 - 30/06/2024\\n| Unita | Nominativo | Totale preventivo |\\n| --- | --- | ---: |\\n| B11 | BONACCI FABIO | -1.897,45 |\\n\\nRATE DA VERSARE alle scadenze indicate\\nPeriodo: 01/07/2023 - 30/06/2024\\n| Nominativo | Unita | Totale dovuto | Rata n. 1 01/09/2023 |\\n| --- | --- | ---: | ---: |\\n| BONACCI FABIO | B11 (Pr) | 1.897,45 | 847,45 |",
+      "expect": {
+        "classification": {
+          "primary_type": "rendiconto_contabile",
+          "min_confidence": 0.7
+        },
+        "routing": {
+          "pipeline_id": "financial_pipeline",
+          "family": "financial"
+        },
+        "accounting": {
+          "statement_type": "rendiconto_composito",
+          "min_tables": 5,
+          "required_section_roles": [
+            "actual_summary",
+            "actual_allocation",
+            "budget_summary",
+            "budget_allocation",
+            "budget_installment_schedule"
+          ],
+          "requires_normalized_amounts": true,
+          "account_extraction_mode": "llm_unavailable"
+        }
+      }
+    },
+    {
+      "id": "generic_notice_it",
+      "family": "general",
+      "text": "Promemoria interno. Si ricorda di aggiornare l'archivio cartaceo entro fine mese. Il testo non contiene un documento specialistico o una richiesta di pagamento.",
+      "expect": {
+        "classification": {
+          "primary_type": "altro",
+          "max_confidence": 0.7
+        },
+        "routing": {
+          "pipeline_id": "general_pipeline",
+          "family": "general"
+        }
+      }
+    }
+  ]
+}

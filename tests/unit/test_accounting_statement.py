@@ -68,30 +68,21 @@ Periodo: 01/07/2022 - 30/06/2023
 
     result, _ = process_accounting_statement(_document_unit(), text, "fixture:v1")
 
-    account = next(account for account in result["accounts"] if account["unit_code"] == "B11")
-    assert account["subject_label"] == "BONACCI FABIO"
-    fact_types = {fact["fact_type"] for fact in account["facts"]}
-    assert {"allocated_expense", "payment_received", "amount_due", "installment_due"} <= fact_types
+    assert result["accounts"] == []
+    assert result["account_extraction_mode"] == "llm_unavailable"
+    assert result["reconciliation"]["status"] == "not_requested"
+    assert "no_account_facts_extracted" in result["reconciliation"]["trigger_reasons"]
 
-    general_expense = next(
-        fact
-        for fact in account["facts"]
-        if fact["category_key"] == "propr_generale_spese_generali"
-    )
-    assert general_expense["amount"] == 362.59
-    assert general_expense["raw_amount"] == -362.59
-    assert general_expense["period_context"] == {
-        "from": "2022-07-01",
-        "to": "2023-06-30",
-        "source": "preceding_section",
-        "review_status": "inferred",
-    }
-    assert general_expense["evidence"]["column"] == "Propr. Generale / Spese generali"
+    allocation = result["tables"][0]
+    assert allocation["table_type"] == "expense_allocation"
+    assert allocation["rows"][0]["cells"]["Unita"] == "B11"
+    assert allocation["rows"][0]["cells"]["Nominativo"] == "BONACCI FABIO"
+    assert allocation["rows"][0]["normalized_amounts"]["Propr. Generale / Spese generali"] == -362.59
 
-    total_due = next(fact for fact in account["facts"] if fact["fact_type"] == "amount_due")
-    assert total_due["accounting_role"] == "budget_installment_schedule"
-    assert total_due["amount"] == 1897.45
-    assert total_due["evidence"]["raw_value"] == "1.897,45"
+    schedule = result["tables"][2]
+    assert schedule["table_type"] == "payment_schedule"
+    assert schedule["accounting_context"]["role"] == "budget_installment_schedule"
+    assert schedule["rows"][0]["normalized_amounts"]["Totale dovuto"] == 1897.45
 
 
 def test_accounting_statement_does_not_publish_unnamed_numeric_columns_as_facts():
@@ -104,9 +95,12 @@ Periodo: 01/07/2022 - 30/06/2023
 
     result, _ = process_accounting_statement(_document_unit(), text, "fixture:v1")
 
-    account = result["accounts"][0]
-    assert account["unit_code"] == "C28"
-    assert [fact["category_key"] for fact in account["facts"]] == ["totale_gestione"]
+    table = result["tables"][0]
+    assert result["accounts"] == []
+    assert table["rows"][0]["cells"]["Unita"] == "C28"
+    assert table["rows"][0]["normalized_amounts"]["Totale gestione"] == -950.00
+    assert table["rows"][0]["normalized_amounts"]["column_7"] == -80.00
+    assert "no_account_facts_extracted" in result["reconciliation"]["trigger_reasons"]
 
 
 def test_accounting_statement_keeps_currency_values_in_millesimal_headers():
@@ -120,12 +114,13 @@ Periodo: 01/07/2022 - 30/06/2023
 
     result, _ = process_accounting_statement(_document_unit(), text, "fixture:v5")
 
-    account = result["accounts"][0]
-    categories = {fact["category_key"]: fact["amount"] for fact in account["facts"]}
-    assert categories["spese_generali_mill"] == 362.59
-    assert categories["totale_gestione"] == 1419.21
-    assert "riscaldamento_mill" not in categories
-    assert "ascensore_mill" not in categories
+    table = result["tables"][0]
+    amounts = table["rows"][0]["normalized_amounts"]
+    assert result["accounts"] == []
+    assert amounts["Spese generali / mill."] == -362.59
+    assert amounts["Totale gestione / mill."] == -1419.21
+    assert amounts["Riscaldamento / mill."] == 121.2958
+    assert amounts["Ascensore / mill."] == 0.0
 
 
 def test_accounting_statement_scopes_period_and_role_to_each_section():
@@ -145,16 +140,14 @@ Periodo: 01/07/2023 - 30/06/2024
 
     result, _ = process_accounting_statement(_document_unit(), text, "fixture:v2")
 
-    facts = result["accounts"][0]["facts"]
-    closing_balance = next(fact for fact in facts if fact["fact_type"] == "closing_balance")
-    due = next(fact for fact in facts if fact["fact_type"] == "amount_due")
-
-    assert closing_balance["accounting_role"] == "actual_allocation"
-    assert closing_balance["period_context"]["from"] == "2022-07-01"
-    assert due["accounting_role"] == "budget_installment_schedule"
-    assert due["period_context"] == {
-        "from": "2023-07-01",
-        "to": "2024-06-30",
+    assert result["accounts"] == []
+    actual_table, schedule_table = result["tables"]
+    assert actual_table["accounting_context"]["role"] == "actual_allocation"
+    assert actual_table["accounting_context"]["period_from"] == "2022-07-01"
+    assert schedule_table["accounting_context"] == {
+        "role": "budget_installment_schedule",
+        "period_from": "2023-07-01",
+        "period_to": "2024-06-30",
         "source": "preceding_section",
         "review_status": "inferred",
     }
@@ -223,13 +216,12 @@ def test_accounting_statement_locates_context_for_structured_table():
         structured_json=structured_json,
     )
 
-    fact = next(
-        fact
-        for fact in result["accounts"][0]["facts"]
-        if fact["fact_type"] == "closing_balance"
-    )
-    assert fact["accounting_role"] == "actual_allocation"
-    assert fact["period_context"]["review_status"] == "inferred"
+    table = result["tables"][0]
+    assert result["accounts"] == []
+    assert table["source"] == "docling_structured"
+    assert table["accounting_context"]["role"] == "actual_allocation"
+    assert table["accounting_context"]["review_status"] == "inferred"
+    assert table["rows"][0]["normalized_amounts"]["Saldo finale"] == 636.41
 
 
 def test_structured_table_context_uses_html_position_for_repeated_headers():
@@ -363,9 +355,11 @@ Periodo: 01/07/2022 - 30/06/2023
 
     result, _ = process_accounting_statement(_document_unit(), text, "fixture:v4")
 
-    fact = result["accounts"][0]["facts"][0]
-    assert fact["fact_type"] == "personal_charge"
-    assert fact["accounting_role"] == "actual_personal_charge"
+    table = result["tables"][0]
+    assert result["accounts"] == []
+    assert table["rows"][0]["cells"]["Movimento"].startswith("- B11 BONACCI FABIO")
+    assert table["rows"][0]["normalized_amounts"]["Importo"] == -155.66
+    assert "no_account_facts_extracted" in result["reconciliation"]["trigger_reasons"]
 
 
 def test_accounting_statement_uses_llm_header_reconciliation_only_when_it_improves_extraction():

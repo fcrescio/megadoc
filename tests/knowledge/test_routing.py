@@ -56,7 +56,7 @@ def test_router_routes_invoice_scans_to_financial_pipeline():
     assert decision.family == "financial"
 
 
-def test_router_routes_noisy_invoice_ocr_to_financial_pipeline():
+def test_router_keeps_noisy_invoice_like_ocr_general_without_semantic_purpose():
     service = PipelineRouterService(MockDeterministicProvider())
     ocr_result = _ocr(
         "DATIIDENTIFICATIVIDELCLIENTE PartitaVA01735100503 "
@@ -65,11 +65,11 @@ def test_router_routes_noisy_invoice_ocr_to_financial_pipeline():
 
     decision = service.route_scan(ocr_result)
 
-    assert decision.pipeline_id == "financial_pipeline"
-    assert decision.family == "financial"
+    assert decision.pipeline_id == "general_pipeline"
+    assert decision.family == "general"
 
 
-def test_router_routes_retail_receipt_to_financial_pipeline():
+def test_router_keeps_retail_receipt_general_without_archive_specialist_need():
     service = PipelineRouterService(MockDeterministicProvider())
     ocr_result = _ocr(
         "UNIEURO S.P.A. Totale vendita 445,00. Acconto 400,00. "
@@ -78,8 +78,8 @@ def test_router_routes_retail_receipt_to_financial_pipeline():
 
     decision = service.route_scan(ocr_result)
 
-    assert decision.pipeline_id == "financial_pipeline"
-    assert decision.family == "financial"
+    assert decision.pipeline_id == "general_pipeline"
+    assert decision.family == "general"
 
 
 def test_router_falls_back_to_general_pipeline_for_unknown_scans():

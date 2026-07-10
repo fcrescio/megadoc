@@ -240,13 +240,19 @@ class JobService:
         now = now or datetime.now(timezone.utc)
         if job.status == JobStatus.RUNNING.value and job.started_at is not None:
             cutoff = now - timedelta(seconds=self.settings.ingestion_job_running_timeout_seconds)
-            if job.started_at < cutoff:
+            if _as_aware_utc(job.started_at) < cutoff:
                 return True, "running timeout exceeded"
         if job.status == JobStatus.QUEUED.value:
             cutoff = now - timedelta(seconds=self.settings.ingestion_job_queued_timeout_seconds)
-            if job.created_at < cutoff:
+            if _as_aware_utc(job.created_at) < cutoff:
                 return True, "queue timeout exceeded"
         return False, None
+
+
+def _as_aware_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 class OCRService:
