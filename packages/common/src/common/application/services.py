@@ -16,6 +16,7 @@ from common.application.repositories import (
     JobRepository,
     OCRResultRepository,
 )
+from common.application.page_artifacts import add_page_artifacts_to_structured_json
 from common.config import Settings, get_settings
 from common.db.models import Document, DocumentAsset, DocumentVersion, IngestionJob, OCRResult
 from common.domain.enums import AssetType, JobStatus, JobType, OCRStatus, SourceType
@@ -336,6 +337,15 @@ class OCRService:
                     if refined_full_text:
                         ocr_result_model.full_text = refined_full_text
                         ocr_result_model.markdown_text = refined_full_text
+            ocr_result_model.structured_json = add_page_artifacts_to_structured_json(
+                structured_json=ocr_result_model.structured_json,
+                markdown_text=ocr_result_model.markdown_text,
+                full_text=ocr_result_model.full_text,
+                page_count=ocr_result_model.page_count,
+                engine_name=ocr_result_model.engine_name,
+                engine_version=ocr_result_model.engine_version,
+                confidence_summary=ocr_result_model.confidence_summary,
+            )
             return self._store_ocr_result(document.id, version.id, ocr_result_model)
         finally:
             if normalized_path is not None:

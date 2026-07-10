@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -42,6 +42,26 @@ class PageModel(BaseModel):
     blocks: list[BlockModel] = Field(default_factory=list)
     tables: list[TableModel] = Field(default_factory=list)
     figures: list[FigureModel] = Field(default_factory=list)
+
+
+class PageArtifactModel(BaseModel):
+    page_number: int
+    text: str = ""
+    markdown: str = ""
+    blocks: list[dict[str, Any]] = Field(default_factory=list)
+    tables: list[dict[str, Any]] = Field(default_factory=list)
+    figures: list[dict[str, Any]] = Field(default_factory=list)
+    width: float | None = None
+    height: float | None = None
+    text_origin: Literal["native", "ocr", "hybrid", "unknown", "failed"] = "unknown"
+    page_class: Literal["native", "scan", "hybrid", "low_quality", "failed", "unknown"] = "unknown"
+    backend: str | None = None
+    backend_version: str | None = None
+    rotation_applied: int | None = None
+    page_order_reversed: bool = False
+    confidence: float | None = None
+    quality_flags: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class OCRResultModel(BaseModel):

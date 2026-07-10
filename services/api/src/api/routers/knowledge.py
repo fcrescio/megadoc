@@ -37,6 +37,7 @@ from common.application.accounting import (
     get_accounting_table,
 )
 from common.application.specialists import ensure_specialist_jobs_for_scan_unit
+from common.application.page_artifacts import get_page_artifact_text
 from common.db.models import (
     CanonicalEntity,
     CanonicalEntityVariant,
@@ -4119,21 +4120,16 @@ def _agent_specialist_result_summary(result: SpecialistResult) -> dict[str, Any]
 
 
 def _extract_ocr_page_text(ocr: OCRResult, page_number: int) -> str:
-    structured = ocr.structured_json or {}
-    pages = structured.get("pages") if isinstance(structured, dict) else None
-    if isinstance(pages, list):
-        for page in pages:
-            if not isinstance(page, dict):
-                continue
-            current = page.get("page_number") or page.get("page") or page.get("index")
-            if current == page_number or current == page_number - 1:
-                text = page.get("text") or page.get("markdown") or page.get("content")
-                if isinstance(text, str) and text.strip():
-                    return text
-    # Last resort for OCR engines that only expose full text.
-    if ocr.page_count <= 1:
-        return ocr.full_text or ocr.markdown_text or ""
-    return ocr.markdown_text or ocr.full_text or ""
+    return get_page_artifact_text(
+        structured_json=ocr.structured_json,
+        markdown_text=ocr.markdown_text,
+        full_text=ocr.full_text,
+        page_count=ocr.page_count,
+        page_number=page_number,
+        engine_name=ocr.engine_name,
+        engine_version=ocr.engine_version,
+        confidence_summary=ocr.confidence_summary,
+    )
 
 
 def _plan_accounting_question(

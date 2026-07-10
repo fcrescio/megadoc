@@ -6,6 +6,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from common.application.page_artifacts import build_page_artifacts
 from knowledge_classifier.config import get_settings
 from knowledge_classifier.llm.base import ChatMessage
 from knowledge_classifier.llm.base import LLMProvider
@@ -75,43 +76,21 @@ class SegmentationService:
         page_count: int,
     ) -> list[PageRepresentation]:
         """Build page representations from OCR data."""
-        pages: list[PageRepresentation] = []
-        
-        # Try to extract per-page data from structured JSON
-        pages_data = structured.get("pages", [])
-        
-        if pages_data and isinstance(pages_data, list):
-            for i, page_data in enumerate(pages_data[:page_count]):
-                if isinstance(page_data, dict):
-                    text = page_data.get("text", page_data.get("markdown", ""))
-                    headings = self._extract_headings(text)
-                    keywords = self._extract_keywords(text)
-                    
-                    pages.append(PageRepresentation(
-                        page_number=i + 1,
-                        text=text,
-                        headings=headings,
-                        keywords=keywords
-                    ))
-        else:
-            # Fallback: split markdown by page markers or lines
-            # This is a rough approximation
-            lines = markdown.split("\n")
-            lines_per_page = max(1, len(lines) // page_count) if page_count > 0 else len(lines)
-            
-            for i in range(page_count):
-                start_idx = i * lines_per_page
-                end_idx = min((i + 1) * lines_per_page, len(lines))
-                page_text = "\n".join(lines[start_idx:end_idx])
-                
-                pages.append(PageRepresentation(
-                    page_number=i + 1,
-                    text=page_text,
-                    headings=self._extract_headings(page_text),
-                    keywords=self._extract_keywords(page_text)
-                ))
-        
-        return pages
+        artifacts = build_page_artifacts(
+            structured_json=structured,
+            markdown_text=markdown,
+            full_text=markdown,
+            page_count=page_count,
+        )
+        return [
+            PageRepresentation(
+                page_number=artifact.page_number,
+                text=artifact.markdown or artifact.text,
+                headings=self._extract_headings(artifact.markdown or artifact.text),
+                keywords=self._extract_keywords(artifact.markdown or artifact.text),
+            )
+            for artifact in artifacts
+        ]
 
     def _extract_headings(self, text: str) -> list[str]:
         """Extract potential headings from text."""
