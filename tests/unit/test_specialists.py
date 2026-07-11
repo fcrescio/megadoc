@@ -1,4 +1,8 @@
-from common.application.specialists import extract_document_unit_text, route_specialists_for_document_unit
+from common.application.specialists import (
+    extract_document_unit_text,
+    route_specialists_for_document_unit,
+    specialist_candidates_for_document_unit,
+)
 from common.db.models import DocumentType, DocumentUnit, OCRResult
 
 
@@ -75,6 +79,10 @@ def test_route_specialists_accepts_llm_classified_utility_bill():
     specialists = route_specialists_for_document_unit(document_unit, "numero cliente rif.bolletta acqua")
 
     assert specialists == ["utility_bill"]
+
+    candidates = specialist_candidates_for_document_unit(document_unit)
+    assert candidates[0].confidence == 0.0
+    assert "LLM document type 'bolletta'" in candidates[0].rationale
 
 
 def test_route_specialists_accepts_llm_classified_invoice_for_utility_worker():

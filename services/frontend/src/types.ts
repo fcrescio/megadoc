@@ -203,6 +203,8 @@ export interface SpecialistJob {
   specialist_type: string;
   status: string;
   input_version: string | null;
+  routing_confidence: number | null;
+  routing_rationale: string | null;
   attempt_count: number;
   error_message: string | null;
   created_at: string;

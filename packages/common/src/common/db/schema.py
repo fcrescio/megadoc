@@ -146,12 +146,16 @@ def ensure_knowledge_schema(engine) -> None:
             specialist_type VARCHAR(64) NOT NULL,
             status VARCHAR(32) NOT NULL,
             input_version VARCHAR(128) NULL,
+            routing_confidence DOUBLE PRECISION NULL,
+            routing_rationale TEXT NULL,
             attempt_count INTEGER NOT NULL DEFAULT 0,
             error_message TEXT NULL,
             created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             started_at TIMESTAMPTZ NULL,
             finished_at TIMESTAMPTZ NULL
         )""",
+        "ALTER TABLE specialist_jobs ADD COLUMN IF NOT EXISTS routing_confidence DOUBLE PRECISION NULL",
+        "ALTER TABLE specialist_jobs ADD COLUMN IF NOT EXISTS routing_rationale TEXT NULL",
         "CREATE INDEX IF NOT EXISTS ix_specialist_jobs_status_created_at ON specialist_jobs(status, created_at)",
         "CREATE INDEX IF NOT EXISTS ix_specialist_jobs_unit_type ON specialist_jobs(document_unit_id, specialist_type)",
         """CREATE TABLE IF NOT EXISTS specialist_results (

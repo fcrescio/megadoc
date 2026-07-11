@@ -361,6 +361,8 @@ def _serialize_document_unit(doc_unit: DocumentUnit) -> dict[str, Any]:
                 "specialist_type": job.specialist_type,
                 "status": job.status,
                 "input_version": job.input_version,
+                "routing_confidence": job.routing_confidence,
+                "routing_rationale": job.routing_rationale,
                 "attempt_count": job.attempt_count,
                 "error_message": job.error_message,
                 "created_at": job.created_at,

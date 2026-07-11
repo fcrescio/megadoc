@@ -66,6 +66,49 @@ function formatCurrency(value: unknown) {
   }).format(value);
 }
 
+function SpecialistEnvelopeCard({ result }: { result: KnowledgeDocumentUnit['specialist_results'][number] }) {
+  const envelope = result.result_json._specialist;
+  if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)) {
+    return null;
+  }
+  const metadata = envelope as Record<string, unknown>;
+  const validation = metadata.validation && typeof metadata.validation === 'object'
+    ? metadata.validation as Record<string, unknown>
+    : {};
+  const presentation = metadata.presentation && typeof metadata.presentation === 'object'
+    ? metadata.presentation as Record<string, unknown>
+    : {};
+  const fields = Array.isArray(presentation.fields) ? presentation.fields : [];
+  const evidence = Array.isArray(metadata.evidence) ? metadata.evidence : [];
+  const messages = Array.isArray(validation.messages) ? validation.messages : [];
+  return (
+    <details className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs">
+      <summary className="cursor-pointer font-medium text-slate-700">
+        {String(presentation.title ?? result.specialist_type)} · {String(validation.status ?? 'non verificato')}
+        {' · '}{evidence.length} evidenze
+      </summary>
+      <div className="mt-3 space-y-2 text-slate-600">
+        {typeof presentation.summary === 'string' && presentation.summary && <p>{presentation.summary}</p>}
+        {fields.length > 0 && (
+          <dl className="grid gap-1 sm:grid-cols-2">
+            {fields.map((item, index) => {
+              const field = item && typeof item === 'object' ? item as Record<string, unknown> : {};
+              return <div key={index}><dt className="inline font-medium">{String(field.label ?? '')}: </dt><dd className="inline">{String(field.value ?? '')}</dd></div>;
+            })}
+          </dl>
+        )}
+        {messages.map((message, index) => <p key={index} className="text-amber-700">{String(message)}</p>)}
+        <a
+          href={getSpecialistResultExportUrl(result.id, 'json')}
+          className="inline-flex text-cyan-700 hover:underline"
+        >
+          Esporta risultato ed evidenze
+        </a>
+      </div>
+    </details>
+  );
+}
+
 function UtilityBillSpecialistCard({
   result,
   links,
@@ -1085,6 +1128,7 @@ function DocumentDetail({ documentId, onBack, onAskDocument, initialTab = 'info'
                                         </span>
                                       )}
                                     </div>
+                                    <SpecialistEnvelopeCard result={specialistResult} />
                                     {specialistResult.specialist_type === 'utility_bill' ? (
                                       <UtilityBillSpecialistCard
                                         result={{ ...specialistResult.result_json, __result_id: specialistResult.id }}
@@ -1099,7 +1143,6 @@ function DocumentDetail({ documentId, onBack, onAskDocument, initialTab = 'info'
                                 ))}
                               </div>
                             )}
-
                             {unit.specialist_jobs.length > 0 && (
                               <div>
                                 <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
@@ -1117,6 +1160,16 @@ function DocumentDetail({ documentId, onBack, onAskDocument, initialTab = 'info'
                                     </span>
                                   ))}
                                 </div>
+                                {unit.specialist_jobs.some((job) => job.routing_rationale) && (
+                                  <div className="mt-2 space-y-1">
+                                    {unit.specialist_jobs.filter((job) => job.routing_rationale).map((job) => (
+                                      <p key={`${job.id}-routing`} className="text-xs text-slate-500">
+                                        Router: {job.routing_rationale}
+                                        {job.routing_confidence !== null ? ` (${(job.routing_confidence * 100).toFixed(0)}%)` : ''}
+                                      </p>
+                                    ))}
+                                  </div>
+                                )}
                                 {unit.specialist_jobs.some((job) => job.error_message) && (
                                   <div className="mt-2 space-y-1">
                                     {unit.specialist_jobs.filter((job) => job.error_message).map((job) => (

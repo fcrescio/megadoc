@@ -8,6 +8,13 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from common.db.models import DocumentUnit, OCRResult, ScanUnit, SpecialistJob, SpecialistResult
+from common.application.specialist_contracts import SpecialistCandidate
+
+
+SPECIALIST_DOCUMENT_TYPES: dict[str, frozenset[str]] = {
+    "utility_bill": frozenset({"bolletta", "fattura"}),
+    "accounting_statement": frozenset({"rendiconto_contabile", "riparto_spese", "preventivo"}),
+}
 
 
 def _utcnow() -> datetime:
@@ -42,19 +49,25 @@ def extract_document_unit_text(document_unit: DocumentUnit, ocr_result: OCRResul
     return "\n".join(lines[start_idx:end_idx]).strip()
 
 
-def route_specialists_for_document_unit(document_unit: DocumentUnit, segment_text: str) -> list[str]:
+def specialist_candidates_for_document_unit(document_unit: DocumentUnit) -> list[SpecialistCandidate]:
     doc_type = document_unit.document_type.code if document_unit.document_type else None
-    specialists: list[str] = []
+    if not doc_type:
+        return []
+    confidence = document_unit.document_type_confidence or 0.0
+    return [
+        SpecialistCandidate(
+            capability=capability,
+            confidence=confidence,
+            rationale=f"LLM document type '{doc_type}' supports capability '{capability}'.",
+        )
+        for capability, document_types in SPECIALIST_DOCUMENT_TYPES.items()
+        if doc_type in document_types
+    ]
 
-    # Specialist dispatch is based only on the LLM-assigned document type.
-    # Text markers are deliberately ignored here: ambiguous semantic routing
-    # must be handled by classification/review, not by keyword promotion.
-    if doc_type in {"bolletta", "fattura"}:
-        specialists.append("utility_bill")
 
-    if doc_type in {"rendiconto_contabile", "riparto_spese", "preventivo"}:
-        specialists.append("accounting_statement")
-    return specialists
+def route_specialists_for_document_unit(document_unit: DocumentUnit, segment_text: str) -> list[str]:
+    """Compatibility adapter returning capability names for existing callers."""
+    return [candidate.capability for candidate in specialist_candidates_for_document_unit(document_unit)]
 
 
 def ensure_specialist_jobs_for_scan_unit(session: Session, scan_unit_id: str | uuid.UUID) -> list[SpecialistJob]:
@@ -79,9 +92,10 @@ def ensure_specialist_jobs_for_scan_unit(session: Session, scan_unit_id: str | u
         if ocr_result is None:
             continue
         segment_text = extract_document_unit_text(document_unit, ocr_result)
-        specialist_types = route_specialists_for_document_unit(document_unit, segment_text)
+        candidates = specialist_candidates_for_document_unit(document_unit)
         input_version = f"{ocr_result.id}:{document_unit.start_page}-{document_unit.end_page}"
-        for specialist_type in specialist_types:
+        for candidate in candidates:
+            specialist_type = candidate.capability
             latest_job = session.execute(
                 select(SpecialistJob)
                 .where(
@@ -111,6 +125,8 @@ def ensure_specialist_jobs_for_scan_unit(session: Session, scan_unit_id: str | u
                 specialist_type=specialist_type,
                 status="queued",
                 input_version=input_version,
+                routing_confidence=candidate.confidence,
+                routing_rationale=candidate.rationale,
             )
             session.add(job)
             created_jobs.append(job)

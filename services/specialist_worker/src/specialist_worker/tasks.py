@@ -7,12 +7,11 @@ import uuid
 from datetime import datetime, timezone
 
 from celery import shared_task
-from common.application.accounting import (
-    project_accounting_result,
-    reapply_manual_accounting_corrections,
-)
-from common.application.calendar import project_utility_bill_calendar_event
 from common.application.graph import project_document_unit
+from common.application.specialist_contracts import (
+    SpecialistExecutionContext,
+    attach_specialist_envelope,
+)
 from common.application.specialists import extract_document_unit_text
 from common.db.models import (
     DocumentUnit,
@@ -27,8 +26,7 @@ from knowledge_classifier.llm.openai_compat import OpenAICompatibleProvider
 from sqlalchemy import create_engine, delete, select, text
 from sqlalchemy.orm import Session, selectinload
 
-from specialist_worker.services.accounting_statement import process_accounting_statement
-from specialist_worker.services.utility_bill import process_utility_bill
+from specialist_worker.registry import build_specialist_registry
 
 logger = logging.getLogger(__name__)
 
@@ -88,31 +86,31 @@ def process_specialist_job(self, specialist_job_id: str):
             ocr_result = document_unit.scan_unit.ocr_result
             segment_text = extract_document_unit_text(document_unit, ocr_result)
 
-            if specialist_job.specialist_type == "utility_bill":
-                result_json, links, confidence = process_utility_bill(
-                    session,
-                    document_unit,
-                    segment_text,
-                    specialist_job.input_version or "",
-                )
-                _replace_links(session, document_unit.id, "utility_bill_detail", links)
-                schema_version = "utility_bill_v1"
-            elif specialist_job.specialist_type == "accounting_statement":
-                reconciliation_provider = _accounting_reconciliation_provider()
-                try:
-                    result_json, confidence = process_accounting_statement(
-                        document_unit,
-                        segment_text,
-                        specialist_job.input_version or "",
-                        structured_json=ocr_result.structured_json,
-                        reconciliation_provider=reconciliation_provider,
-                    )
-                finally:
-                    if reconciliation_provider is not None:
-                        reconciliation_provider.close()
-                schema_version = "accounting_statement_v6"
-            else:
-                raise ValueError(f"Unsupported specialist type: {specialist_job.specialist_type}")
+            registry = build_specialist_registry(_accounting_reconciliation_provider)
+            handler = registry.get(specialist_job.specialist_type)
+            extraction = handler.extract(SpecialistExecutionContext(
+                session=session,
+                document_unit=document_unit,
+                text=segment_text,
+                structured_json=ocr_result.structured_json or {},
+                input_version=specialist_job.input_version or "",
+            ))
+            validation = handler.validate(extraction)
+            presentation = handler.present(extraction.payload)
+            result_json = attach_specialist_envelope(
+                extraction,
+                handler=handler,
+                validation=validation,
+                presentation=presentation,
+            )
+            confidence = extraction.confidence
+            schema_version = handler.schema_version
+            review_status = (
+                "auto_accepted"
+                if validation.status == "valid" and confidence >= 0.7
+                else "needs_review"
+            )
+            _replace_links(session, document_unit.id, specialist_job.specialist_type, extraction.links)
 
             existing_result = session.execute(
                 select(SpecialistResult)
@@ -128,20 +126,16 @@ def process_specialist_job(self, specialist_job_id: str):
                     specialist_type=specialist_job.specialist_type,
                     schema_version=schema_version,
                     confidence=confidence,
-                    review_status="auto_accepted" if confidence >= 0.7 else "needs_review",
+                    review_status=review_status,
                     result_json=result_json,
                 )
                 session.add(specialist_result)
             else:
                 specialist_result = existing_result
-                if specialist_job.specialist_type == "accounting_statement":
-                    result_json = reapply_manual_accounting_corrections(
-                        result_json,
-                        specialist_result.result_json,
-                    )
+                result_json = handler.reapply_corrections(result_json, specialist_result.result_json)
                 specialist_result.schema_version = schema_version
                 specialist_result.confidence = confidence
-                specialist_result.review_status = "auto_accepted" if confidence >= 0.7 else "needs_review"
+                specialist_result.review_status = review_status
                 specialist_result.result_json = result_json
                 specialist_result.updated_at = _utcnow()
 
@@ -156,10 +150,7 @@ def process_specialist_job(self, specialist_job_id: str):
                 )
             ).scalar_one()
             project_document_unit(session, projection_unit)
-            if specialist_job.specialist_type == "accounting_statement":
-                project_accounting_result(session, projection_unit, specialist_result)
-            elif specialist_job.specialist_type == "utility_bill":
-                project_utility_bill_calendar_event(session, projection_unit, specialist_result)
+            handler.project(session, projection_unit, specialist_result)
             session.commit()
             _update_specialist_job(engine, specialist_job_id, status="succeeded", finished_at=_utcnow(), error_message=None)
             return {"specialist_job_id": specialist_job_id, "status": "succeeded", "specialist_type": specialist_job.specialist_type}
@@ -196,13 +187,13 @@ def _accounting_reconciliation_provider() -> OpenAICompatibleProvider | None:
 def _replace_links(
     session: Session,
     document_unit_id: uuid.UUID,
-    link_type: str,
+    specialist_type: str,
     links: list[DocumentUnitLink],
 ) -> None:
     session.execute(
         delete(DocumentUnitLink).where(
             DocumentUnitLink.source_document_unit_id == document_unit_id,
-            DocumentUnitLink.link_type == link_type,
+            DocumentUnitLink.link_type.startswith(f"{specialist_type}_"),
         )
     )
     for link in links:
