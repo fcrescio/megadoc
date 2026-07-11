@@ -15,15 +15,24 @@ for source_path in (
 ):
     sys.path.insert(0, str(source_path))
 
-from common.db.models import DocumentUnit  # noqa: E402
+from common.db.models import DocumentType, DocumentUnit  # noqa: E402
 from knowledge_classifier.llm.mock import MockDeterministicProvider  # noqa: E402
 from knowledge_classifier.services.classification import ClassificationService  # noqa: E402
 from knowledge_classifier.services.routing import PipelineRouterService  # noqa: E402
 from specialist_worker.services.accounting_statement import process_accounting_statement  # noqa: E402
+from specialist_worker.services.utility_bill import process_utility_bill  # noqa: E402
 
 
 class _NoDBSession:
-    pass
+    class _EmptyResult:
+        def scalars(self):
+            return self
+
+        def all(self):
+            return []
+
+    def execute(self, statement):
+        return self._EmptyResult()
 
 
 def _document_unit() -> DocumentUnit:
@@ -105,6 +114,20 @@ def _evaluate_accounting(case: dict[str, Any], expected: dict[str, Any]) -> list
     return errors
 
 
+def _evaluate_payable(case: dict[str, Any], expected: dict[str, Any]) -> list[str]:
+    unit = _document_unit()
+    unit.document_type = DocumentType(code="bolletta", name="Bolletta")
+    result, _, confidence = process_utility_bill(
+        _NoDBSession(), unit, _case_text(case), "gold:v1"
+    )
+    errors: list[str] = []
+    for field in ("payable_kind", "issuer", "total_amount", "due_date"):
+        _check_equal(errors, f"payable.{field}", result.get(field), expected.get(field))
+    if confidence <= 0:
+        errors.append(f"payable.confidence: expected positive confidence, got {confidence:.3f}")
+    return errors
+
+
 def evaluate_manifest(path: Path) -> dict[str, Any]:
     manifest = json.loads(path.read_text(encoding="utf-8"))
     case_results: list[dict[str, Any]] = []
@@ -117,6 +140,8 @@ def evaluate_manifest(path: Path) -> dict[str, Any]:
             errors.extend(_evaluate_routing(case, expected["routing"]))
         if "accounting" in expected:
             errors.extend(_evaluate_accounting(case, expected["accounting"]))
+        if "payable" in expected:
+            errors.extend(_evaluate_payable(case, expected["payable"]))
         case_results.append(
             {
                 "id": case.get("id"),

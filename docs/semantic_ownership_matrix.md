@@ -54,10 +54,11 @@ Questa matrice definisce quale tabella e' autorevole e quale tabella e' una proi
 | `document_unit_links` | projection | Link tra document unit, ricostruibile o revisionabile a seconda del tipo link. |
 | `specialist_jobs` | operational | Stato operativo degli specialisti. |
 | `specialist_results` | source_of_truth | Output versionato degli specialisti, con confidence/review/evidence. |
+| `payables` | projection | Obbligazione di pagamento normalizzata e reviewabile derivata dallo specialista utility. Source per calendario e ricerca pagamenti. |
 | `accounting_accounts` | projection | Vista analitica contabile ricostruibile da `specialist_results`. |
 | `accounting_account_aliases` | projection | Alias degli account contabili ricostruibili. |
 | `accounting_facts` | projection | Facts contabili materializzati per query; non sostituiscono il payload specialistico. |
-| `calendar_events` | projection | Eventi calendario derivati da bollette/fatture/specialisti. |
+| `calendar_events` | projection | Scadenze operative derivate dai payable con data valida e non duplicati. |
 | `knowledge_search_chunks` | index_cache | Chunk indicizzati per retrieval lessicale/vettoriale. |
 | `knowledge_agent_runs` | operational | Trace e output delle conversazioni agente. |
 | `llm_decisions` | operational | Audit delle decisioni LLM della pipeline. |

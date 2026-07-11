@@ -66,7 +66,7 @@ import {
   searchKnowledge,
   getSpecialistUtilityBills,
   getSpecialistAccountingStatements,
-  getCalendarEvents,
+  getCalendarEvents, getPayables,
   getKnowledgeEntities,
   getKnowledgeEntityDetail,
   getCanonicalEntities,
@@ -292,6 +292,19 @@ export function useCalendarEvents(options?: {
   return useQuery<{ total: number; items: CalendarEventSummary[] }>({
     queryKey: ['calendar-events', options?.query, options?.dateFrom, options?.dateTo, options?.status, options?.reviewStatus, options?.limit],
     queryFn: () => getCalendarEvents(options),
+    enabled,
+  });
+}
+
+export function usePayables(options?: {
+  query?: string;
+  reviewStatus?: string;
+  missingDueDate?: boolean;
+  limit?: number;
+}, enabled = true) {
+  return useQuery({
+    queryKey: ['payables', options?.query, options?.reviewStatus, options?.missingDueDate, options?.limit],
+    queryFn: () => getPayables(options),
     enabled,
   });
 }

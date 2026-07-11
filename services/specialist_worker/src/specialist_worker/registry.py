@@ -7,6 +7,7 @@ from common.application.accounting import (
     reapply_manual_accounting_corrections,
 )
 from common.application.calendar import project_utility_bill_calendar_event
+from common.application.payables import project_payable
 from common.application.specialist_contracts import (
     SpecialistEvidence,
     SpecialistExecutionContext,
@@ -55,6 +56,7 @@ class UtilityBillHandler:
         )
 
     def project(self, session: Session, document_unit: DocumentUnit, result: SpecialistResult) -> None:
+        project_payable(session, document_unit, result)
         project_utility_bill_calendar_event(session, document_unit, result)
 
     def present(self, payload: dict[str, Any]) -> SpecialistPresentation:

@@ -487,6 +487,28 @@ export interface CalendarEventSummary {
   updated_at: string | null;
 }
 
+export interface PayableSummary {
+  id: string;
+  payable_kind: string;
+  issuer: string | null;
+  recipient: string | null;
+  subject: string | null;
+  issue_date: string | null;
+  due_date: string | null;
+  amount: number | null;
+  currency: string | null;
+  payment_reference: string | null;
+  status: string;
+  review_status: string;
+  duplicate_of_id: string | null;
+  confidence: number | null;
+  evidence: Record<string, unknown>;
+  document_id: string;
+  original_filename: string;
+  source_document_unit_id: string;
+  source_specialist_result_id: string;
+}
+
 export interface SpecialistAccountingStatementSummary {
   result_id: string;
   document_unit_id: string;

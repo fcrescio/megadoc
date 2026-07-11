@@ -20,7 +20,7 @@
     {
       "id": "utility_bill_it",
       "family": "utility_vendor",
-      "text": "BOLLETTA ACQUA\\nAzienda Servizi Idrici S.p.A.\\nSpett.le Condominio Via Roma 10\\nPeriodo: Gennaio - Marzo 2024\\nImporto da pagare: euro 85,50\\nScadenza: 31/01/2024\\nCodice fornitura: 123456789",
+      "text": "BOLLETTA ACQUA\\nAcque S.p.A.\\nSpett.le Condominio Via Roma 10\\nPeriodo: 01/01/2024 - 31/03/2024\\nTotale bolletta: 85,50\\nScadenza: 31/01/2024\\nRif. bolletta: ACQ-2024-10",
       "expect": {
         "classification": {
           "primary_type": "bolletta",
@@ -29,6 +29,12 @@
         "routing": {
           "pipeline_id": "utility_vendor_pipeline",
           "family": "utility_vendor"
+        },
+        "payable": {
+          "payable_kind": "utility_bill",
+          "issuer": "Acque S.p.A.",
+          "total_amount": 85.5,
+          "due_date": "2024-01-31"
         }
       }
     },

@@ -23,6 +23,14 @@ Gli specialisti trasformano una document unit gia' classificata in un payload di
 
 Accounting e utility mantengono i rispettivi payload interni. L'envelope e' il contratto comune consumato dalla UI e dai futuri strumenti generici.
 
+## Payable
+
+Lo specialista `utility_bill` proietta il payload compatibile in `payables`, che e' la rappresentazione autorevole di bollette, fatture, avvisi, solleciti e quietanze. Il payable conserva issuer, recipient, subject, date, importo, valuta, riferimento, stato, evidence e possibile duplicato.
+
+Il calendario e' una proiezione operativa: riceve soltanto payable con scadenza valida e non duplicati. Un payable senza data non viene eliminato, ma resta `needs_review` ed e' visibile nella sezione di revisione del calendario.
+
+La deduplicazione usa una fingerprint deterministica composta da emittente, destinatario, importo, valuta, riferimento e periodo. Il duplicato conserva la propria fonte e punta al payable originario tramite `duplicate_of_id`.
+
 ## Aggiungere uno specialista
 
 1. Implementare un handler conforme a `SpecialistHandler` nel worker.

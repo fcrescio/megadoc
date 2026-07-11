@@ -13,7 +13,7 @@ import type {
   KnowledgeSearchResult,
   SpecialistAccountingStatementSummary,
   SpecialistUtilityBillSummary,
-  CalendarEventSummary,
+  CalendarEventSummary, PayableSummary,
   KnowledgeEntitySummary,
   KnowledgeEntityDetail,
   CanonicalEntitySummary,
@@ -286,6 +286,21 @@ export async function getCalendarEvents(options?: {
   if (options?.reviewStatus && options.reviewStatus !== 'all') params.set('review_status', options.reviewStatus);
   if (options?.limit) params.set('limit', String(options.limit));
   const response = await fetch(`${API_BASE}/knowledge/calendar-events?${params.toString()}`);
+  return handleResponse(response);
+}
+
+export async function getPayables(options?: {
+  query?: string;
+  reviewStatus?: string;
+  missingDueDate?: boolean;
+  limit?: number;
+}): Promise<{ total: number; items: PayableSummary[] }> {
+  const params = new URLSearchParams();
+  if (options?.query) params.set('q', options.query);
+  if (options?.reviewStatus && options.reviewStatus !== 'all') params.set('review_status', options.reviewStatus);
+  if (options?.missingDueDate) params.set('missing_due_date', 'true');
+  if (options?.limit) params.set('limit', String(options.limit));
+  const response = await fetch(`${API_BASE}/knowledge/payables?${params.toString()}`);
   return handleResponse(response);
 }
 

@@ -7,7 +7,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from common.db.models import CalendarEvent, DocumentUnit, SpecialistResult
+from common.db.models import CalendarEvent, DocumentUnit, Payable, SpecialistResult
 
 MAX_AUTO_ACCEPTED_UTILITY_AMOUNT = Decimal("5000.00")
 
@@ -57,6 +57,9 @@ def project_utility_bill_calendar_event(
     if specialist_result.specialist_type != "utility_bill":
         return None
     payload = specialist_result.result_json or {}
+    payable = session.execute(
+        select(Payable).where(Payable.source_specialist_result_id == specialist_result.id)
+    ).scalar_one_or_none()
     due_date = _parse_date(payload.get("due_date"))
     existing = session.execute(
         select(CalendarEvent).where(
@@ -64,7 +67,7 @@ def project_utility_bill_calendar_event(
             CalendarEvent.event_type == "payment_due",
         )
     ).scalar_one_or_none()
-    if due_date is None:
+    if due_date is None or (payable is not None and payable.duplicate_of_id is not None):
         if existing is not None:
             session.delete(existing)
         return None
@@ -95,7 +98,13 @@ def project_utility_bill_calendar_event(
         event_type="payment_due",
     )
     event.source_document_unit_id = document_unit.id
-    event.title = f"Bolletta {issuer} - scadenza {due_date.isoformat()}"
+    kind_label = {
+        "invoice": "Fattura",
+        "payment_notice": "Avviso",
+        "reminder": "Sollecito",
+        "receipt": "Quietanza",
+    }.get(str(payload.get("payable_kind") or ""), "Bolletta")
+    event.title = f"{kind_label} {issuer} - scadenza {due_date.isoformat()}"
     event.subject = subject
     event.amount = amount
     event.currency = str(payload.get("currency") or "EUR").strip()[:8] or "EUR"
@@ -105,6 +114,7 @@ def project_utility_bill_calendar_event(
     event.review_status = review_status
     event.evidence_json = {
         "source": "utility_bill_specialist",
+        "payable_id": str(payable.id) if payable is not None else None,
         "issuer": payload.get("issuer"),
         "raw_total_amount": raw_amount,
         "raw_due_date": payload.get("due_date"),

@@ -79,10 +79,15 @@ def process_utility_bill(
 
     result = {
         "document_kind": "utility_bill",
+        "payable_kind": "invoice" if (
+            document_unit.document_type and document_unit.document_type.code == "fattura"
+        ) else "utility_bill",
         "input_version": input_version,
         "issuer": issuer,
         "service_type": service_type,
         "account_holder": account_holder,
+        "recipient": account_holder,
+        "subject": service_type or header_reference,
         "issue_date": issue_date,
         "due_date": due_date,
         "billing_period_from": billing_period["from"],
@@ -90,6 +95,7 @@ def process_utility_bill(
         "total_amount": total_amount,
         "currency": "EUR" if total_amount is not None else None,
         "document_number": document_number,
+        "payment_reference": document_number or supply_code,
         "contract_code": contract_code,
         "pod_pdr_or_supply_code": supply_code,
         "supply_reference": header_reference,
@@ -229,7 +235,7 @@ def _extract_due_date(text: str) -> str | None:
     explicit_patterns = [
         r"Entro il\s+(\d{1,2}\s+[A-Za-zà-ù]+(?:\s+\d{2,4})?)",
         r"Scad\.?\s*(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})",
-        r"Scadenza\s*(?:\n+\s*)?(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})",
+        r"Scadenza\s*:?\s*(?:\n+\s*)?(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})",
     ]
     for pattern in explicit_patterns:
         value = _regex_group(text, pattern)

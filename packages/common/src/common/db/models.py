@@ -378,6 +378,7 @@ class SpecialistResult(Base):
     assertions: Mapped[list["KnowledgeAssertion"]] = relationship(back_populates="specialist_result")
     accounting_facts: Mapped[list["AccountingFact"]] = relationship(back_populates="specialist_result")
     calendar_events: Mapped[list["CalendarEvent"]] = relationship(back_populates="source_specialist_result")
+    payable: Mapped["Payable | None"] = relationship(back_populates="source_specialist_result")
 
 
 class DocumentUnitLink(Base):
@@ -698,6 +699,46 @@ class DocumentUnitMention(Base):
 
     document_unit: Mapped["DocumentUnit"] = relationship(back_populates="mentions")
     node: Mapped["KnowledgeNode"] = relationship(back_populates="mentions")
+
+
+class Payable(Base):
+    __tablename__ = "payables"
+    __table_args__ = (
+        UniqueConstraint("source_specialist_result_id", name="uq_payables_source_result"),
+        Index("ix_payables_due_date", "due_date"),
+        Index("ix_payables_issuer", "issuer"),
+        Index("ix_payables_status", "status"),
+        Index("ix_payables_fingerprint", "deduplication_fingerprint"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    source_document_unit_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("document_units.id", ondelete="CASCADE"), nullable=False
+    )
+    source_specialist_result_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("specialist_results.id", ondelete="CASCADE"), nullable=False
+    )
+    duplicate_of_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("payables.id", ondelete="SET NULL"), nullable=True
+    )
+    payable_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    issuer: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    recipient: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    subject: Mapped[str | None] = mapped_column(Text, nullable=True)
+    issue_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    due_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
+    currency: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    payment_reference: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="unknown")
+    deduplication_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    review_status: Mapped[str] = mapped_column(String(32), nullable=False, default="needs_review")
+    evidence_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    source_specialist_result: Mapped["SpecialistResult"] = relationship(back_populates="payable")
 
 
 class CalendarEvent(Base):

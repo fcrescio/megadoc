@@ -17,6 +17,7 @@ import {
   useReviewGraphConsolidationSuggestion,
   useRunKnowledgeConsolidation,
   useCalendarEvents,
+  usePayables,
   useSpecialistAccountingStatements,
   useSpecialistUtilityBills,
 } from '../hooks/useDocuments';
@@ -596,6 +597,11 @@ export const CalendarPanel = memo(function CalendarPanel({ onOpenDocument, defer
     reviewStatus: reviewFilter,
     limit: 120,
   });
+  const reviewPayables = usePayables({
+    query: deferredSearch || undefined,
+    reviewStatus: 'needs_review',
+    limit: 60,
+  });
 
   return (
     <div className="flex h-full flex-col gap-3">
@@ -618,6 +624,22 @@ export const CalendarPanel = memo(function CalendarPanel({ onOpenDocument, defer
           </select>
         </div>
       </div>
+      {reviewPayables.data?.items.length ? (
+        <details className="shrink-0 rounded-xl border border-amber-300/20 bg-amber-400/10 p-3">
+          <summary className="cursor-pointer text-sm font-medium text-amber-100">
+            {reviewPayables.data.items.length} pagamenti da verificare
+          </summary>
+          <div className="mt-3 grid max-h-48 gap-2 overflow-y-auto lg:grid-cols-2">
+            {reviewPayables.data.items.map((payable) => (
+              <button key={payable.id} onClick={() => onOpenDocument(payable.document_id)} className="rounded-lg border border-white/10 bg-slate-950/40 p-3 text-left">
+                <p className="text-sm text-white">{payable.issuer ?? 'Emittente da verificare'} · {formatCurrency(payable.amount)}</p>
+                <p className="mt-1 text-xs text-slate-300">{payable.payable_kind} · {formatDate(payable.due_date)}</p>
+                <p className="mt-1 truncate text-xs text-slate-500">{payable.original_filename}</p>
+              </button>
+            ))}
+          </div>
+        </details>
+      ) : null}
       <div className="min-h-0 flex-1 overflow-y-auto rounded-2xl border border-white/10 bg-slate-950/35 p-3">
         {events.isLoading ? (
           <p className="text-sm text-slate-400">Caricamento calendario...</p>

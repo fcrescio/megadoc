@@ -70,6 +70,7 @@ from common.db.models import (
     DocumentUnitLink,
     DocumentUnitMention,
     CalendarEvent,
+    Payable,
     KnowledgeAssertion,
     KnowledgeNode,
     KnowledgeNodeAlias,
@@ -1798,6 +1799,60 @@ def list_calendar_events(
             str(item.get(field) or "")
             for field in ("title", "subject", "original_filename", "document_unit_title", "document_type_code")
         )
+        if normalized_query and normalized_query not in _normalize_search_value(haystack):
+            continue
+        items.append(item)
+        if len(items) >= limit:
+            break
+    return {"total": len(items), "items": items}
+
+
+@router.get("/payables")
+def list_payables(
+    q: str | None = None,
+    review_status: str | None = None,
+    missing_due_date: bool | None = None,
+    limit: int = Query(default=100, ge=1, le=500),
+    db: Session = Depends(get_db_session),
+) -> dict[str, Any]:
+    statement = (
+        select(Payable, Document)
+        .join(DocumentUnit, DocumentUnit.id == Payable.source_document_unit_id)
+        .join(ScanUnit, ScanUnit.id == DocumentUnit.scan_unit_id)
+        .join(Document, Document.id == ScanUnit.source_document_id)
+        .order_by(Payable.due_date.asc().nulls_first(), Payable.created_at.desc())
+    )
+    if review_status and review_status != "all":
+        statement = statement.where(Payable.review_status == review_status)
+    if missing_due_date is True:
+        statement = statement.where(Payable.due_date.is_(None))
+    normalized_query = _normalize_search_value(q)
+    items: list[dict[str, Any]] = []
+    for payable, document in db.execute(statement.limit(limit * 2)).all():
+        item = {
+            "id": str(payable.id),
+            "payable_kind": payable.payable_kind,
+            "issuer": payable.issuer,
+            "recipient": payable.recipient,
+            "subject": payable.subject,
+            "issue_date": payable.issue_date.isoformat() if payable.issue_date else None,
+            "due_date": payable.due_date.isoformat() if payable.due_date else None,
+            "amount": float(payable.amount) if payable.amount is not None else None,
+            "currency": payable.currency,
+            "payment_reference": payable.payment_reference,
+            "status": payable.status,
+            "review_status": payable.review_status,
+            "duplicate_of_id": str(payable.duplicate_of_id) if payable.duplicate_of_id else None,
+            "confidence": payable.confidence,
+            "evidence": payable.evidence_json or {},
+            "document_id": str(document.id),
+            "original_filename": document.original_filename,
+            "source_document_unit_id": str(payable.source_document_unit_id),
+            "source_specialist_result_id": str(payable.source_specialist_result_id),
+        }
+        haystack = " ".join(str(item.get(field) or "") for field in (
+            "issuer", "recipient", "subject", "payment_reference", "original_filename"
+        ))
         if normalized_query and normalized_query not in _normalize_search_value(haystack):
             continue
         items.append(item)
