@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Megadoc Gold Annotator</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, system-ui, sans-serif; background:#07111f; color:#dce9f7 }
+    * { box-sizing:border-box } body { margin:0; height:100vh; overflow:hidden }
+    button,input,select,textarea { font:inherit; color:inherit; background:#0b1b2e; border:1px solid #29425c; border-radius:7px; padding:7px 9px }
+    button { cursor:pointer } button:hover { background:#14304a } textarea { resize:vertical; width:100% }
+    .app { display:grid; grid-template-columns:230px minmax(420px,1fr) 420px; height:100vh }
+    aside,.editor { overflow:auto; border-right:1px solid #1d344a; background:#091624 }
+    aside { padding:12px } .editor { border:0; border-left:1px solid #1d344a; padding:14px }
+    .pdf { display:flex; flex-direction:column; min-width:0 } iframe { width:100%; flex:1; border:0; background:#313b47 }
+    .toolbar { height:48px; display:flex; gap:8px; align-items:center; padding:7px 10px; border-bottom:1px solid #1d344a }
+    .case { display:block; width:100%; text-align:left; margin:4px 0; padding:8px; font-size:12px }
+    .case.active { border-color:#36c5d8; background:#12364a } .case.done::before { content:'✓ '; color:#56d69b }
+    h2,h3 { margin:8px 0 } h3 { font-size:13px; color:#8fb5d8; text-transform:uppercase; letter-spacing:.06em }
+    label { display:block; margin:8px 0 4px; color:#9db5cc; font-size:12px }
+    input,select { width:100% } .row { display:grid; grid-template-columns:1fr 1fr; gap:8px }
+    .unit { border:1px solid #29425c; border-radius:9px; padding:9px; margin:8px 0; background:#0a1929 }
+    .unit-head { display:flex; justify-content:space-between; gap:8px }.unit-head button { width:auto; padding:3px 7px }
+    .badge { border:1px solid #36516a; border-radius:999px; padding:4px 8px; font-size:11px }
+    .progress { height:7px; background:#1a2a39; border-radius:9px; overflow:hidden; margin:8px 0 }.progress i { display:block; height:100%; background:#27b9ca }
+    .status { font-size:11px; color:#7fd9a7 }.warn { color:#ffc16b }.tabs { display:flex; gap:6px; margin-bottom:10px }.tabs button { width:auto }
+    .hidden { display:none!important }.question { border-bottom:1px solid #22384d; padding:10px 0 }
+    .actions { display:flex; gap:7px; margin:10px 0 }.actions button { flex:1 }.primary { background:#0e6977; border-color:#27b9ca }
+    code { font-size:11px; color:#79bed1 }.small { font-size:11px; color:#7893aa }
+  </style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <h2>Gold corpus</h2>
+    <div id="progressText" class="small">Caricamento…</div><div class="progress"><i id="progressBar"></i></div>
+    <input id="filter" placeholder="Filtra periodo/caso">
+    <div id="caseList"></div>
+  </aside>
+  <main class="pdf">
+    <div class="toolbar">
+      <button id="prev">←</button><button id="next">→</button>
+      <span id="caseTitle"></span><span id="pageBadge" class="badge"></span>
+      <input id="page" type="number" min="1" style="width:78px">
+      <button id="openPdf">Nuova scheda</button>
+      <span id="saveStatus" class="status">Pronto</span>
+    </div>
+    <iframe id="pdfFrame" title="Documento PDF"></iframe>
+  </main>
+  <section class="editor">
+    <div class="tabs"><button data-tab="document" class="primary">Documento</button><button data-tab="questions">Domande</button></div>
+    <div id="documentTab">
+      <label><input id="reviewed" type="checkbox" style="width:auto"> Revisione documento completata</label>
+      <label><input id="orientationVerified" type="checkbox" style="width:auto"> Orientamento suggerito verificato</label>
+      <div id="orientationHint" class="small"></div>
+      <div class="row"><div><label>Tipo principale</label><select id="documentType"></select></div><div><label>Qualità scan</label><select id="quality"><option>good</option><option>readable</option><option>low_quality</option><option>failed</option></select></div></div>
+      <label>Titolo minimo</label><input id="title" placeholder="Titolo dichiarato o descrittivo">
+      <label>Entità chiave, una per riga</label><textarea id="entities" rows="3" placeholder="organizzazione: Condominio…&#10;persona: Mario Rossi"></textarea>
+      <h3>Document unit</h3><div id="units"></div><button id="addUnit">+ Aggiungi unità</button>
+      <h3>Specialista</h3>
+      <select id="specialistKind"><option value="none">Nessuno</option><option value="payable">Payable / bolletta / fattura</option><option value="accounting">Bilancio / contabilità</option><option value="other">Altro caso specialistico</option></select>
+      <div id="payableFields" class="hidden">
+        <div class="row"><div><label>Emittente</label><input data-special="issuer"></div><div><label>Destinatario</label><input data-special="recipient"></div></div>
+        <div class="row"><div><label>Importo</label><input data-special="amount"></div><div><label>Scadenza</label><input data-special="due_date" placeholder="YYYY-MM-DD"></div></div>
+        <label>Oggetto</label><input data-special="subject"><label>Riferimento pagamento</label><input data-special="payment_reference">
+      </div>
+      <div id="accountingFields" class="hidden">
+        <label>Pagine con tabelle contabili</label><input data-special="table_pages" placeholder="2, 4-8, 12">
+        <label>Totali/celle campione da verificare</label><textarea data-special="cell_checks" rows="4" placeholder="p.4 | tabella riparto | riga A10 | TOTALE | 123,45"></textarea>
+      </div>
+      <label>Note / anomalie / ordine pagine</label><textarea id="notes" rows="3"></textarea>
+      <div class="actions"><button id="save" class="primary">Salva Ctrl+S</button><button id="completeNext">Completa e avanti</button></div>
+    </div>
+    <div id="questionsTab" class="hidden">
+      <p class="small">Aggiungi domande realistiche. Per le domande senza risposta lascia vuota la risposta e seleziona “non rispondibile”.</p>
+      <div id="questions"></div><button id="addQuestion">+ Nuova domanda</button>
+    </div>
+  </section>
+</div>
+<script>
+const TYPES=['altro','bolletta','fattura','rendiconto_contabile','riparto_spese','preventivo','verbale','lettera','contratto','estratto_conto','regolamento_condominiale'];
+let state, current=0, page=1, saveTimer;
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+async function init(){state=await fetch('/api/state').then(r=>r.json()); renderList(); openCase(0); renderProgress();}
+function annotation(){const id=state.cases[current].case_id; return state.annotations.documents[id]??=( {reviewed:false,orientation_verified:false,document_type:'altro',quality:'readable',title:'',entities:[],document_units:[],specialist:{kind:'none'},notes:''} );}
+function renderList(){const q=$('filter').value.toLowerCase();$('caseList').innerHTML=state.cases.map((c,i)=>({c,i})).filter(x=>(x.c.case_id+' '+x.c.period).toLowerCase().includes(q)).map(({c,i})=>`<button class="case ${i===current?'active':''} ${state.annotations.documents[c.case_id]?.reviewed?'done':''}" onclick="openCase(${i})">${esc(c.case_id)}<br><span class="small">${c.pages} pagine · ${c.size_bucket}</span></button>`).join('');}
+function openCase(i){current=Math.max(0,Math.min(state.cases.length-1,i));page=1;renderList();renderDocument();showPage();}
+function showPage(){const c=state.cases[current]; page=Math.max(1,Math.min(c.pages,Number(page)||1));$('page').value=page;$('pageBadge').textContent=`p. ${page}/${c.pages}`;$('pdfFrame').src=`/api/pdf/${encodeURIComponent(c.case_id)}#page=${page}&zoom=page-fit`;}
+function renderDocument(){const c=state.cases[current],a=annotation();$('caseTitle').textContent=c.case_id;$('reviewed').checked=!!a.reviewed;$('orientationVerified').checked=!!a.orientation_verified;$('documentType').innerHTML=TYPES.map(t=>`<option ${a.document_type===t?'selected':''}>${t}</option>`).join('');$('quality').value=a.quality||'readable';$('title').value=a.title||'';$('entities').value=(a.entities||[]).join('\n');$('notes').value=a.notes||'';const hint=(state.orientation_suggestions.documents||[]).find(x=>x.case_id===c.case_id);$('orientationHint').textContent=hint?`Suggerimento: rotazione dominante ${hint.dominant_rotation??'mista'}°, pagine ${hint.pages.join(', ')}`:'Nessun suggerimento';renderUnits();$('specialistKind').value=a.specialist?.kind||'none';renderSpecialist();}
+function renderUnits(){const a=annotation();$('units').innerHTML=(a.document_units||[]).map((u,i)=>`<div class="unit"><div class="unit-head"><b>Unità ${i+1}</b><button onclick="removeUnit(${i})">×</button></div><div class="row"><div><label>Da pagina</label><input type="number" value="${u.start_page||1}" onchange="unitField(${i},'start_page',this.value)"></div><div><label>A pagina</label><input type="number" value="${u.end_page||1}" onchange="unitField(${i},'end_page',this.value)"></div></div><label>Tipo</label><select onchange="unitField(${i},'document_type',this.value)">${TYPES.map(t=>`<option ${u.document_type===t?'selected':''}>${t}</option>`).join('')}</select><label>Titolo</label><input value="${esc(u.title||'')}" onchange="unitField(${i},'title',this.value)"></div>`).join('');}
+function unitField(i,k,v){annotation().document_units[i][k]=k.endsWith('page')?Number(v):v;queueSave();} function removeUnit(i){annotation().document_units.splice(i,1);renderUnits();queueSave();}
+function renderSpecialist(){const a=annotation(),kind=$('specialistKind').value;a.specialist??={};a.specialist.kind=kind;$('payableFields').classList.toggle('hidden',kind!=='payable');$('accountingFields').classList.toggle('hidden',kind!=='accounting');document.querySelectorAll('[data-special]').forEach(el=>el.value=a.specialist[el.dataset.special]||'');}
+function renderQuestions(){const qs=state.annotations.questions||=[];$('questions').innerHTML=qs.map((q,i)=>`<div class="question"><label>Domanda</label><textarea rows="2" onchange="questionField(${i},'question',this.value)">${esc(q.question||'')}</textarea><label><input type="checkbox" style="width:auto" ${q.answerable!==false?'checked':''} onchange="questionField(${i},'answerable',this.checked)"> Rispondibile</label><label>Risposta attesa</label><textarea rows="2" onchange="questionField(${i},'expected_answer',this.value)">${esc(q.expected_answer||'')}</textarea><label>Evidenza: case_id:pagine</label><input value="${esc(q.evidence||'')}" onchange="questionField(${i},'evidence',this.value)" placeholder="pisa-2011-large:2-3"><button onclick="removeQuestion(${i})">Elimina</button></div>`).join('');}
+function questionField(i,k,v){state.annotations.questions[i][k]=v;queueSave();}function removeQuestion(i){state.annotations.questions.splice(i,1);renderQuestions();queueSave();}
+function collect(){const a=annotation();a.reviewed=$('reviewed').checked;a.orientation_verified=$('orientationVerified').checked;a.document_type=$('documentType').value;a.quality=$('quality').value;a.title=$('title').value;a.entities=$('entities').value.split('\n').map(x=>x.trim()).filter(Boolean);a.notes=$('notes').value;a.specialist??={};a.specialist.kind=$('specialistKind').value;document.querySelectorAll('[data-special]').forEach(el=>a.specialist[el.dataset.special]=el.value);}
+function queueSave(){clearTimeout(saveTimer);$('saveStatus').textContent='Modifiche…';saveTimer=setTimeout(save,500)}
+async function save(){collect();$('saveStatus').textContent='Salvataggio…';const r=await fetch('/api/annotations',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(state.annotations)}).then(r=>r.json());$('saveStatus').textContent=r.saved?'Salvato':'Errore';if(r.progress){state.progress=r.progress;renderProgress()}renderList();}
+function renderProgress(){const p=state.progress||{};$('progressText').textContent=`${p.documents_reviewed||0}/${p.documents_total||state.cases.length} documenti · ${p.questions||0}/30 domande`;$('progressBar').style.width=`${100*(p.documents_reviewed||0)/(p.documents_total||state.cases.length)}%`;}
+document.addEventListener('input',e=>{if(e.target.closest('#documentTab')&&!e.target.closest('#units'))queueSave()});$('filter').oninput=renderList;$('prev').onclick=()=>openCase(current-1);$('next').onclick=()=>openCase(current+1);$('page').onchange=()=>{page=$('page').value;showPage()};$('openPdf').onclick=()=>window.open(`/api/pdf/${encodeURIComponent(state.cases[current].case_id)}#page=${page}`,'_blank');$('addUnit').onclick=()=>{const a=annotation();const last=a.document_units.at(-1);a.document_units.push({start_page:last?last.end_page+1:1,end_page:last?last.end_page+1:state.cases[current].pages,document_type:a.document_type||'altro',title:''});renderUnits();queueSave()};$('specialistKind').onchange=()=>{renderSpecialist();queueSave()};$('save').onclick=save;$('completeNext').onclick=async()=>{$('reviewed').checked=true;await save();openCase(current+1)};$('addQuestion').onclick=()=>{(state.annotations.questions??=[]).push({question:'',answerable:true,expected_answer:'',evidence:''});renderQuestions();queueSave()};document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{const q=b.dataset.tab==='questions';$('documentTab').classList.toggle('hidden',q);$('questionsTab').classList.toggle('hidden',!q);document.querySelectorAll('[data-tab]').forEach(x=>x.classList.toggle('primary',x===b));if(q)renderQuestions()});document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='s'){e.preventDefault();save()}if(!e.target.matches('input,textarea,select')){if(e.key==='ArrowRight')openCase(current+1);if(e.key==='ArrowLeft')openCase(current-1)}});init();
+</script>
+</body>
+</html>
