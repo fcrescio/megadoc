@@ -16,6 +16,8 @@ def test_build_page_artifacts_records_per_page_provenance():
         "backend": "dots_native",
         "orientation_preprocess": {
             "rotation_applied": 180,
+            "page_rotations": {"1": 180, "2": 90, "3": 0},
+            "review_pages": [3],
             "page_order_reversed": True,
         },
         "pages": [
@@ -57,7 +59,10 @@ def test_build_page_artifacts_records_per_page_provenance():
     assert artifacts[0].page_order_reversed is True
     assert artifacts[1].text_origin == "ocr"
     assert artifacts[1].page_class == "scan"
+    assert artifacts[1].rotation_applied == 90
     assert artifacts[2].text_origin == "failed"
+    assert artifacts[2].rotation_applied == 0
+    assert "orientation_needs_review" in artifacts[2].quality_flags
     assert "empty_text" in artifacts[2].quality_flags
 
 

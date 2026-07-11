@@ -129,8 +129,12 @@ def _artifact_from_page(
     confidence = _confidence(metadata)
     text_origin = _text_origin(page, metadata, text=text, engine_name=engine_name, structured=structured)
     quality_flags = _quality_flags(text=text, confidence=confidence, metadata=metadata)
+    rotation_applied, page_order_reversed = _orientation(
+        structured, confidence_summary, page_number=page_number
+    )
+    if _orientation_needs_review(structured, confidence_summary, page_number):
+        quality_flags.append("orientation_needs_review")
     page_class = _page_class(text_origin=text_origin, quality_flags=quality_flags)
-    rotation_applied, page_order_reversed = _orientation(structured, confidence_summary)
     return PageArtifactModel(
         page_number=page_number,
         text=text,
@@ -194,13 +198,17 @@ def _fallback_artifacts(
 ) -> list[PageArtifactModel]:
     expected_count = max(page_count, 1)
     chunks = _split_by_page_markers(markdown_text or full_text, expected_count)
-    rotation_applied, page_order_reversed = _orientation(structured, confidence_summary)
     backend = str(structured.get("backend") or engine_name or "") or None
     artifacts: list[PageArtifactModel] = []
     for index in range(1, expected_count + 1):
+        rotation_applied, page_order_reversed = _orientation(
+            structured, confidence_summary, page_number=index
+        )
         text = chunks[index - 1] if index - 1 < len(chunks) else ""
         flags = _quality_flags(text=text, confidence=None, metadata={})
         flags.append("fallback_split")
+        if _orientation_needs_review(structured, confidence_summary, index):
+            flags.append("orientation_needs_review")
         artifacts.append(
             PageArtifactModel(
                 page_number=index,
@@ -326,17 +334,37 @@ def _page_class(*, text_origin: str, quality_flags: list[str]) -> str:
 def _orientation(
     structured: dict[str, Any],
     confidence_summary: dict[str, Any] | None,
+    *,
+    page_number: int | None = None,
 ) -> tuple[int | None, bool]:
     summary = confidence_summary if isinstance(confidence_summary, dict) else {}
     orientation = structured.get("orientation_preprocess")
     if not isinstance(orientation, dict):
         orientation = summary.get("orientation_preprocess") if isinstance(summary.get("orientation_preprocess"), dict) else {}
-    rotation = orientation.get("rotation_applied")
+    page_rotations = orientation.get("page_rotations")
+    rotation = None
+    if page_number is not None and isinstance(page_rotations, dict):
+        rotation = page_rotations.get(str(page_number), page_rotations.get(page_number))
+    if rotation is None:
+        rotation = orientation.get("rotation_applied")
     try:
         rotation_applied = int(rotation) if rotation is not None else None
     except (TypeError, ValueError):
         rotation_applied = None
     return rotation_applied, bool(orientation.get("page_order_reversed", False))
+
+
+def _orientation_needs_review(
+    structured: dict[str, Any],
+    confidence_summary: dict[str, Any] | None,
+    page_number: int,
+) -> bool:
+    summary = confidence_summary if isinstance(confidence_summary, dict) else {}
+    orientation = structured.get("orientation_preprocess")
+    if not isinstance(orientation, dict):
+        candidate = summary.get("orientation_preprocess")
+        orientation = candidate if isinstance(candidate, dict) else {}
+    return page_number in set(orientation.get("review_pages") or [])
 
 
 def _confidence(metadata: dict[str, Any]) -> float | None:

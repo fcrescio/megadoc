@@ -58,8 +58,21 @@ class OrientationPreprocessService:
                 metadata={"backend": backend, "applied": False, "reason": "no_detections"},
             )
 
+        page_count = preflight.page_count if preflight and preflight.page_count else max(
+            (item["page_number"] for item in detections), default=1
+        )
+        qualified = self._qualified_detections(detections)
+        sampled_rotations = {int(item["rotation"]) % 360 for item in qualified}
+        full_page_detection = len(detections) >= page_count
+        if len(sampled_rotations) > 1 and not full_page_detection:
+            detections = self._detect_page_orientations(
+                source, preflight, page_numbers=list(range(1, page_count + 1))
+            )
+            qualified = self._qualified_detections(detections)
+            full_page_detection = len(detections) >= page_count
+
         dominant_rotation = self._choose_rotation(detections)
-        if dominant_rotation is None:
+        if dominant_rotation is None and not full_page_detection:
             return OrientationPreprocessResult(
                 normalized_path=None,
                 metadata={
@@ -70,20 +83,52 @@ class OrientationPreprocessService:
                 },
             )
 
-        reverse_page_order = self._should_reverse_page_order(dominant_rotation, detections)
-        normalized_path = self._rotate_pdf(source, dominant_rotation, reverse_page_order=reverse_page_order)
+        detected_by_page = {
+            int(item["page_number"]): int(item["rotation"]) % 360
+            for item in qualified
+        }
+        fallback_rotation = dominant_rotation or 0
+        page_rotations = {
+            page_number: detected_by_page.get(page_number, fallback_rotation)
+            for page_number in range(1, page_count + 1)
+        }
+        inferred_pages = sorted(
+            page_number for page_number in range(1, page_count + 1)
+            if page_number not in detected_by_page
+        )
+        review_pages = inferred_pages if full_page_detection else []
+        mixed_orientation = len(set(page_rotations.values())) > 1
+        reverse_page_order = self._should_reverse_page_order(
+            dominant_rotation or 0, detections
+        ) and not mixed_orientation and not review_pages
+        normalized_path = self._rotate_pdf(
+            source,
+            dominant_rotation or 0,
+            page_rotations=page_rotations,
+            reverse_page_order=reverse_page_order,
+        )
         return OrientationPreprocessResult(
             normalized_path=normalized_path,
             metadata={
                 "backend": backend,
                 "applied": True,
                 "rotation_applied": dominant_rotation,
+                "page_rotations": {str(key): value for key, value in page_rotations.items()},
+                "mixed_orientation": mixed_orientation,
+                "full_page_detection": full_page_detection,
+                "inferred_pages": [] if full_page_detection else inferred_pages,
+                "review_pages": review_pages,
                 "page_order_reversed": reverse_page_order,
                 "detections": detections,
             },
         )
 
-    def _detect_page_orientations(self, source: Path, preflight: PDFPreflightReport | None) -> list[dict]:
+    def _detect_page_orientations(
+        self,
+        source: Path,
+        preflight: PDFPreflightReport | None,
+        page_numbers: list[int] | None = None,
+    ) -> list[dict]:
         try:
             import fitz
         except ImportError:
@@ -95,7 +140,7 @@ class OrientationPreprocessService:
 
         document = fitz.open(source)
         try:
-            sample_pages = self._sample_page_numbers(document.page_count)
+            sample_pages = page_numbers or self._sample_page_numbers(document.page_count)
             detections: list[dict] = []
             with TemporaryDirectory(prefix="megadoc-rot-") as temp_dir:
                 temp_root = Path(temp_dir)
@@ -202,11 +247,7 @@ class OrientationPreprocessService:
         return sorted(page for page in positions if 1 <= page <= page_count)
 
     def _choose_rotation(self, detections: list[dict]) -> int | None:
-        qualified = [
-            item
-            for item in detections
-            if item["confidence"] >= self._settings.rotation_detector_min_confidence
-        ]
+        qualified = self._qualified_detections(detections)
         if not qualified:
             return None
 
@@ -231,6 +272,13 @@ class OrientationPreprocessService:
             return None
         return dominant_rotation
 
+    def _qualified_detections(self, detections: list[dict]) -> list[dict]:
+        return [
+            item
+            for item in detections
+            if item["confidence"] >= self._settings.rotation_detector_min_confidence
+        ]
+
     def _should_reverse_page_order(self, rotation: int, detections: list[dict]) -> bool:
         if not self._settings.rotation_reverse_page_order_on_180:
             return False
@@ -245,7 +293,14 @@ class OrientationPreprocessService:
             return False
         return all(int(item["rotation"]) % 360 == 180 for item in qualified)
 
-    def _rotate_pdf(self, source: Path, rotation: int, *, reverse_page_order: bool = False) -> Path:
+    def _rotate_pdf(
+        self,
+        source: Path,
+        rotation: int,
+        *,
+        page_rotations: dict[int, int] | None = None,
+        reverse_page_order: bool = False,
+    ) -> Path:
         import fitz
         from tempfile import NamedTemporaryFile
 
@@ -257,8 +312,13 @@ class OrientationPreprocessService:
             page_indexes = range(document.page_count - 1, -1, -1) if reverse_page_order else range(document.page_count)
             for page_index in page_indexes:
                 target_document.insert_pdf(document, from_page=page_index, to_page=page_index)
-            for page in target_document:
-                page.set_rotation((page.rotation + rotation) % 360)
+            source_page_numbers = list(range(1, document.page_count + 1))
+            if reverse_page_order:
+                source_page_numbers.reverse()
+            for target_index, page in enumerate(target_document):
+                source_page_number = source_page_numbers[target_index]
+                page_rotation = (page_rotations or {}).get(source_page_number, rotation)
+                page.set_rotation((page.rotation + page_rotation) % 360)
             target_document.save(str(target))
         finally:
             target_document.close()
