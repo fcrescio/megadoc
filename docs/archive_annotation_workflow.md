@@ -1,6 +1,6 @@
 # Annotazione del corpus archivistico
 
-Il tool locale consente di completare le annotazioni umane richieste dalla Fase 0 senza caricare i PDF nel database e senza copiarli nel repository.
+Il tool locale consente di completare le annotazioni umane richieste dalla Fase 0 senza caricare i PDF nel database. Corpus, manifest, hash, baseline e annotazioni restano completamente fuori dal repository.
 
 ## Avvio
 
@@ -10,18 +10,26 @@ python3 scripts/archive_annotation_server.py
 
 Aprire `http://127.0.0.1:8765`.
 
-Il corpus viene letto da `~/Pisa`; il lavoro viene salvato automaticamente e atomicamente in:
+Il corpus viene letto da `~/Pisa`; manifest, suggerimenti e lavoro umano si trovano per default in:
 
 ```text
-tests/gold/archive_human_annotations.json
+~/.local/share/megadoc/archive-gold/
+  archive_corpus.tsv
+  page_annotations.json
+  archive_human_annotations.json
+  baselines/
 ```
+
+La directory puo' essere cambiata con `MEGADOC_ARCHIVE_GOLD_DIR`. Non aggiungere questi file al repository.
 
 Per usare percorsi o porte differenti:
 
 ```bash
+MEGADOC_ARCHIVE_GOLD_DIR=/percorso/dati-gold \
 python3 scripts/archive_annotation_server.py \
   --corpus-root /percorso/corpus \
-  --output /percorso/annotazioni.json \
+  --manifest /percorso/dati-gold/archive_corpus.tsv \
+  --output /percorso/dati-gold/archive_human_annotations.json \
   --port 8765
 ```
 
@@ -68,4 +76,4 @@ Il comando termina con successo soltanto quando:
 - i campi specialistici obbligatori sono presenti;
 - sono presenti almeno 30 domande con risposta/evidenza coerente.
 
-Il file JSON risultante va revisionato e committato come parte del corpus gold. Le annotazioni sono verita' attesa umana; non devono essere compilate copiando automaticamente l'output della pipeline.
+Il file JSON risultante va revisionato e conservato insieme al corpus privato, ma non committato. Le annotazioni sono verita' attesa umana; non devono essere compilate copiando automaticamente l'output della pipeline.

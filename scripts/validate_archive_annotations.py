@@ -3,7 +3,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
 from scripts.archive_annotation_server import load_annotations, load_cases
 
@@ -93,9 +97,15 @@ def validate_annotations(cases: list[dict[str, object]], payload: dict[str, obje
 
 
 def main() -> int:
+    data_root = Path(
+        __import__("os").getenv(
+            "MEGADOC_ARCHIVE_GOLD_DIR",
+            str(Path.home() / ".local/share/megadoc/archive-gold"),
+        )
+    )
     parser = argparse.ArgumentParser(description="Validate human annotations for the archive corpus.")
-    parser.add_argument("--manifest", default="tests/gold/archive_corpus.tsv")
-    parser.add_argument("--annotations", default="tests/gold/archive_human_annotations.json")
+    parser.add_argument("--manifest", default=str(data_root / "archive_corpus.tsv"))
+    parser.add_argument("--annotations", default=str(data_root / "archive_human_annotations.json"))
     args = parser.parse_args()
     report = validate_annotations(load_cases(Path(args.manifest)), load_annotations(Path(args.annotations)))
     print(json.dumps(report, indent=2, ensure_ascii=False))

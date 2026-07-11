@@ -24,5 +24,13 @@ tmp/
 .tmp/
 *.log
 
+# Private/local archive gold data. Tooling belongs in git; corpus metadata and
+# human annotations must remain outside the repository.
+tests/gold/archive_corpus.tsv
+tests/gold/page_annotations.json
+tests/gold/archive_human_annotations.json
+tests/gold/baselines/orientation_*.json
+local/archive-gold/
+
 .idea/
 .vscode/

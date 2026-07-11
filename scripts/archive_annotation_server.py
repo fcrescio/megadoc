@@ -14,9 +14,15 @@ from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_MANIFEST = ROOT / "tests/gold/archive_corpus.tsv"
-DEFAULT_SUGGESTIONS = ROOT / "tests/gold/page_annotations.json"
-DEFAULT_OUTPUT = ROOT / "tests/gold/archive_human_annotations.json"
+DEFAULT_DATA_ROOT = Path(
+    os.getenv(
+        "MEGADOC_ARCHIVE_GOLD_DIR",
+        str(Path.home() / ".local/share/megadoc/archive-gold"),
+    )
+)
+DEFAULT_MANIFEST = DEFAULT_DATA_ROOT / "archive_corpus.tsv"
+DEFAULT_SUGGESTIONS = DEFAULT_DATA_ROOT / "page_annotations.json"
+DEFAULT_OUTPUT = DEFAULT_DATA_ROOT / "archive_human_annotations.json"
 STATIC_ROOT = ROOT / "tools/archive-annotator"
 
 
@@ -106,7 +112,11 @@ def make_handler(
             parsed = urlparse(self.path)
             if parsed.path == "/api/state":
                 annotations = load_annotations(output)
-                suggestion_payload = json.loads(suggestions.read_text(encoding="utf-8"))
+                suggestion_payload = (
+                    json.loads(suggestions.read_text(encoding="utf-8"))
+                    if suggestions.is_file()
+                    else {"schema_version": 1, "documents": []}
+                )
                 self._json({
                     "cases": cases,
                     "annotations": annotations,
@@ -232,6 +242,11 @@ def main() -> int:
     parser.add_argument("--suggestions", default=str(DEFAULT_SUGGESTIONS))
     parser.add_argument("--output", default=str(DEFAULT_OUTPUT))
     args = parser.parse_args()
+    if not Path(args.manifest).is_file():
+        parser.error(
+            f"Private corpus manifest not found: {args.manifest}. "
+            "Set --manifest or MEGADOC_ARCHIVE_GOLD_DIR."
+        )
     handler = make_handler(
         manifest=Path(args.manifest), corpus_root=Path(args.corpus_root),
         suggestions=Path(args.suggestions), output=Path(args.output),
