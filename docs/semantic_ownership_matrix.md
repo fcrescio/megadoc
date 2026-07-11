@@ -73,4 +73,27 @@ Questa matrice definisce quale tabella e' autorevole e quale tabella e' una proi
 3. Ogni nuova vista per l'LLM deve essere `projection` o `index_cache`, salvo motivazione esplicita.
 4. `topics` puo' raggruppare documenti, ma non deve diventare un secondo registro di persone, immobili o organizzazioni.
 5. `knowledge_nodes` puo' avere nodi senza `canonical_entity_id` solo per oggetti non ancora reconciliati o per entita' specialistiche non promosse.
+
+## Contratti applicativi
+
+- La creazione e la riconciliazione delle identita' passa da `common.application.entities`.
+- La coppia `(entity_type, canonical_value)` identifica una sola canonical entity.
+- La coppia `(entity_type, entity_key)` identifica una sola variante e quindi un solo owner canonico.
+- Le menzioni locali restano in `document_unit_entities`; non diventano identita' globali finche' non sono riconciliate.
+- Graph e context sono proiezioni derivate. `rebuild_semantic_projections()` le ricostruisce insieme e `semantic_projection_fingerprint()` ne verifica il contenuto ignorando UUID e timestamp generati.
+- I topic sono collection curate (`family`, `issue`, `project`, `context`), mai identita' globali.
+
+## Compatibilita' e deprecazioni
+
+- `TopicKind.ENTITY` resta temporaneamente leggibile nelle API per dati/client legacy, ma non e' selezionabile dalla UI e viene normalizzato in scrittura.
+- `knowledge_nodes` senza `canonical_entity_id` sono ammessi per valori specialistici o menzioni non riconciliate; non sono una seconda source of truth.
+- Gli endpoint graph/context restano adapter di lettura sulle proiezioni correnti.
+
+Verifica operativa:
+
+```bash
+python scripts/rebuild_semantic_projections.py --verify-idempotent
+```
+
+Il comando termina con errore se conteggi o contenuto semantico cambiano fra due rebuild consecutivi.
 6. I rebuild di graph, contexts e indici devono essere idempotenti e misurabili.

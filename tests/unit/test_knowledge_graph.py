@@ -2,6 +2,7 @@ import uuid
 
 from api.routers.knowledge import get_knowledge_node, list_knowledge_nodes, rebuild_graph_projection
 from common.application.graph import graph_stats, project_document_unit, rebuild_knowledge_graph
+from common.application.projections import rebuild_semantic_projections
 from common.db.models import (
     CanonicalEntity,
     CanonicalEntityVariant,
@@ -115,6 +116,17 @@ def test_rebuild_graph_is_idempotent(db_session):
     assert first.nodes == second.nodes == 2
     assert first.mentions == second.mentions == 2
     assert first.assertions == second.assertions
+
+
+def test_semantic_projection_rebuild_has_stable_fingerprint(db_session):
+    _make_utility_unit(db_session)
+
+    first = rebuild_semantic_projections(db_session)
+    second = rebuild_semantic_projections(db_session)
+
+    assert first.graph == second.graph
+    assert first.contexts == second.contexts
+    assert first.fingerprint == second.fingerprint
 
 
 def test_graph_api_rebuild_and_browse_node(db_session):

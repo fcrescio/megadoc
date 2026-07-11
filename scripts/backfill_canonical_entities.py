@@ -18,6 +18,11 @@ from sqlalchemy import create_engine, func, select  # noqa: E402
 from sqlalchemy.orm import Session  # noqa: E402
 
 from common.config import get_settings  # noqa: E402
+from common.application.entities import (  # noqa: E402
+    EntityVariantInput,
+    assign_entity_variant,
+    get_or_create_canonical_entity,
+)
 from common.db.models import (  # noqa: E402
     CanonicalEntity,
     CanonicalEntityVariant,
@@ -110,25 +115,22 @@ def backfill(*, dry_run: bool, min_documents: int) -> dict[str, int]:
                 )
             ).scalar_one_or_none()
             if existing_entity is None:
-                existing_entity = CanonicalEntity(
+                summary["created_entities"] += 1
+            if not dry_run:
+                existing_entity = get_or_create_canonical_entity(
+                    session,
                     entity_type=candidate.entity_type,
                     canonical_value=candidate.entity_key,
                     display_value=candidate.display_value,
-                    review_status="auto",
                 )
-                if not dry_run:
-                    session.add(existing_entity)
-                    session.flush()
-                summary["created_entities"] += 1
-            if not dry_run:
-                session.add(
-                    CanonicalEntityVariant(
-                        canonical_entity_id=existing_entity.id,
+                assign_entity_variant(
+                    session,
+                    existing_entity,
+                    EntityVariantInput(
                         entity_type=candidate.entity_type,
                         entity_key=candidate.entity_key,
                         display_value=candidate.display_value,
-                        review_status="auto",
-                    )
+                    ),
                 )
             summary["created_variants"] += 1
         if dry_run:

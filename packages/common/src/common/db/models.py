@@ -409,6 +409,9 @@ class DocumentUnitLink(Base):
 
 class CanonicalEntity(Base):
     __tablename__ = "canonical_entities"
+    __table_args__ = (
+        UniqueConstraint("entity_type", "canonical_value", name="uq_canonical_entities_type_value"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     entity_type: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -431,6 +434,9 @@ class CanonicalEntity(Base):
 
 class CanonicalEntityVariant(Base):
     __tablename__ = "canonical_entity_variants"
+    __table_args__ = (
+        UniqueConstraint("entity_type", "entity_key", name="uq_canonical_entity_variants_type_key"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     canonical_entity_id: Mapped[uuid.UUID] = mapped_column(

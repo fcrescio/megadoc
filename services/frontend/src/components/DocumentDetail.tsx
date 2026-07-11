@@ -36,7 +36,7 @@ const ASSIGNMENT_ROLES = [
   { value: 'secondary', label: 'Secondario' },
 ];
 
-const TOPIC_KINDS = ['entity', 'family', 'issue', 'project', 'context'];
+const TOPIC_KINDS = ['family', 'issue', 'project', 'context'];
 
 function formatDate(value: unknown) {
   if (typeof value !== 'string' || !value) {
@@ -371,7 +371,10 @@ function TopicAssignmentManager({
   const [newTitle, setNewTitle] = useState(unit.proposal?.proposed_title ?? unit.title ?? '');
   const [newSlug, setNewSlug] = useState(unit.proposal?.proposed_slug ?? slugify(unit.title ?? ''));
   const [newClass, setNewClass] = useState(unit.proposal?.topic_class ?? 'other');
-  const [newKind, setNewKind] = useState(unit.proposal?.proposed_topic_kind ?? 'entity');
+  const proposedKind = unit.proposal?.proposed_topic_kind;
+  const [newKind, setNewKind] = useState(
+    proposedKind && proposedKind !== 'entity' ? proposedKind : 'context',
+  );
   const [description, setDescription] = useState(unit.extracted_summary ?? '');
 
   const filteredTopics = useMemo(() => {

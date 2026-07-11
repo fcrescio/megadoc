@@ -21,7 +21,7 @@ const ASSIGNMENT_ROLES = [
   { value: 'secondary', label: 'Secondario' },
 ];
 
-const TOPIC_KINDS = ['entity', 'family', 'issue', 'project', 'context'];
+const TOPIC_KINDS = ['family', 'issue', 'project', 'context'];
 const TOPIC_OPTION_LIMIT = 80;
 
 function slugify(value: string) {
@@ -63,7 +63,9 @@ const ProposalCard = memo(function ProposalCard({
   const [selectedTopicId, setSelectedTopicId] = useState<string>(proposal.matched_existing_topic_id ?? '');
   const [newTitle, setNewTitle] = useState(proposal.proposed_title);
   const [newSlug, setNewSlug] = useState(proposal.proposed_slug);
-  const [newKind, setNewKind] = useState(proposal.proposed_topic_kind);
+  const [newKind, setNewKind] = useState(
+    proposal.proposed_topic_kind === 'entity' ? 'context' : proposal.proposed_topic_kind,
+  );
   const [description, setDescription] = useState(proposal.description ?? '');
   const [confirmReject, setConfirmReject] = useState(false);
   const [showSourcePreview, setShowSourcePreview] = useState(false);

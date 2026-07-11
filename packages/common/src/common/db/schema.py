@@ -65,7 +65,7 @@ def ensure_knowledge_schema(engine) -> None:
             created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             updated_at TIMESTAMPTZ NULL
         )""",
-        "CREATE INDEX IF NOT EXISTS ix_canonical_entities_type_value ON canonical_entities(entity_type, canonical_value)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_canonical_entities_type_value ON canonical_entities(entity_type, canonical_value)",
         """CREATE TABLE IF NOT EXISTS canonical_entity_variants (
             id UUID PRIMARY KEY,
             canonical_entity_id UUID NOT NULL REFERENCES canonical_entities(id) ON DELETE CASCADE,
@@ -76,7 +76,7 @@ def ensure_knowledge_schema(engine) -> None:
             created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             updated_at TIMESTAMPTZ NULL
         )""",
-        "CREATE INDEX IF NOT EXISTS ix_canonical_entity_variants_type_key ON canonical_entity_variants(entity_type, entity_key)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_canonical_entity_variants_type_key ON canonical_entity_variants(entity_type, entity_key)",
         """CREATE TABLE IF NOT EXISTS knowledge_contexts (
             id UUID PRIMARY KEY,
             context_kind VARCHAR(32) NOT NULL DEFAULT 'entity',

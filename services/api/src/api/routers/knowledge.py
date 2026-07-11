@@ -39,6 +39,12 @@ from common.application.accounting import (
 from common.application.specialists import ensure_specialist_jobs_for_scan_unit
 from common.application.page_artifacts import get_page_artifact_text
 from common.application.topic_policy import collection_topic_kind
+from common.application.entities import (
+    EntityVariantInput,
+    assign_entity_variant,
+    get_or_create_canonical_entity,
+)
+from common.application.projections import rebuild_semantic_projections
 from common.db.models import (
     CanonicalEntity,
     CanonicalEntityVariant,
@@ -2049,14 +2055,13 @@ def merge_canonical_entities(
         if canonical_entity is None:
             raise HTTPException(status_code=404, detail="Canonical entity not found")
     elif payload.create_canonical_entity is not None:
-        canonical_entity = CanonicalEntity(
+        canonical_entity = get_or_create_canonical_entity(
+            db,
             entity_type=payload.create_canonical_entity.entity_type,
             canonical_value=payload.create_canonical_entity.canonical_value,
             display_value=payload.create_canonical_entity.display_value,
             review_status="human_reviewed",
         )
-        db.add(canonical_entity)
-        db.flush()
     else:
         raise HTTPException(status_code=400, detail="Provide target_canonical_entity_id or create_canonical_entity")
 
@@ -2064,18 +2069,6 @@ def merge_canonical_entities(
         entity_key_normalized = entity_key.strip().lower()
         if not entity_key_normalized:
             continue
-        existing_variant = db.execute(
-            select(CanonicalEntityVariant).where(
-                CanonicalEntityVariant.entity_type == payload.entity_type,
-                CanonicalEntityVariant.entity_key == entity_key_normalized,
-            )
-        ).scalar_one_or_none()
-        if existing_variant is not None:
-            existing_variant.canonical_entity_id = canonical_entity.id
-            existing_variant.review_status = "human_reviewed"
-            existing_variant.updated_at = _utcnow()
-            continue
-
         display_row = db.execute(
             select(func.max(DocumentUnitEntity.entity_value))
             .where(
@@ -2083,22 +2076,22 @@ def merge_canonical_entities(
                 _entity_key_expr() == entity_key_normalized,
             )
         ).scalar_one_or_none()
-        db.add(
-            CanonicalEntityVariant(
-                canonical_entity_id=canonical_entity.id,
+        assign_entity_variant(
+            db,
+            canonical_entity,
+            EntityVariantInput(
                 entity_type=payload.entity_type,
                 entity_key=entity_key_normalized,
                 display_value=display_row or entity_key_normalized,
                 review_status="human_reviewed",
-            )
+            ),
         )
 
     canonical_entity.review_status = "human_reviewed"
     canonical_entity.updated_at = _utcnow()
     db.commit()
 
-    rebuild_knowledge_graph(db)
-    rebuild_knowledge_contexts(db)
+    rebuild_semantic_projections(db)
     db.commit()
 
     db.refresh(canonical_entity)
