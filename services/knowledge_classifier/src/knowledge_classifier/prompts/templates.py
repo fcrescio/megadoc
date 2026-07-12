@@ -135,6 +135,9 @@ Rules:
 - Choose exactly one pipeline_id from the available list.
 - The family must match the chosen pipeline_id.
 - Route by the document's main purpose, not by isolated keywords.
+- A specialist family is eligible only when the entire supplied segment is one coherent document of that family.
+- If the segment mixes correspondence, bill details, unrelated issuers, multiple independent documents, or unexplained page resets, choose general_pipeline with confidence below 0.7 so a human can correct segmentation first.
+- Do not route a generic commercial invoice to utility_vendor_pipeline unless it is specifically a water, electricity, gas, telecom, waste, or other recurring utility bill.
 - Prefer general_pipeline when the document is correspondence/reminder/notice and no specialist workflow is clearly needed.
 - Confidence between 0 and 1.
 - Keep rationale brief, in the source document language.
