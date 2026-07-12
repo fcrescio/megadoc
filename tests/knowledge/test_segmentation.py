@@ -1,6 +1,7 @@
 """Tests for segmentation service."""
 
 from knowledge_classifier.llm.mock import MockDeterministicProvider
+from knowledge_classifier.schemas import SegmentBoundary, SegmentCandidate, SegmentationResult
 from knowledge_classifier.services.segmentation import SegmentationService
 from tests.knowledge.fixtures import (
     VERBALE_OCR_STRUCTURED,
@@ -78,3 +79,58 @@ def test_segmentation_uses_llm_for_multi_page_boundaries():
     assert len(result.segments) == 2
     assert result.boundaries
     assert result.overall_confidence > 0
+
+
+def test_segmentation_windows_cover_long_scans_without_truncation():
+    class WindowProvider:
+        def chat_with_json(self, messages, response_model, temperature=0.0):
+            content = messages[-1].content
+            page_numbers = [
+                int(line.removeprefix("=== Page ").removesuffix(" ==="))
+                for line in content.splitlines()
+                if line.startswith("=== Page ")
+            ]
+            start, end = min(page_numbers), max(page_numbers)
+            boundary = start + 4
+            segments = [SegmentCandidate(
+                start_page=start,
+                end_page=min(boundary, end),
+                confidence=0.9,
+                rationale="First document",
+            )]
+            boundaries = []
+            if boundary < end:
+                segments.append(SegmentCandidate(
+                    start_page=boundary + 1,
+                    end_page=end,
+                    confidence=0.9,
+                    rationale="Second document",
+                ))
+                boundaries.append(SegmentBoundary(
+                    page_before=boundary,
+                    page_after=boundary + 1,
+                    confidence=0.9,
+                    rationale="Document reset",
+                ))
+            return SegmentationResult(
+                segments=segments,
+                overall_confidence=0.9,
+                boundaries=boundaries,
+            ), {}
+
+    service = SegmentationService(WindowProvider(), object())
+    structured = {
+        "pages": [
+            {"page_number": page, "text": f"Page {page}"}
+            for page in range(1, 35)
+        ]
+    }
+
+    result = service.segment_ocr_result(structured, "", 34)
+
+    assert result.segments[0].start_page == 1
+    assert result.segments[-1].end_page == 34
+    assert all(
+        current.end_page + 1 == following.start_page
+        for current, following in zip(result.segments, result.segments[1:])
+    )

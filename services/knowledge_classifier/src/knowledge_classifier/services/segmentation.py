@@ -13,12 +13,16 @@ from knowledge_classifier.llm.base import LLMProvider
 from knowledge_classifier.prompts import SEGMENTATION_PROMPT
 from knowledge_classifier.schemas import (
     PageRepresentation,
+    SegmentBoundary,
     SegmentCandidate,
     SegmentationResult,
 )
 from knowledge_classifier.services.language import detect_document_language, output_language_instruction
 
 logger = logging.getLogger(__name__)
+
+SEGMENTATION_WINDOW_PAGES = 10
+SEGMENTATION_WINDOW_OVERLAP = 1
 
 class SegmentationService:
     """Service for segmenting OCR results into document units."""
@@ -127,11 +131,59 @@ class SegmentationService:
         return keywords[:10]
 
     def _segment_with_llm(self, pages: list[PageRepresentation]) -> SegmentationResult:
-        """Use LLM to segment ambiguous documents."""
-        # Build pages content string
+        """Segment every page through overlapping, independently validated LLM windows."""
+        windows = self._page_windows(pages)
+        results = [self._segment_window_with_llm(window) for window in windows]
+        if len(results) == 1:
+            return results[0]
+
+        boundaries_by_pair: dict[tuple[int, int], SegmentBoundary] = {}
+        for result in results:
+            for boundary in result.boundaries:
+                pair = (boundary.page_before, boundary.page_after)
+                previous = boundaries_by_pair.get(pair)
+                if previous is None or boundary.confidence > previous.confidence:
+                    boundaries_by_pair[pair] = boundary
+
+        boundaries = sorted(boundaries_by_pair.values(), key=lambda item: item.page_before)
+        segments: list[SegmentCandidate] = []
+        start_page = pages[0].page_number
+        for boundary in boundaries:
+            if boundary.page_after != boundary.page_before + 1:
+                raise ValueError(f"Non-consecutive segmentation boundary: {boundary}")
+            if boundary.page_before < start_page or boundary.page_before >= pages[-1].page_number:
+                continue
+            segments.append(SegmentCandidate(
+                start_page=start_page,
+                end_page=boundary.page_before,
+                confidence=boundary.confidence,
+                rationale=boundary.rationale,
+            ))
+            start_page = boundary.page_after
+        segments.append(SegmentCandidate(
+            start_page=start_page,
+            end_page=pages[-1].page_number,
+            confidence=min(result.overall_confidence for result in results),
+            rationale="Continuità verificata tra finestre di segmentazione sovrapposte.",
+        ))
+        merged = SegmentationResult(
+            segments=segments,
+            overall_confidence=min(result.overall_confidence for result in results),
+            boundaries=boundaries,
+        )
+        self._validate_coverage(merged, pages[0].page_number, pages[-1].page_number)
+        return merged
+
+    def _page_windows(self, pages: list[PageRepresentation]) -> list[list[PageRepresentation]]:
+        if len(pages) <= SEGMENTATION_WINDOW_PAGES:
+            return [pages]
+        step = SEGMENTATION_WINDOW_PAGES - SEGMENTATION_WINDOW_OVERLAP
+        return [pages[start:start + SEGMENTATION_WINDOW_PAGES] for start in range(0, len(pages), step)]
+
+    def _segment_window_with_llm(self, pages: list[PageRepresentation]) -> SegmentationResult:
         pages_content = "\n\n".join([
             f"=== Page {p.page_number} ===\n{p.text[:2000]}"
-            for p in pages[:10]  # Limit to first 10 pages for context
+            for p in pages
         ])
         language_code = detect_document_language(pages_content)
 
@@ -153,7 +205,24 @@ class SegmentationService:
                 SegmentationResult,
                 temperature=self.settings.llm_temperature,
             )
+            self._validate_coverage(result, pages[0].page_number, pages[-1].page_number)
             return result
         except Exception:
             logger.exception("LLM segmentation failed")
             raise
+
+    @staticmethod
+    def _validate_coverage(result: SegmentationResult, start_page: int, end_page: int) -> None:
+        expected_start = start_page
+        for segment in sorted(result.segments, key=lambda item: item.start_page):
+            if segment.start_page != expected_start or segment.end_page < segment.start_page:
+                raise ValueError(
+                    f"Invalid segmentation coverage at page {expected_start}: "
+                    f"received {segment.start_page}-{segment.end_page}"
+                )
+            expected_start = segment.end_page + 1
+        if expected_start != end_page + 1:
+            raise ValueError(
+                f"Incomplete segmentation coverage: expected through page {end_page}, "
+                f"received through page {expected_start - 1}"
+            )
