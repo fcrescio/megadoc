@@ -225,7 +225,16 @@ def finalize_scan_topics_task(self, scan_unit_id: str):
                     finalization_job.error_message = str(exc)
                     status_session.commit()
             logger.info("Topic finalization deferred for scan_unit %s: %s", scan_unit_id, exc)
-            raise self.retry(exc=exc, countdown=15)
+            rescheduled = finalize_scan_topics_task.apply_async(
+                args=[scan_unit_id],
+                countdown=15,
+                queue=settings.celery_queue,
+            )
+            return {
+                "scan_unit_id": scan_unit_id,
+                "status": "deferred",
+                "next_task_id": rescheduled.id,
+            }
         except Exception as exc:
             session.rollback()
             with Session(engine) as status_session:
