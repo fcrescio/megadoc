@@ -25,6 +25,8 @@ from sqlalchemy.orm import Session
 from specialist_worker.services.accounting_statement import process_accounting_statement
 from specialist_worker.services.utility_bill import process_utility_bill
 
+MAX_AUTO_ACCEPTED_UTILITY_AMOUNT = Decimal("5000.00")
+
 
 class UtilityBillHandler:
     capability = "utility_bill"
@@ -181,6 +183,8 @@ def _amount_supported(value: Any, text: str) -> bool:
     try:
         amount = Decimal(str(value)).quantize(Decimal("0.01"))
     except (InvalidOperation, ValueError):
+        return False
+    if amount < 0 or amount > MAX_AUTO_ACCEPTED_UTILITY_AMOUNT:
         return False
     european = f"{amount:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     candidates = {f"{amount:.2f}", f"{amount:.2f}".replace(".", ","), european}
