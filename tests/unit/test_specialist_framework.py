@@ -94,7 +94,7 @@ def test_builtin_specialists_follow_common_contract(monkeypatch, db_session, cap
     extraction = handler.extract(SpecialistExecutionContext(
         session=db_session,
         document_unit=unit,
-        text="fixture",
+        text="Acque S.p.A. Totale EUR 10,50. Scadenza 01/08/2026.",
         structured_json={},
         input_version="fixture:v1",
     ))
@@ -110,6 +110,32 @@ def test_builtin_specialists_follow_common_contract(monkeypatch, db_session, cap
     assert envelope["_specialist"]["capability"] == capability
     assert envelope["_specialist"]["schema_version"] == handler.schema_version
     assert envelope["_specialist"]["evidence"]
+
+
+def test_utility_validation_rejects_values_not_grounded_in_source(monkeypatch, db_session):
+    monkeypatch.setattr(
+        worker_registry,
+        "process_utility_bill",
+        lambda session, document_unit, text, input_version: (
+            {"issuer": "Toscana Energia", "total_amount": 7148428.17, "due_date": "2010-02-09"},
+            [],
+            0.95,
+        ),
+    )
+    handler = worker_registry.build_specialist_registry(lambda: None).get("utility_bill")
+    extraction = handler.extract(SpecialistExecutionContext(
+        session=db_session,
+        document_unit=_unit("bolletta"),
+        text="Toscana Energia - importo 19,78 euro - scadenza 05/03/2009",
+        structured_json={},
+        input_version="fixture:v1",
+    ))
+
+    validation = handler.validate(extraction)
+
+    assert validation.status == "needs_review"
+    assert any("total_amount" in message for message in validation.messages)
+    assert any("due_date" in message for message in validation.messages)
 
 
 def test_registry_rejects_duplicate_capability():

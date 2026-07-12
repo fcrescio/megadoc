@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+from decimal import Decimal, InvalidOperation
 from typing import Any, Callable
 
 from common.application.accounting import (
@@ -33,6 +35,7 @@ class UtilityBillHandler:
         payload, links, confidence = process_utility_bill(
             context.session, context.document_unit, context.text, context.input_version
         )
+        payload["_source_checks"] = _utility_source_checks(payload, context.text)
         evidence = [
             SpecialistEvidence(
                 field=field,
@@ -50,10 +53,12 @@ class UtilityBillHandler:
     def validate(self, extraction: SpecialistExtraction) -> SpecialistValidation:
         required = ("issuer", "total_amount", "due_date")
         missing = tuple(field for field in required if extraction.payload.get(field) in {None, "", "unknown"})
-        return SpecialistValidation(
-            status="valid" if not missing else "needs_review",
-            messages=tuple(f"Missing recommended field: {field}" for field in missing),
-        )
+        messages = [f"Missing recommended field: {field}" for field in missing]
+        source_checks = extraction.payload.get("_source_checks") or {}
+        for field in required:
+            if field not in missing and source_checks.get(field) is not True:
+                messages.append(f"Extracted field is not supported by source text: {field}")
+        return SpecialistValidation(status="valid" if not messages else "needs_review", messages=tuple(messages))
 
     def project(self, session: Session, document_unit: DocumentUnit, result: SpecialistResult) -> None:
         project_payable(session, document_unit, result)
@@ -143,6 +148,57 @@ def build_specialist_registry(
     registry.register(UtilityBillHandler())
     registry.register(AccountingStatementHandler(accounting_provider_factory))
     return registry
+
+
+def _utility_source_checks(payload: dict[str, Any], text: str) -> dict[str, bool]:
+    normalized_text = _normalized_search_text(text)
+    return {
+        "issuer": _issuer_supported(payload.get("issuer"), normalized_text),
+        "total_amount": _amount_supported(payload.get("total_amount"), text),
+        "due_date": _date_supported(payload.get("due_date"), normalized_text),
+        "payment_reference": _literal_supported(payload.get("payment_reference"), normalized_text),
+    }
+
+
+def _normalized_search_text(value: Any) -> str:
+    return " ".join(re.findall(r"[a-z0-9]+", str(value or "").casefold()))
+
+
+def _literal_supported(value: Any, normalized_text: str) -> bool:
+    normalized_value = _normalized_search_text(value)
+    return not normalized_value or normalized_value in normalized_text
+
+
+def _issuer_supported(value: Any, normalized_text: str) -> bool:
+    tokens = [token for token in _normalized_search_text(value).split() if len(token) >= 3]
+    if not tokens:
+        return False
+    matched = sum(token in normalized_text for token in tokens)
+    return matched >= min(2, len(tokens)) and matched / len(tokens) >= 0.6
+
+
+def _amount_supported(value: Any, text: str) -> bool:
+    try:
+        amount = Decimal(str(value)).quantize(Decimal("0.01"))
+    except (InvalidOperation, ValueError):
+        return False
+    european = f"{amount:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    candidates = {f"{amount:.2f}", f"{amount:.2f}".replace(".", ","), european}
+    compact_text = re.sub(r"\s+", "", text or "")
+    return any(candidate in compact_text for candidate in candidates)
+
+
+def _date_supported(value: Any, normalized_text: str) -> bool:
+    match = re.fullmatch(r"(\d{4})-(\d{2})-(\d{2})", str(value or "").strip())
+    if not match:
+        return False
+    year, month, day = match.groups()
+    variants = (
+        f"{day} {month} {year}",
+        f"{day.lstrip('0') or '0'} {month.lstrip('0') or '0'} {year}",
+        f"{year} {month} {day}",
+    )
+    return any(variant in normalized_text for variant in variants)
 
 
 def _accounting_evidence(document_unit: DocumentUnit, payload: dict[str, Any]) -> list[SpecialistEvidence]:

@@ -90,7 +90,15 @@ def project_utility_bill_calendar_event(
     confidence = specialist_result.confidence
     if issues and confidence is not None:
         confidence = max(0.0, confidence - 0.2)
-    review_status = "auto_accepted" if not issues and (confidence is None or confidence >= 0.7) else "needs_review"
+    review_status = (
+        "auto_accepted"
+        if (
+            specialist_result.review_status == "auto_accepted"
+            and not issues
+            and (confidence is None or confidence >= 0.7)
+        )
+        else "needs_review"
+    )
 
     event = existing or CalendarEvent(
         source_document_unit_id=document_unit.id,

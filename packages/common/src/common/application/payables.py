@@ -47,7 +47,11 @@ def project_payable(
     issues = _review_issues(payable_kind, issuer, amount, due_date, payment_reference)
     review_status = (
         "auto_accepted"
-        if not issues and (specialist_result.confidence or 0) >= 0.7
+        if (
+            specialist_result.review_status == "auto_accepted"
+            and not issues
+            and (specialist_result.confidence or 0) >= 0.7
+        )
         else "needs_review"
     )
 
