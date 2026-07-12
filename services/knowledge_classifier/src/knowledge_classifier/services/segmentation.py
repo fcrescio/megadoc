@@ -208,7 +208,7 @@ class SegmentationService:
                     temperature=self.settings.llm_temperature,
                 )
                 self._validate_coverage(result, pages[0].page_number, pages[-1].page_number)
-                return result
+                return self._review_segmentation_window(pages, pages_content, result)
             except ValueError as exc:
                 last_error = exc
                 logger.warning(
@@ -231,6 +231,46 @@ class SegmentationService:
                 raise
         raise ValueError(
             f"LLM could not produce valid segmentation for pages "
+            f"{pages[0].page_number}-{pages[-1].page_number}: {last_error}"
+        )
+
+    def _review_segmentation_window(
+        self,
+        pages: list[PageRepresentation],
+        pages_content: str,
+        draft: SegmentationResult,
+    ) -> SegmentationResult:
+        messages = [
+            ChatMessage(role="system", content="You audit document segmentation and correct subtle boundary errors."),
+            ChatMessage(role="user", content=(
+                "Review every adjacent page pair independently. Correct the draft by adding boundaries "
+                "when a new independent document starts and removing boundaries caused only by layout "
+                "changes, continued tables, detail pages, or payment slips. Every supplied page must occur "
+                "exactly once. Return only the SegmentationResult JSON schema used by the draft.\n\n"
+                f"PAGES:\n{pages_content}\n\nDRAFT:\n{draft.model_dump_json()}"
+            )),
+        ]
+        last_error: Exception | None = None
+        for attempt in range(3):
+            reviewed, _ = self.llm.chat_with_json(
+                messages,
+                SegmentationResult,
+                temperature=self.settings.llm_temperature,
+            )
+            try:
+                self._validate_coverage(reviewed, pages[0].page_number, pages[-1].page_number)
+                return reviewed
+            except ValueError as exc:
+                last_error = exc
+                messages.append(ChatMessage(
+                    role="user",
+                    content=(
+                        f"The reviewed JSON is invalid: {exc}. Correct it to cover pages "
+                        f"{pages[0].page_number}-{pages[-1].page_number} exactly once."
+                    ),
+                ))
+        raise ValueError(
+            f"LLM could not review segmentation for pages "
             f"{pages[0].page_number}-{pages[-1].page_number}: {last_error}"
         )
 

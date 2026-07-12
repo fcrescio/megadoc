@@ -161,5 +161,5 @@ def test_segmentation_retries_only_invalid_window_response():
         PageRepresentation(page_number=3, text="three"),
     ])
 
-    assert provider.calls == 2
+    assert provider.calls == 3
     assert result.segments[0].start_page == 2
