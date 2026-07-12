@@ -15,6 +15,11 @@ SPECIALIST_DOCUMENT_TYPES: dict[str, frozenset[str]] = {
     "utility_bill": frozenset({"bolletta", "fattura"}),
     "accounting_statement": frozenset({"rendiconto_contabile", "riparto_spese", "preventivo"}),
 }
+SPECIALIST_PIPELINE_FAMILIES = {
+    "utility_bill": "utility_vendor",
+    "accounting_statement": "financial",
+}
+SPECIALIST_CONFIDENCE_THRESHOLD = 0.7
 
 
 def _utcnow() -> datetime:
@@ -53,15 +58,35 @@ def specialist_candidates_for_document_unit(document_unit: DocumentUnit) -> list
     doc_type = document_unit.document_type.code if document_unit.document_type else None
     if not doc_type:
         return []
-    confidence = document_unit.document_type_confidence or 0.0
+    type_confidence = document_unit.document_type_confidence or 0.0
+    segmentation_confidence = document_unit.segmentation_confidence or 0.0
+    if (
+        document_unit.review_status != "auto_accepted"
+        or type_confidence < SPECIALIST_CONFIDENCE_THRESHOLD
+        or segmentation_confidence < SPECIALIST_CONFIDENCE_THRESHOLD
+    ):
+        return []
+    routing_decisions = [
+        decision for decision in document_unit.llm_decisions
+        if decision.decision_type == "pipeline_routing"
+    ]
+    latest_routing = max(routing_decisions, key=lambda decision: decision.created_at) if routing_decisions else None
+    routing_payload = latest_routing.output_payload_json if latest_routing is not None else {}
+    routing_family = routing_payload.get("family")
+    routing_confidence = float(routing_payload.get("confidence") or 0.0)
     return [
         SpecialistCandidate(
             capability=capability,
-            confidence=confidence,
-            rationale=f"LLM document type '{doc_type}' supports capability '{capability}'.",
+            confidence=min(type_confidence, segmentation_confidence, routing_confidence),
+            rationale=(
+                f"LLM document type '{doc_type}' and pipeline family '{routing_family}' "
+                f"support capability '{capability}'."
+            ),
         )
         for capability, document_types in SPECIALIST_DOCUMENT_TYPES.items()
         if doc_type in document_types
+        and routing_family == SPECIALIST_PIPELINE_FAMILIES[capability]
+        and routing_confidence >= SPECIALIST_CONFIDENCE_THRESHOLD
     ]
 
 
@@ -80,6 +105,7 @@ def ensure_specialist_jobs_for_scan_unit(session: Session, scan_unit_id: str | u
             selectinload(DocumentUnit.entities),
             selectinload(DocumentUnit.specialist_jobs),
             selectinload(DocumentUnit.specialist_results),
+            selectinload(DocumentUnit.llm_decisions),
             selectinload(DocumentUnit.scan_unit).selectinload(ScanUnit.ocr_result),
         )
         .order_by(DocumentUnit.ordinal.asc())
