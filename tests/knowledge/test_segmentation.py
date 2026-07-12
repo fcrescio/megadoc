@@ -1,7 +1,7 @@
 """Tests for segmentation service."""
 
 from knowledge_classifier.llm.mock import MockDeterministicProvider
-from knowledge_classifier.schemas import SegmentBoundary, SegmentCandidate, SegmentationResult
+from knowledge_classifier.schemas import PageRepresentation, SegmentBoundary, SegmentCandidate, SegmentationResult
 from knowledge_classifier.services.segmentation import SegmentationService
 from tests.knowledge.fixtures import (
     VERBALE_OCR_STRUCTURED,
@@ -134,3 +134,32 @@ def test_segmentation_windows_cover_long_scans_without_truncation():
         current.end_page + 1 == following.start_page
         for current, following in zip(result.segments, result.segments[1:])
     )
+
+
+def test_segmentation_retries_only_invalid_window_response():
+    class CorrectingProvider:
+        calls = 0
+
+        def chat_with_json(self, messages, response_model, temperature=0.0):
+            self.calls += 1
+            start = 1 if self.calls == 1 else 2
+            return SegmentationResult(
+                segments=[SegmentCandidate(
+                    start_page=start,
+                    end_page=3,
+                    confidence=0.8,
+                    rationale="Corrected coverage",
+                )],
+                overall_confidence=0.8,
+            ), {}
+
+    provider = CorrectingProvider()
+    service = SegmentationService(provider, object())
+
+    result = service._segment_window_with_llm([
+        PageRepresentation(page_number=2, text="two"),
+        PageRepresentation(page_number=3, text="three"),
+    ])
+
+    assert provider.calls == 2
+    assert result.segments[0].start_page == 2

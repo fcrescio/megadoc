@@ -199,17 +199,40 @@ class SegmentationService:
             ChatMessage(role="user", content=prompt),
         ]
         
-        try:
-            result, _ = self.llm.chat_with_json(
-                messages,
-                SegmentationResult,
-                temperature=self.settings.llm_temperature,
-            )
-            self._validate_coverage(result, pages[0].page_number, pages[-1].page_number)
-            return result
-        except Exception:
-            logger.exception("LLM segmentation failed")
-            raise
+        last_error: Exception | None = None
+        for attempt in range(3):
+            try:
+                result, _ = self.llm.chat_with_json(
+                    messages,
+                    SegmentationResult,
+                    temperature=self.settings.llm_temperature,
+                )
+                self._validate_coverage(result, pages[0].page_number, pages[-1].page_number)
+                return result
+            except ValueError as exc:
+                last_error = exc
+                logger.warning(
+                    "Invalid segmentation window %s-%s on attempt %s: %s",
+                    pages[0].page_number,
+                    pages[-1].page_number,
+                    attempt + 1,
+                    exc,
+                )
+                messages.append(ChatMessage(
+                    role="user",
+                    content=(
+                        f"The previous JSON was invalid: {exc}. Return a corrected segmentation "
+                        f"covering every page from {pages[0].page_number} through "
+                        f"{pages[-1].page_number} exactly once, with no gaps or overlaps."
+                    ),
+                ))
+            except Exception:
+                logger.exception("LLM segmentation failed")
+                raise
+        raise ValueError(
+            f"LLM could not produce valid segmentation for pages "
+            f"{pages[0].page_number}-{pages[-1].page_number}: {last_error}"
+        )
 
     @staticmethod
     def _validate_coverage(result: SegmentationResult, start_page: int, end_page: int) -> None:
