@@ -39,10 +39,11 @@ Per ogni documento:
 
 1. Verificare il suggerimento di orientamento e selezionare `Orientamento suggerito verificato`.
 2. Indicare tipo principale, qualita', titolo minimo ed entita' chiave.
-3. Aggiungere le document unit in ordine. Gli intervalli devono coprire ogni pagina esattamente una volta.
-4. Se il documento e' payable o accounting, compilare i campi specialistici mostrati.
-5. Annotare anomalie di scansione o ordine nelle note.
-6. Premere `Completa e avanti`.
+3. Correggere le entita' suggerite scegliendo sempre tipo e valore.
+4. Aggiungere le document unit in ordine. Gli intervalli devono coprire ogni pagina esattamente una volta.
+5. Se una singola document unit e' payable o accounting, compilare lo specialista dentro quella unit. Un PDF misto puo' avere specialisti diversi per unit.
+6. Annotare anomalie di scansione o ordine nelle note.
+7. Premere `Completa e avanti`. L'azione resta bloccata finche' i dati non sono validi.
 
 Scorciatoie:
 

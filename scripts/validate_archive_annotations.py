@@ -32,6 +32,13 @@ def validate_annotations(cases: list[dict[str, object]], payload: dict[str, obje
             errors.append(f"{case_id}: document type missing")
         if not str(annotation.get("title") or "").strip():
             errors.append(f"{case_id}: title missing")
+        entities = annotation.get("entities")
+        if isinstance(entities, list):
+            for entity_index, entity in enumerate(entities, start=1):
+                if not isinstance(entity, dict):
+                    errors.append(f"{case_id}: entity {entity_index} uses legacy untyped format")
+                elif entity.get("entity_type") in {None, "", "unknown"} or not str(entity.get("value") or "").strip():
+                    errors.append(f"{case_id}: entity {entity_index} type/value missing")
         units = annotation.get("document_units")
         if not isinstance(units, list) or not units:
             errors.append(f"{case_id}: document units missing")
@@ -47,22 +54,22 @@ def validate_annotations(cases: list[dict[str, object]], payload: dict[str, obje
                     continue
                 if not str(unit.get("document_type") or "").strip() or not str(unit.get("title") or "").strip():
                     errors.append(f"{case_id}: type/title missing for unit {index}")
+                specialist = unit.get("specialist")
+                if isinstance(specialist, dict) and specialist.get("kind") in specialist_counts:
+                    kind = str(specialist["kind"])
+                    specialist_counts[kind] += 1
+                    required = (
+                        ("issuer", "amount", "due_date")
+                        if kind == "payable"
+                        else ("table_pages", "cell_checks")
+                    )
+                    for field in required:
+                        if not str(specialist.get(field) or "").strip():
+                            errors.append(f"{case_id}: unit {index} {kind} field {field} missing")
                 covered.extend(range(start, end + 1))
                 unit_count += 1
             if sorted(covered) != list(range(1, page_count + 1)):
                 errors.append(f"{case_id}: unit ranges must cover every page exactly once")
-        specialist = annotation.get("specialist")
-        if isinstance(specialist, dict) and specialist.get("kind") in specialist_counts:
-            kind = str(specialist["kind"])
-            specialist_counts[kind] += 1
-            required = (
-                ("issuer", "amount", "due_date")
-                if kind == "payable"
-                else ("table_pages", "cell_checks")
-            )
-            for field in required:
-                if not str(specialist.get(field) or "").strip():
-                    errors.append(f"{case_id}: {kind} field {field} missing")
     questions = payload.get("questions") if isinstance(payload.get("questions"), list) else []
     if len(questions) < 30:
         errors.append(f"questions: expected at least 30, got {len(questions)}")

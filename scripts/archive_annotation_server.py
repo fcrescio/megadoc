@@ -67,6 +67,60 @@ def save_annotations(path: Path, payload: dict[str, object]) -> None:
     os.replace(temporary, path)
 
 
+def normalize_annotations(
+    cases: list[dict[str, object]], payload: dict[str, object]
+) -> dict[str, object]:
+    documents = payload.get("documents") if isinstance(payload.get("documents"), dict) else {}
+    for case in cases:
+        case_id = str(case["case_id"])
+        annotation = documents.get(case_id)
+        if not isinstance(annotation, dict):
+            continue
+        migrated = False
+        entities = annotation.get("entities")
+        if isinstance(entities, list):
+            normalized_entities = []
+            for entity in entities:
+                if isinstance(entity, str):
+                    normalized_entities.append({"entity_type": "unknown", "value": entity})
+                    migrated = True
+                elif isinstance(entity, dict):
+                    normalized_entities.append(entity)
+            annotation["entities"] = normalized_entities
+        units = annotation.get("document_units")
+        if not isinstance(units, list) or not units:
+            units = [{
+                "start_page": 1,
+                "end_page": int(case["pages"]),
+                "document_type": annotation.get("document_type") or "altro",
+                "title": annotation.get("title") or "",
+            }]
+            annotation["document_units"] = units
+            migrated = True
+        legacy_specialist = annotation.get("specialist")
+        for unit in units:
+            if not isinstance(unit, dict) or isinstance(unit.get("specialist"), dict):
+                continue
+            document_type = str(unit.get("document_type") or "")
+            kind = (
+                "payable" if document_type in {"bolletta", "fattura"}
+                else "accounting" if document_type in {"rendiconto_contabile", "riparto_spese", "preventivo"}
+                else "none"
+            )
+            if len(units) == 1 and isinstance(legacy_specialist, dict) and legacy_specialist.get("kind") != "none":
+                unit["specialist"] = dict(legacy_specialist)
+            else:
+                unit["specialist"] = {"kind": kind}
+            migrated = True
+        if "specialist" in annotation:
+            del annotation["specialist"]
+            migrated = True
+        if migrated:
+            annotation["reviewed"] = False
+    payload["documents"] = documents
+    return payload
+
+
 def annotation_progress(cases: list[dict[str, object]], payload: dict[str, object]) -> dict[str, object]:
     documents = payload.get("documents") if isinstance(payload.get("documents"), dict) else {}
     reviewed = 0
@@ -82,11 +136,12 @@ def annotation_progress(cases: list[dict[str, object]], payload: dict[str, objec
         document_units = annotation.get("document_units")
         if isinstance(document_units, list):
             units += len(document_units)
-        specialist = annotation.get("specialist")
-        if isinstance(specialist, dict) and specialist.get("kind") == "payable":
-            payable_cases += 1
-        if isinstance(specialist, dict) and specialist.get("kind") == "accounting":
-            accounting_cases += 1
+            for unit in document_units:
+                specialist = unit.get("specialist") if isinstance(unit, dict) else None
+                if isinstance(specialist, dict) and specialist.get("kind") == "payable":
+                    payable_cases += 1
+                if isinstance(specialist, dict) and specialist.get("kind") == "accounting":
+                    accounting_cases += 1
     questions = payload.get("questions") if isinstance(payload.get("questions"), list) else []
     return {
         "documents_total": len(cases),
@@ -111,7 +166,7 @@ def make_handler(
         def do_GET(self) -> None:  # noqa: N802
             parsed = urlparse(self.path)
             if parsed.path == "/api/state":
-                annotations = load_annotations(output)
+                annotations = normalize_annotations(cases, load_annotations(output))
                 suggestion_payload = (
                     json.loads(suggestions.read_text(encoding="utf-8"))
                     if suggestions.is_file()
