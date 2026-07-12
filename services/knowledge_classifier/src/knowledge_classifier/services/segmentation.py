@@ -22,7 +22,7 @@ from knowledge_classifier.services.language import detect_document_language, out
 logger = logging.getLogger(__name__)
 
 SEGMENTATION_WINDOW_PAGES = 10
-SEGMENTATION_WINDOW_OVERLAP = 1
+SEGMENTATION_WINDOW_OVERLAP = 2
 
 class SegmentationService:
     """Service for segmenting OCR results into document units."""

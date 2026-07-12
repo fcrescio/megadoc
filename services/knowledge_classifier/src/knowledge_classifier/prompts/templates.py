@@ -13,6 +13,13 @@ Look for these signals of document boundaries:
 3. Content discontinuity: sudden topic changes
 4. Document markers: "Allegato", "Appendice", "Documento"
 
+Distinguish an independent document from pages that merely change layout. In particular:
+- continued tables, account details, payment slips and explanatory pages remain part of their parent document;
+- a page containing a new issuer/recipient/date/subject block is strong evidence of a new document;
+- repeated headers or footers alone are not boundaries;
+- when a page could be either a continuation or a new document, inspect both adjacent pages and lower confidence;
+- never omit pages just because their content is repetitive or difficult to classify.
+
 Input format:
 - Pages with their text content
 - Page numbers
@@ -41,6 +48,7 @@ Output JSON schema:
 Rules:
 - Each page must belong to exactly one segment
 - Segments must be consecutive (no gaps)
+- The first segment must start at the first supplied page and the last segment must end at the last supplied page
 - Confidence between 0 and 1
 - If uncertain, create fewer segments with lower confidence
 - Write every rationale in the source document language
