@@ -72,19 +72,20 @@ class MockDeterministicProvider(LLMProvider):
         """Generate mock JSON data matching schema."""
         if schema.__name__ == "SegmentationResult":
             page_numbers = [int(value) for value in re.findall(r"=== Page (\d+) ===", user_text)]
+            first_page = min(page_numbers) if page_numbers else 1
             page_count = max(page_numbers) if page_numbers else 1
             lower_text = user_text.lower()
             if page_count > 1 and "rendiconto" in lower_text and "verbale" in lower_text:
                 return {
                     "segments": [
                         {
-                            "start_page": 1,
-                            "end_page": 1,
+                            "start_page": first_page,
+                            "end_page": first_page,
                             "confidence": 0.86,
                             "rationale": "Mock LLM split at semantic document boundary.",
                         },
                         {
-                            "start_page": 2,
+                            "start_page": first_page + 1,
                             "end_page": page_count,
                             "confidence": 0.86,
                             "rationale": "Mock LLM detected a second document.",
@@ -93,8 +94,8 @@ class MockDeterministicProvider(LLMProvider):
                     "overall_confidence": 0.86,
                     "boundaries": [
                         {
-                            "page_before": 1,
-                            "page_after": 2,
+                            "page_before": first_page,
+                            "page_after": first_page + 1,
                             "confidence": 0.86,
                             "rationale": "Mock semantic boundary.",
                         }
@@ -103,7 +104,7 @@ class MockDeterministicProvider(LLMProvider):
             return {
                 "segments": [
                     {
-                        "start_page": 1,
+                        "start_page": first_page,
                         "end_page": page_count,
                         "confidence": 0.9,
                         "rationale": "Mock LLM single document.",
@@ -111,6 +112,18 @@ class MockDeterministicProvider(LLMProvider):
                 ],
                 "overall_confidence": 0.9,
                 "boundaries": [],
+            }
+
+        if schema.__name__ == "AdjacentBoundaryDecision":
+            lower_text = user_text.lower()
+            parts = re.split(r"page \d+:\n", lower_text)
+            before = parts[-2] if len(parts) >= 3 else ""
+            after = parts[-1] if len(parts) >= 2 else ""
+            boundary = "verbale" in before and "rendiconto" in after
+            return {
+                "is_boundary": boundary,
+                "confidence": 0.86,
+                "rationale": "Mock adjacent-page boundary decision.",
             }
 
         if schema.__name__ == "PipelineRoutingDecision":

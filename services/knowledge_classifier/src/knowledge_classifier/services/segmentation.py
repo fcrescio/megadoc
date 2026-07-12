@@ -5,6 +5,7 @@ import re
 from typing import Any
 
 from sqlalchemy.orm import Session
+from pydantic import BaseModel, Field
 
 from common.application.page_artifacts import build_page_artifacts
 from knowledge_classifier.config import get_settings
@@ -23,6 +24,12 @@ logger = logging.getLogger(__name__)
 
 SEGMENTATION_WINDOW_PAGES = 10
 SEGMENTATION_WINDOW_OVERLAP = 2
+
+
+class AdjacentBoundaryDecision(BaseModel):
+    is_boundary: bool
+    confidence: float = Field(..., ge=0, le=1)
+    rationale: str
 
 class SegmentationService:
     """Service for segmenting OCR results into document units."""
@@ -135,7 +142,7 @@ class SegmentationService:
         windows = self._page_windows(pages)
         results = [self._segment_window_with_llm(window) for window in windows]
         if len(results) == 1:
-            return results[0]
+            return self._adjudicate_adjacent_boundaries(pages, results[0])
 
         boundaries_by_pair: dict[tuple[int, int], SegmentBoundary] = {}
         for result in results:
@@ -172,7 +179,7 @@ class SegmentationService:
             boundaries=boundaries,
         )
         self._validate_coverage(merged, pages[0].page_number, pages[-1].page_number)
-        return merged
+        return self._adjudicate_adjacent_boundaries(pages, merged)
 
     def _page_windows(self, pages: list[PageRepresentation]) -> list[list[PageRepresentation]]:
         if len(pages) <= SEGMENTATION_WINDOW_PAGES:
@@ -273,6 +280,76 @@ class SegmentationService:
             f"LLM could not review segmentation for pages "
             f"{pages[0].page_number}-{pages[-1].page_number}: {last_error}"
         )
+
+    def _adjudicate_adjacent_boundaries(
+        self,
+        pages: list[PageRepresentation],
+        draft: SegmentationResult,
+    ) -> SegmentationResult:
+        draft_boundaries = {(item.page_before, item.page_after) for item in draft.boundaries}
+        decisions: list[tuple[PageRepresentation, PageRepresentation, AdjacentBoundaryDecision]] = []
+        for before, after in zip(pages, pages[1:]):
+            proposed = (before.page_number, after.page_number) in draft_boundaries
+            prompt = (
+                "Decide whether the second page starts a new independent archival document. "
+                "A layout change, continued table, bill detail, payment slip, attachment or repeated header "
+                "is not enough. A new sender/recipient/subject/date block and a semantic reset are strong "
+                "evidence. Judge the pair independently; do not preserve the draft merely for consistency.\n\n"
+                f"DRAFT_BOUNDARY: {proposed}\n"
+                f"PAGE {before.page_number}:\n{before.text[:3000]}\n\n"
+                f"PAGE {after.page_number}:\n{after.text[:3000]}"
+            )
+            decision, _ = self.llm.chat_with_json(
+                [
+                    ChatMessage(role="system", content="You adjudicate one document boundary at a time."),
+                    ChatMessage(role="user", content=prompt),
+                ],
+                AdjacentBoundaryDecision,
+                temperature=self.settings.llm_temperature,
+            )
+            decisions.append((before, after, decision))
+
+        boundaries = [
+            SegmentBoundary(
+                page_before=before.page_number,
+                page_after=after.page_number,
+                confidence=decision.confidence,
+                rationale=decision.rationale,
+            )
+            for before, after, decision in decisions
+            if decision.is_boundary
+        ]
+        segments: list[SegmentCandidate] = []
+        start_page = pages[0].page_number
+        for boundary in boundaries:
+            relevant = [
+                decision.confidence for before, after, decision in decisions
+                if start_page <= before.page_number <= boundary.page_before
+            ]
+            segments.append(SegmentCandidate(
+                start_page=start_page,
+                end_page=boundary.page_before,
+                confidence=min(relevant or [boundary.confidence]),
+                rationale=boundary.rationale,
+            ))
+            start_page = boundary.page_after
+        relevant = [
+            decision.confidence for before, after, decision in decisions
+            if before.page_number >= start_page
+        ]
+        segments.append(SegmentCandidate(
+            start_page=start_page,
+            end_page=pages[-1].page_number,
+            confidence=min(relevant or [draft.overall_confidence]),
+            rationale="Confini adiacenti verificati individualmente dall'LLM.",
+        ))
+        result = SegmentationResult(
+            segments=segments,
+            overall_confidence=min((decision.confidence for _, _, decision in decisions), default=draft.overall_confidence),
+            boundaries=boundaries,
+        )
+        self._validate_coverage(result, pages[0].page_number, pages[-1].page_number)
+        return result
 
     @staticmethod
     def _validate_coverage(result: SegmentationResult, start_page: int, end_page: int) -> None:

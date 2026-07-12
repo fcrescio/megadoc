@@ -2,7 +2,7 @@
 
 from knowledge_classifier.llm.mock import MockDeterministicProvider
 from knowledge_classifier.schemas import PageRepresentation, SegmentBoundary, SegmentCandidate, SegmentationResult
-from knowledge_classifier.services.segmentation import SegmentationService
+from knowledge_classifier.services.segmentation import AdjacentBoundaryDecision, SegmentationService
 from tests.knowledge.fixtures import (
     VERBALE_OCR_STRUCTURED,
     VERBALE_OCR_MARKDOWN,
@@ -84,6 +84,12 @@ def test_segmentation_uses_llm_for_multi_page_boundaries():
 def test_segmentation_windows_cover_long_scans_without_truncation():
     class WindowProvider:
         def chat_with_json(self, messages, response_model, temperature=0.0):
+            if response_model is AdjacentBoundaryDecision:
+                return AdjacentBoundaryDecision(
+                    is_boundary=False,
+                    confidence=0.9,
+                    rationale="Same document",
+                ), {}
             content = messages[-1].content
             page_numbers = [
                 int(line.removeprefix("=== Page ").removesuffix(" ==="))
@@ -141,6 +147,12 @@ def test_segmentation_retries_only_invalid_window_response():
         calls = 0
 
         def chat_with_json(self, messages, response_model, temperature=0.0):
+            if response_model is AdjacentBoundaryDecision:
+                return AdjacentBoundaryDecision(
+                    is_boundary=False,
+                    confidence=0.9,
+                    rationale="Same document",
+                ), {}
             self.calls += 1
             start = 1 if self.calls == 1 else 2
             return SegmentationResult(
