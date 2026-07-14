@@ -234,6 +234,11 @@ def evaluate(annotations: Path, database_url: str, *, accounting_llm: bool = Fal
                     lineage_matches += sum(result["lineage"].values())
                 else:
                     tables = [table for table in extraction.payload.get("tables") or [] if isinstance(table, dict)]
+                    reconciliation = extraction.payload.get("reconciliation")
+                    result["accounting_mode"] = extraction.payload.get("account_extraction_mode")
+                    result["reconciliation_status"] = (
+                        reconciliation.get("status") if isinstance(reconciliation, dict) else None
+                    )
                     expected_pages = {int(page) for page in str(specialist.get("table_pages") or "").split(",") if page.strip().isdigit()}
                     actual_pages = {table.get("page_number") for table in tables if isinstance(table.get("page_number"), int)}
                     result["table_pages"] = {"expected": sorted(expected_pages), "actual": sorted(actual_pages), "matched": expected_pages <= actual_pages}

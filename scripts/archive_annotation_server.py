@@ -99,6 +99,7 @@ def normalize_annotations(
             annotation["document_units"] = units
             migrated = True
         legacy_specialist = annotation.get("specialist")
+        incomplete_structured_specialist = False
         for unit in units:
             if not isinstance(unit, dict) or isinstance(unit.get("specialist"), dict):
                 continue
@@ -150,10 +151,16 @@ def normalize_annotations(
                         start_page=int(unit.get("start_page") or 1),
                         end_page=int(unit.get("end_page") or 1),
                     )
+                checks = specialist.get("checks")
+                if not isinstance(checks, list) or not checks or any(
+                    not isinstance(check, dict) or not str(check.get("expected") or "").strip()
+                    for check in checks
+                ):
+                    incomplete_structured_specialist = True
         if "specialist" in annotation:
             del annotation["specialist"]
             migrated = True
-        if migrated:
+        if migrated or incomplete_structured_specialist:
             annotation["reviewed"] = False
     payload["documents"] = documents
     payload["schema_version"] = 2

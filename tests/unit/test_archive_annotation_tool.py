@@ -154,3 +154,27 @@ def test_specialist_schema_upgrade_preserves_reviewed_status():
 
     assert document["reviewed"] is True
     assert document["document_units"][0]["specialist"]["checks"][0]["expected"] == "10,00"
+
+
+def test_specialist_schema_upgrade_reopens_incomplete_accounting_checks():
+    payload = empty_annotations()
+    payload["documents"] = {
+        "case-1": {
+            "reviewed": True,
+            "entities": [],
+            "document_units": [{
+                "start_page": 1,
+                "end_page": 1,
+                "document_type": "rendiconto_contabile",
+                "specialist": {
+                    "kind": "accounting",
+                    "table_pages": "1",
+                    "checks": [{"page": 1, "row": "Totale", "column": "Importo", "expected": ""}],
+                },
+            }],
+        }
+    }
+
+    document = normalize_annotations([_case(pages=1)], payload)["documents"]["case-1"]
+
+    assert document["reviewed"] is False
