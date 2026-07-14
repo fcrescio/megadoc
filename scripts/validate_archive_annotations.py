@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from scripts.archive_annotation_server import load_annotations, load_cases
+from scripts.archive_annotation_server import load_annotations, load_cases, normalize_page_spec
 
 
 def validate_annotations(cases: list[dict[str, object]], payload: dict[str, object]) -> dict[str, object]:
@@ -59,13 +59,33 @@ def validate_annotations(cases: list[dict[str, object]], payload: dict[str, obje
                     kind = str(specialist["kind"])
                     specialist_counts[kind] += 1
                     required = (
-                        ("issuer", "amount", "due_date")
-                        if kind == "payable"
-                        else ("table_pages", "cell_checks")
+                        ("payable_kind", "issuer", "amount", "currency", "due_date", "payment_reference")
+                        if kind == "payable" else ("table_pages",)
                     )
                     for field in required:
                         if not str(specialist.get(field) or "").strip():
                             errors.append(f"{case_id}: unit {index} {kind} field {field} missing")
+                    if kind == "accounting":
+                        table_pages = normalize_page_spec(
+                            str(specialist.get("table_pages") or ""),
+                            start_page=start,
+                            end_page=end,
+                        )
+                        if not table_pages:
+                            errors.append(f"{case_id}: unit {index} accounting table pages invalid")
+                        checks = specialist.get("checks")
+                        if not isinstance(checks, list) or not checks:
+                            errors.append(f"{case_id}: unit {index} accounting structured checks missing")
+                        else:
+                            for check_index, check in enumerate(checks, start=1):
+                                if not isinstance(check, dict):
+                                    errors.append(f"{case_id}: unit {index} check {check_index} invalid")
+                                    continue
+                                page = check.get("page")
+                                if not isinstance(page, int) or not start <= page <= end:
+                                    errors.append(f"{case_id}: unit {index} check {check_index} page invalid")
+                                if not str(check.get("expected") or "").strip():
+                                    errors.append(f"{case_id}: unit {index} check {check_index} expected value missing")
                 covered.extend(range(start, end + 1))
                 unit_count += 1
             if sorted(covered) != list(range(1, page_count + 1)):

@@ -36,6 +36,7 @@ def process_utility_bill(
         _extract_code_near(text, ["rif.bolletta", "riferimento fattura", "rif. bolletta", "numero fattura"]),
         entity_map.get("numero_documento", []),
     )
+    payment_reference = _extract_payment_reference(text)
     contract_code = _extract_code_near(text, ["numero contratto", "numerocontratto"])
     supply_code = _extract_code_near(text, ["pod", "pdr", "numero cliente"])
     billing_period = _extract_period(text)
@@ -95,7 +96,7 @@ def process_utility_bill(
         "total_amount": total_amount,
         "currency": "EUR" if total_amount is not None else None,
         "document_number": document_number,
-        "payment_reference": document_number or supply_code,
+        "payment_reference": payment_reference or document_number or supply_code,
         "contract_code": contract_code,
         "pod_pdr_or_supply_code": supply_code,
         "supply_reference": header_reference,
@@ -187,6 +188,10 @@ def _extract_total_amount(text: str) -> float | None:
     strict_patterns = [
         r"Totale bolletta:?\s*(?:\n+\s*)?(-?\d{1,3}(?:\.\d{3})*(?:,\d{2})?)",
         r"Quanto devo pagare\??\s*(?:\n+\s*)?(-?\d{1,3}(?:\.\d{3})*(?:,\d{2})?)",
+        r"Totale da pagare(?: per questa fattura)?:?[^\d-]{0,40}(-?\d{1,3}(?:\.\d{3})*(?:,\d{2})?)",
+        r"Totale fattura salvo conguaglio\s*(?:Euro|€)?\s*(-?\d{1,3}(?:\.\d{3})*(?:,\d{2})?)",
+        r"Importo:?[^\d-]{0,40}(-?\d{1,3}(?:\.\d{3})*(?:,\d{2})?)\s*(?:Euro|€)",
+        r"(?m)^\s*di\s+Euro\s+(-?\d{1,3}(?:\.\d{3})*(?:,\d{2})?)",
     ]
     for pattern in strict_patterns:
         value = _regex_group(text, pattern)
@@ -215,10 +220,17 @@ def _extract_code_near(text: str, anchors: list[str]) -> str | None:
     return None
 
 
+def _extract_payment_reference(text: str) -> str | None:
+    values = re.findall(r"(?<!\d)(\d{18,24})(?!\d)", text)
+    if not values:
+        return None
+    return Counter(values).most_common(1)[0][0]
+
+
 def _extract_account_holder(text: str) -> str | None:
     patterns = [
         r"Contratto intestato a\s*([A-ZÀ-ÖØ-Ý' ]{6,})",
-        r"eseguitoda:?\s*([A-ZÀ-ÖØ-Ý' ]{6,})",
+        r"eseguit[oa]\s*da:?\s*([A-ZÀ-ÖØ-Ý' ]{6,})",
     ]
     for pattern in patterns:
         match = re.search(pattern, text, re.IGNORECASE)

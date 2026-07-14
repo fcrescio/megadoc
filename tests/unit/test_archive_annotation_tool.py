@@ -5,6 +5,8 @@ from scripts.archive_annotation_server import (
     empty_annotations,
     load_annotations,
     normalize_annotations,
+    normalize_page_spec,
+    parse_legacy_accounting_checks,
     save_annotations,
 )
 from scripts.validate_archive_annotations import validate_annotations
@@ -79,9 +81,13 @@ def test_strict_validator_accepts_complete_fixture():
     for index, case in enumerate(cases, start=1):
         kind = "payable" if index <= 10 else "accounting"
         specialist = (
-            {"kind": kind, "issuer": "Issuer", "amount": "10", "due_date": "2026-01-01"}
+            {"kind": kind, "payable_kind": "invoice", "issuer": "Issuer", "amount": "10",
+             "currency": "EUR", "due_date": "2026-01-01", "payment_reference": "INV-1"}
             if kind == "payable"
-            else {"kind": kind, "table_pages": "1-2", "cell_checks": "p.1 | total | 10"}
+            else {"kind": kind, "table_pages": "1-2", "checks": [{
+                "page": 1, "table": "Rendiconto", "row": "Totale", "column": "Importo",
+                "expected": "10", "comparison": "amount",
+            }]}
         )
         payload["documents"][case["case_id"]] = {
             "reviewed": True,
@@ -105,3 +111,46 @@ def test_strict_validator_accepts_complete_fixture():
     report = validate_annotations(cases, payload)
 
     assert report["valid"], report
+
+
+def test_accounting_legacy_checks_are_structured_and_relative_pages_become_absolute():
+    checks = parse_legacy_accounting_checks(
+        "pg. 1 | Situazione contabile | Saldo | Importo | 10,50",
+        start_page=16,
+        end_page=16,
+    )
+
+    assert checks == [{
+        "page": 16,
+        "table": "Situazione contabile",
+        "row": "Saldo",
+        "column": "Importo",
+        "expected": "10,50",
+        "comparison": "amount",
+    }]
+    assert normalize_page_spec("1", start_page=16, end_page=16) == [16]
+
+
+def test_specialist_schema_upgrade_preserves_reviewed_status():
+    payload = empty_annotations()
+    payload["documents"] = {
+        "case-1": {
+            "reviewed": True,
+            "entities": [],
+            "document_units": [{
+                "start_page": 1,
+                "end_page": 2,
+                "document_type": "rendiconto_contabile",
+                "specialist": {
+                    "kind": "accounting",
+                    "table_pages": "1",
+                    "cell_checks": "p.1 | Rendiconto | Totale | Importo | 10,00",
+                },
+            }],
+        }
+    }
+
+    document = normalize_annotations([_case()], payload)["documents"]["case-1"]
+
+    assert document["reviewed"] is True
+    assert document["document_units"][0]["specialist"]["checks"][0]["expected"] == "10,00"

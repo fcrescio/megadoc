@@ -7,6 +7,7 @@ import json
 import mimetypes
 import os
 import tempfile
+from decimal import Decimal, InvalidOperation
 from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -39,7 +40,7 @@ def load_cases(manifest: Path) -> list[dict[str, object]]:
 
 def empty_annotations() -> dict[str, object]:
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "updated_at": None,
         "documents": {},
         "questions": [],
@@ -56,7 +57,7 @@ def load_annotations(path: Path) -> dict[str, object]:
 
 
 def save_annotations(path: Path, payload: dict[str, object]) -> None:
-    payload = {**payload, "schema_version": 1, "updated_at": datetime.now(timezone.utc).isoformat()}
+    payload = {**payload, "schema_version": 2, "updated_at": datetime.now(timezone.utc).isoformat()}
     path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(
         mode="w", encoding="utf-8", dir=path.parent, prefix=f".{path.name}.", delete=False
@@ -112,13 +113,102 @@ def normalize_annotations(
             else:
                 unit["specialist"] = {"kind": kind}
             migrated = True
+        for unit in units:
+            if not isinstance(unit, dict):
+                continue
+            specialist = unit.get("specialist")
+            if not isinstance(specialist, dict):
+                continue
+            if specialist.get("kind") == "payable":
+                defaults = {
+                    "payable_kind": "utility_bill" if unit.get("document_type") == "bolletta" else "invoice",
+                    "currency": "EUR",
+                    "issue_date": "",
+                    "subject": specialist.get("subject") or "",
+                    "payment_status": "unknown",
+                }
+                for key, value in defaults.items():
+                    if key not in specialist:
+                        specialist[key] = value
+            if specialist.get("kind") == "accounting":
+                if "statement_type" not in specialist:
+                    specialist["statement_type"] = "unknown"
+                if "period_from" not in specialist:
+                    specialist["period_from"] = ""
+                    specialist["period_to"] = ""
+                table_pages = normalize_page_spec(
+                    str(specialist.get("table_pages") or ""),
+                    start_page=int(unit.get("start_page") or 1),
+                    end_page=int(unit.get("end_page") or 1),
+                )
+                normalized_page_spec = ",".join(str(page) for page in table_pages)
+                if normalized_page_spec and normalized_page_spec != specialist.get("table_pages"):
+                    specialist["table_pages"] = normalized_page_spec
+                if not isinstance(specialist.get("checks"), list):
+                    specialist["checks"] = parse_legacy_accounting_checks(
+                        str(specialist.get("cell_checks") or ""),
+                        start_page=int(unit.get("start_page") or 1),
+                        end_page=int(unit.get("end_page") or 1),
+                    )
         if "specialist" in annotation:
             del annotation["specialist"]
             migrated = True
         if migrated:
             annotation["reviewed"] = False
     payload["documents"] = documents
+    payload["schema_version"] = 2
     return payload
+
+
+def normalize_page_spec(value: str, *, start_page: int, end_page: int) -> list[int]:
+    pages: list[int] = []
+    for token in value.replace(";", ",").split(","):
+        token = token.strip().lower().removeprefix("pg.").removeprefix("p.").strip()
+        if not token:
+            continue
+        try:
+            if "-" in token:
+                left, right = token.split("-", 1)
+                candidates = list(range(int(left), int(right) + 1))
+            else:
+                candidates = [int(token)]
+        except ValueError:
+            continue
+        for page in candidates:
+            if not start_page <= page <= end_page and 1 <= page <= end_page - start_page + 1:
+                page = start_page + page - 1
+            if start_page <= page <= end_page and page not in pages:
+                pages.append(page)
+    return sorted(pages)
+
+
+def parse_legacy_accounting_checks(
+    value: str, *, start_page: int, end_page: int
+) -> list[dict[str, object]]:
+    checks: list[dict[str, object]] = []
+    for line in value.splitlines():
+        parts = [part.strip() for part in line.split("|")]
+        if len(parts) < 3:
+            continue
+        page_candidates = normalize_page_spec(parts[0], start_page=start_page, end_page=end_page)
+        if not page_candidates:
+            continue
+        expected = parts[-1]
+        try:
+            Decimal(expected.replace(".", "").replace(",", ".") if "," in expected else expected)
+            comparison = "amount"
+        except InvalidOperation:
+            comparison = "exact"
+        middle = parts[1:-1]
+        checks.append({
+            "page": page_candidates[0],
+            "table": middle[0] if middle else "",
+            "row": middle[1] if len(middle) > 1 else "",
+            "column": middle[2] if len(middle) > 2 else "",
+            "expected": expected,
+            "comparison": comparison,
+        })
+    return checks
 
 
 def annotation_progress(cases: list[dict[str, object]], payload: dict[str, object]) -> dict[str, object]:

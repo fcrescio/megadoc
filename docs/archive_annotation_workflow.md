@@ -40,7 +40,7 @@ Per ogni documento:
 1. Verificare il suggerimento di orientamento e selezionare `Orientamento suggerito verificato`.
 2. Indicare tipo principale, qualita', titolo minimo ed entita' chiave.
 3. Correggere le entita' suggerite scegliendo sempre tipo e valore.
-4. Aggiungere le document unit in ordine. Gli intervalli devono coprire ogni pagina esattamente una volta.
+4. Aggiungere le document unit in ordine. Una unit rappresenta un documento logico completo: includere copertina, bollettino, dettagli e allegati necessari a interpretarlo. Gli intervalli devono coprire ogni pagina esattamente una volta.
 5. Se una singola document unit e' payable o accounting, compilare lo specialista dentro quella unit. Un PDF misto puo' avere specialisti diversi per unit.
 6. Annotare anomalie di scansione o ordine nelle note.
 7. Premere `Completa e avanti`. L'azione resta bloccata finche' i dati non sono validi.
@@ -50,6 +50,10 @@ Scorciatoie:
 - freccia destra/sinistra: documento successivo/precedente, quando il focus non e' in un campo;
 - `Ctrl+S` o `Cmd+S`: salvataggio immediato;
 - campo pagina sopra il PDF: navigazione diretta.
+
+Le coordinate annotate sono sempre quelle del PDF originale mostrato nel viewer. I runner traducono queste coordinate nell'ordine OCR normalizzato quando il preprocessore ha invertito le pagine.
+
+Per i payable annotare almeno tipo, emittente, destinatario, importo, valuta, scadenza e riferimento. Per l'accounting indicare le pagine con tabelle e almeno un controllo strutturato con pagina, identita' di riga, colonna e valore atteso. I campi legacy restano visibili solo per facilitare la migrazione.
 
 Nel tab `Domande`, aggiungere almeno 30 domande archivistiche. Una domanda rispondibile richiede risposta attesa ed evidenza nel formato:
 
