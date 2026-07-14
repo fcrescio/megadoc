@@ -123,6 +123,19 @@ Periodo: 01/07/2022 - 30/06/2023
     assert amounts["Ascensore / mill."] == 0.0
 
 
+def test_accounting_statement_normalizes_us_formatted_ocr_amounts():
+    text = """
+| Data | Causale | Dare | Avere | Saldo |
+| --- | --- | ---: | ---: | ---: |
+| 10 NOVEMBRE 2008 | CHIUSURA DEL CONTO | 4,344.71 | 1,526.00 | 2,818.71 |
+"""
+
+    result, _ = process_accounting_statement(_document_unit(), text, "fixture:us-ocr")
+
+    amounts = result["tables"][0]["rows"][0]["normalized_amounts"]
+    assert amounts == {"Dare": 4344.71, "Avere": 1526.0, "Saldo": 2818.71}
+
+
 def test_accounting_statement_scopes_period_and_role_to_each_section():
     text = """
 Consuntivo Ripartizioni per unita

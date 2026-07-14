@@ -1284,12 +1284,15 @@ def _parse_amount(value: str | None) -> float | None:
     # Simple format: 1234,56 (comma=decimal)
     # OCR error: 1234.56 (dot used instead of comma for decimal)
     italian_pattern = r"-?\d{1,3}(?:\.\d{3})*(?:,\d+)?"
+    us_pattern = r"-?\d{1,3}(?:,\d{3})+(?:\.\d+)?"
     simple_pattern = r"-?\d+(?:,\d+)?"
     dot_decimal_pattern = r"-?\d+\.\d{1,2}"
 
     if re.fullmatch(italian_pattern, compact):
         # Remove thousands separators (dots), replace decimal comma with dot
         normalized = compact.replace(".", "").replace(",", ".")
+    elif re.fullmatch(us_pattern, compact):
+        normalized = compact.replace(",", "")
     elif re.fullmatch(simple_pattern, compact):
         # Replace decimal comma with dot
         normalized = compact.replace(",", ".")
