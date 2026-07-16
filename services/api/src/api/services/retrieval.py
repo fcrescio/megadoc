@@ -129,14 +129,14 @@ class RetrievalService:
     def _normalize_lexical(payload: dict[str, Any]) -> list[dict[str, Any]]:
         return [
             {
-                "source_type": "ocr_page",
-                "source_id": None,
+                "source_type": hit.get("source_type") or "ocr_page",
+                "source_id": hit.get("source_id"),
                 "document_id": hit.get("document_id"),
                 "document_unit_id": hit.get("document_unit_id"),
-                "page_from": hit.get("page_number"),
-                "page_to": hit.get("page_number"),
+                "page_from": hit.get("page_from", hit.get("page_number")),
+                "page_to": hit.get("page_to", hit.get("page_number")),
                 "snippet": hit.get("snippet"),
-                "metadata": {"original_filename": hit.get("original_filename")},
+                "metadata": hit.get("metadata") or {"original_filename": hit.get("original_filename")},
                 "channel_score": hit.get("score"),
             }
             for hit in payload.get("hits", [])

@@ -3260,6 +3260,73 @@ def _agent_semantic_search(
     }
 
 
+def _agent_lexical_index_search(
+    db: Session,
+    query: str,
+    *,
+    limit: int,
+    document_id: str | None = None,
+) -> dict[str, Any]:
+    if not query.strip():
+        return {"query": query, "hits": [], "warning": "query is empty"}
+    provider = _embedding_provider()
+    terms = [term for term in re.findall(r"[\w]+", query.lower()) if len(term) >= 3]
+    if not terms:
+        return {"query": query, "hits": [], "warning": "query has no searchable terms"}
+    ts_query = " | ".join(f"{term}:*" for term in terms)
+    document_filter = "AND document_id = CAST(:document_id AS uuid)" if document_id else ""
+    rows = db.execute(
+        text(f"""
+            SELECT
+                source_type,
+                source_id::text AS source_id,
+                document_id::text AS document_id,
+                document_unit_id::text AS document_unit_id,
+                page_from,
+                page_to,
+                left(text, 900) AS snippet,
+                metadata_json,
+                greatest(
+                    ts_rank_cd(to_tsvector('simple', text), to_tsquery('simple', :ts_query)),
+                    similarity(text, :query)
+                ) AS score
+            FROM knowledge_search_chunks
+            WHERE embedding_model = :embedding_model
+              {document_filter}
+              AND (
+                  to_tsvector('simple', text) @@ to_tsquery('simple', :ts_query)
+                  OR text % :query
+              )
+            ORDER BY score DESC, page_from NULLS LAST
+            LIMIT :limit
+        """),
+        {
+            "query": query.strip(),
+            "ts_query": ts_query,
+            "embedding_model": provider.model_name,
+            "document_id": document_id,
+            "limit": limit,
+        },
+    ).mappings().all()
+    return {
+        "query": query,
+        "hits": [
+            {
+                "source_type": row["source_type"],
+                "source_id": row["source_id"],
+                "document_id": row["document_id"],
+                "document_unit_id": row["document_unit_id"],
+                "page_from": row["page_from"],
+                "page_to": row["page_to"],
+                "snippet": row["snippet"],
+                "metadata": row["metadata_json"],
+                "score": float(row["score"]),
+            }
+            for row in rows
+        ],
+    }
+
+
 def _knowledge_search_index_stats(db: Session) -> KnowledgeSearchIndexStats:
     active_model = _embedding_provider().model_name
     total = int(db.execute(
@@ -3365,16 +3432,24 @@ def _index_knowledge_search_chunks(
     batch_size = 12
     for offset in range(0, len(chunks), batch_size):
         batch = chunks[offset : offset + batch_size]
-        try:
-            embeddings = provider.embed([chunk["text"] for chunk in batch])
-        except Exception:
-            db.rollback()
-            raise
+        embeddings = None
+        for attempt, delay in enumerate((0, 5, 15), start=1):
+            if delay:
+                time.sleep(delay)
+            try:
+                embeddings = provider.embed([chunk["text"] for chunk in batch])
+                break
+            except Exception:
+                if attempt == 3:
+                    db.rollback()
+                    raise
+        if embeddings is None:
+            raise RuntimeError("Embedding provider returned no batch")
         for chunk, embedding in zip(batch, embeddings, strict=False):
             if not embedding:
                 chunks_skipped += 1
                 continue
-            db.execute(
+            insert_result = db.execute(
                 text(
                     """
                     INSERT INTO knowledge_search_chunks (
@@ -3423,7 +3498,10 @@ def _index_knowledge_search_chunks(
                     "embedding_model": provider.model_name,
                 },
             )
-            chunks_indexed += 1
+            if insert_result.rowcount:
+                chunks_indexed += 1
+            else:
+                chunks_skipped += 1
     return chunks_indexed, chunks_skipped
 
 
@@ -3536,21 +3614,25 @@ def _collect_knowledge_search_chunks(
             if not page_text:
                 continue
             unit = unit_by_document_page.get((str(ocr.document_id), page_number))
-            chunks.append(
-                _make_search_chunk(
-                    source_type="ocr_page",
-                    source_id=str(ocr.id),
-                    document_id=str(ocr.document_id),
-                    document_unit_id=str(unit.id) if unit else None,
-                    page_from=page_number,
-                    page_to=page_number,
-                    text_value=page_text[:600],
-                    metadata={
-                        "page_number": page_number,
-                        "document_unit_title": unit.title if unit else None,
-                    },
+            page_chunks = _split_search_text(page_text)
+            for chunk_index, page_chunk in enumerate(page_chunks):
+                chunks.append(
+                    _make_search_chunk(
+                        source_type="ocr_page",
+                        source_id=str(ocr.id),
+                        document_id=str(ocr.document_id),
+                        document_unit_id=str(unit.id) if unit else None,
+                        page_from=page_number,
+                        page_to=page_number,
+                        text_value=page_chunk,
+                        metadata={
+                            "page_number": page_number,
+                            "chunk_index": chunk_index,
+                            "page_chunk_count": len(page_chunks),
+                            "document_unit_title": unit.title if unit else None,
+                        },
+                    )
                 )
-            )
 
     latest_specialist_by_unit_type: dict[tuple[uuid.UUID, str], SpecialistResult] = {}
     specialist_results = db.execute(
@@ -3683,8 +3765,13 @@ def _make_search_chunk(
     text_value: str,
     metadata: dict[str, Any],
 ) -> dict[str, Any]:
-    normalized_text = re.sub(r"\s+", " ", text_value).strip()[:600]
-    text_hash = hashlib.sha256(f"{source_type}\n{source_id}\n{normalized_text}".encode("utf-8")).hexdigest()
+    normalized_text = re.sub(r"\s+", " ", text_value).strip()[:400]
+    text_hash = hashlib.sha256(
+        (
+            f"{source_type}\n{source_id}\n{document_id}\n{document_unit_id}\n"
+            f"{page_from}\n{page_to}\n{normalized_text}"
+        ).encode("utf-8")
+    ).hexdigest()
     return {
         "source_type": source_type,
         "source_id": source_id,
@@ -3696,6 +3783,25 @@ def _make_search_chunk(
         "text_hash": text_hash,
         "metadata": metadata,
     }
+
+
+def _split_search_text(text_value: str, *, max_chars: int = 400, overlap: int = 60) -> list[str]:
+    normalized = re.sub(r"\s+", " ", text_value).strip()
+    if len(normalized) <= max_chars:
+        return [normalized] if normalized else []
+    chunks: list[str] = []
+    start = 0
+    while start < len(normalized):
+        end = min(len(normalized), start + max_chars)
+        if end < len(normalized):
+            boundary = normalized.rfind(" ", start + max_chars // 2, end)
+            if boundary > start:
+                end = boundary
+        chunks.append(normalized[start:end].strip())
+        if end >= len(normalized):
+            break
+        start = max(start + 1, end - overlap)
+    return [chunk for chunk in chunks if chunk]
 
 
 def _vector_literal(values: list[float]) -> str:
@@ -4108,8 +4214,11 @@ def _agent_retrieve_evidence(
     limit: int,
 ) -> dict[str, Any]:
     def lexical(search_query: str, search_limit: int) -> dict[str, Any]:
-        return _agent_search_document_text(
-            db, document_id, search_query, limit=search_limit
+        return _agent_lexical_index_search(
+            db,
+            search_query,
+            document_id=document_id,
+            limit=search_limit,
         )
 
     def semantic(search_query: str, search_limit: int) -> dict[str, Any]:

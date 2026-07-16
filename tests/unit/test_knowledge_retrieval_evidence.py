@@ -2,6 +2,7 @@ from api.routers import knowledge
 from api.routers.knowledge import (
     _KnowledgeAgentAction,
     _run_knowledge_agent_tool,
+    _split_search_text,
     _specialist_search_evidence,
 )
 from common.db.models import DocumentUnit, SpecialistResult
@@ -105,3 +106,13 @@ def test_accounting_agent_tool_delegates_to_accounting_query_engine(monkeypatch)
     assert captured["db"] is db
     assert captured["payload"].subject == "Bonacci"
     assert captured["payload"].period_b_to.isoformat() == "2023-12-31"
+
+
+def test_search_text_split_covers_tail_with_bounded_chunks():
+    text = " ".join(f"token-{index}" for index in range(300))
+
+    chunks = _split_search_text(text, max_chars=120, overlap=20)
+
+    assert len(chunks) > 2
+    assert all(len(chunk) <= 120 for chunk in chunks)
+    assert "token-299" in chunks[-1]
