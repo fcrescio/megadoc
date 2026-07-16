@@ -277,6 +277,10 @@ class KnowledgeSearchIndexStats(BaseModel):
     total_chunks: int
     by_source_type: dict[str, int] = Field(default_factory=dict)
     embedding_models: list[str] = Field(default_factory=list)
+    active_model: str
+    indexed_at: datetime | None = None
+    source_updated_at: datetime | None = None
+    is_stale: bool
 
 
 class KnowledgeSearchIndexRebuildResponse(KnowledgeSearchIndexStats):
@@ -2716,6 +2720,29 @@ def rebuild_knowledge_search_index(
         ) from exc
 
 
+@router.post(
+    "/agent/search-index/documents/{document_id}/refresh",
+    response_model=KnowledgeSearchIndexRebuildResponse,
+)
+def refresh_document_search_index(
+    document_id: str,
+    db: Session = Depends(get_db_session),
+):
+    try:
+        parsed_id = uuid.UUID(document_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid document ID") from exc
+    if db.get(Document, parsed_id) is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    try:
+        return _refresh_document_search_index(db, parsed_id)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Embedding backend unavailable or incompatible: {exc}",
+        ) from exc
+
+
 def _validate_knowledge_agent_final(
     action: _KnowledgeAgentAction,
     trace: list[KnowledgeAgentTraceStep],
@@ -3234,9 +3261,11 @@ def _agent_semantic_search(
 
 
 def _knowledge_search_index_stats(db: Session) -> KnowledgeSearchIndexStats:
-    total = int(
-        db.execute(text("SELECT count(*) FROM knowledge_search_chunks")).scalar_one()
-    )
+    active_model = _embedding_provider().model_name
+    total = int(db.execute(
+        text("SELECT count(*) FROM knowledge_search_chunks WHERE embedding_model = :model"),
+        {"model": active_model},
+    ).scalar_one())
     by_source = {
         row["source_type"]: int(row["count"])
         for row in db.execute(
@@ -3244,10 +3273,12 @@ def _knowledge_search_index_stats(db: Session) -> KnowledgeSearchIndexStats:
                 """
                 SELECT source_type, count(*) AS count
                 FROM knowledge_search_chunks
+                WHERE embedding_model = :model
                 GROUP BY source_type
                 ORDER BY source_type
                 """
-            )
+            ),
+            {"model": active_model},
         ).mappings()
     }
     models = [
@@ -3262,13 +3293,73 @@ def _knowledge_search_index_stats(db: Session) -> KnowledgeSearchIndexStats:
             )
         ).mappings()
     ]
-    return KnowledgeSearchIndexStats(total_chunks=total, by_source_type=by_source, embedding_models=models)
+    indexed_at = db.execute(
+        text("SELECT max(created_at) FROM knowledge_search_chunks WHERE embedding_model = :model"),
+        {"model": active_model},
+    ).scalar_one()
+    source_updated_at = db.execute(text("""
+        SELECT max(changed_at) FROM (
+            SELECT max(created_at) AS changed_at FROM ocr_results
+            UNION ALL SELECT max(COALESCE(updated_at, created_at)) FROM document_units
+            UNION ALL SELECT max(COALESCE(updated_at, created_at)) FROM specialist_results
+            UNION ALL SELECT max(COALESCE(updated_at, created_at)) FROM topics
+        ) AS source_changes
+    """)).scalar_one()
+    return KnowledgeSearchIndexStats(
+        total_chunks=total,
+        by_source_type=by_source,
+        embedding_models=models,
+        active_model=active_model,
+        indexed_at=indexed_at,
+        source_updated_at=source_updated_at,
+        is_stale=source_updated_at is not None and (indexed_at is None or source_updated_at > indexed_at),
+    )
 
 
 def _rebuild_knowledge_search_index(db: Session) -> KnowledgeSearchIndexRebuildResponse:
     provider = _embedding_provider()
     chunks = _collect_knowledge_search_chunks(db)
     db.execute(text("DELETE FROM knowledge_search_chunks WHERE embedding_model = :model"), {"model": provider.model_name})
+    chunks_indexed, chunks_skipped = _index_knowledge_search_chunks(db, provider, chunks)
+    db.commit()
+    stats = _knowledge_search_index_stats(db)
+    return KnowledgeSearchIndexRebuildResponse(
+        status="rebuilt",
+        chunks_indexed=chunks_indexed,
+        chunks_skipped=chunks_skipped,
+        **stats.model_dump(),
+    )
+
+
+def _refresh_document_search_index(
+    db: Session,
+    document_id: uuid.UUID,
+) -> KnowledgeSearchIndexRebuildResponse:
+    provider = _embedding_provider()
+    chunks = _collect_knowledge_search_chunks(db, document_id=document_id)
+    db.execute(
+        text("""
+            DELETE FROM knowledge_search_chunks
+            WHERE embedding_model = :model AND document_id = :document_id
+        """),
+        {"model": provider.model_name, "document_id": document_id},
+    )
+    chunks_indexed, chunks_skipped = _index_knowledge_search_chunks(db, provider, chunks)
+    db.commit()
+    stats = _knowledge_search_index_stats(db)
+    return KnowledgeSearchIndexRebuildResponse(
+        status="document_refreshed",
+        chunks_indexed=chunks_indexed,
+        chunks_skipped=chunks_skipped,
+        **stats.model_dump(),
+    )
+
+
+def _index_knowledge_search_chunks(
+    db: Session,
+    provider: OpenAICompatibleProvider,
+    chunks: list[dict[str, Any]],
+) -> tuple[int, int]:
     chunks_indexed = 0
     chunks_skipped = 0
     batch_size = 12
@@ -3333,19 +3424,15 @@ def _rebuild_knowledge_search_index(db: Session) -> KnowledgeSearchIndexRebuildR
                 },
             )
             chunks_indexed += 1
-    db.commit()
-    stats = _knowledge_search_index_stats(db)
-    return KnowledgeSearchIndexRebuildResponse(
-        status="rebuilt",
-        chunks_indexed=chunks_indexed,
-        chunks_skipped=chunks_skipped,
-        **stats.model_dump(),
-    )
+    return chunks_indexed, chunks_skipped
 
 
-def _collect_knowledge_search_chunks(db: Session) -> list[dict[str, Any]]:
+def _collect_knowledge_search_chunks(
+    db: Session,
+    document_id: uuid.UUID | None = None,
+) -> list[dict[str, Any]]:
     chunks: list[dict[str, Any]] = []
-    topics = db.execute(
+    topics = [] if document_id else db.execute(
         select(Topic)
         .where(Topic.is_active.is_(True))
         .options(selectinload(Topic.aliases))
@@ -3378,7 +3465,7 @@ def _collect_knowledge_search_chunks(db: Session) -> list[dict[str, Any]]:
             )
         )
 
-    units = db.execute(
+    units_query = (
         select(DocumentUnit)
         .options(
             selectinload(DocumentUnit.scan_unit).selectinload(ScanUnit.document),
@@ -3386,7 +3473,12 @@ def _collect_knowledge_search_chunks(db: Session) -> list[dict[str, Any]]:
             selectinload(DocumentUnit.topic_assignments).selectinload(DocumentUnitTopicAssignment.topic),
         )
         .order_by(DocumentUnit.created_at.asc())
-    ).scalars().all()
+    )
+    if document_id:
+        units_query = units_query.join(DocumentUnit.scan_unit).where(
+            ScanUnit.source_document_id == document_id
+        )
+    units = db.execute(units_query).scalars().unique().all()
     for unit in units:
         document = unit.scan_unit.document if unit.scan_unit else None
         topic_titles = [
@@ -3425,7 +3517,10 @@ def _collect_knowledge_search_chunks(db: Session) -> list[dict[str, Any]]:
         )
 
     latest_ocr_by_document: dict[uuid.UUID, OCRResult] = {}
-    for ocr in db.execute(select(OCRResult).order_by(OCRResult.created_at.asc())).scalars().all():
+    ocr_query = select(OCRResult).order_by(OCRResult.created_at.asc())
+    if document_id:
+        ocr_query = ocr_query.where(OCRResult.document_id == document_id)
+    for ocr in db.execute(ocr_query).scalars().all():
         latest_ocr_by_document[ocr.document_id] = ocr
     unit_by_document_page: dict[tuple[str, int], DocumentUnit] = {}
     for unit in units:
