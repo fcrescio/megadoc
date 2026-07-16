@@ -21,6 +21,7 @@ celery_app.conf.update(
     timezone="UTC",
     enable_utc=True,
     task_routes={
+        "knowledge_worker.tasks.refresh_document_search_index_task": {"queue": "search_index"},
         "knowledge_worker.tasks.*": {"queue": "knowledge"},
     },
 )

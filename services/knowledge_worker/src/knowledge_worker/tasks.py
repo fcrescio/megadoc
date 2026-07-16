@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from common.application.knowledge import has_active_ingestion_jobs
 from common.application.specialists import ensure_specialist_jobs_for_scan_unit
-from common.db.models import KnowledgeJob
+from common.db.models import KnowledgeJob, ScanUnit
 from common.db.schema import ensure_knowledge_schema
 from knowledge_classifier.config import get_settings
 from knowledge_classifier.llm.mock import MockDeterministicProvider
@@ -214,6 +214,13 @@ def finalize_scan_topics_task(self, scan_unit_id: str):
             finalization_job.finished_at = _utcnow()
             finalization_job.error_message = None
             session.commit()
+            document_id = session.execute(
+                select(ScanUnit.source_document_id).where(ScanUnit.id == uuid.UUID(scan_unit_id))
+            ).scalar_one()
+            refresh_document_search_index_task.apply_async(
+                args=[str(document_id)],
+                queue="search_index",
+            )
             logger.info("Task completed: %s", result)
             return result
         except RuntimeError as exc:
@@ -257,6 +264,26 @@ def finalize_scan_topics_task(self, scan_unit_id: str):
                 session.rollback()
             finally:
                 session.close()
+
+
+@shared_task(bind=True, max_retries=3)
+def refresh_document_search_index_task(self, document_id: str):
+    """Refresh one document's derived vector index on the isolated indexing queue."""
+    from api.routers.knowledge import _refresh_document_search_index
+
+    engine = create_engine(
+        os.getenv("DATABASE_URL", "postgresql+psycopg://megadoc:megadoc@postgres:5432/megadoc"),
+        echo=False,
+    )
+    _ensure_schema_once(engine)
+    with Session(engine) as session:
+        try:
+            result = _refresh_document_search_index(session, uuid.UUID(document_id))
+            return result.model_dump(mode="json")
+        except Exception as exc:
+            session.rollback()
+            logger.error("Search index refresh failed for document %s: %s", document_id, exc, exc_info=True)
+            raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))
 
 
 def _get_latest_knowledge_job(session: Session, scan_unit_id: str, job_type: str | None = None) -> KnowledgeJob | None:

@@ -250,6 +250,42 @@ services:
       ml-infra-net:
         ipv4_address: 10.89.0.54
 
+  search_index_worker:
+    build:
+      context: .
+      dockerfile: infra/compose/Dockerfile.app
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      DATABASE_URL: postgresql+psycopg://megadoc:megadoc@postgres:5432/megadoc
+      KN_LLM_ENDPOINT: ${KN_WORKER_LLM_ENDPOINT:-http://10.89.0.3:8080/v1}
+      PYTHONPATH: /app/packages/common/src:/app/services/api/src:/app/services/worker/src:/app/services/cli/src:/app/services/knowledge_classifier/src:/app/services/knowledge_worker/src:/app/services/specialist_worker/src
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    command:
+      [
+        "celery",
+        "-A",
+        "knowledge_worker.celery_app:celery_app",
+        "worker",
+        "--loglevel=INFO",
+        "--concurrency=1",
+        "-Q",
+        "search_index"
+      ]
+    networks:
+      megadoc-net:
+      ml-infra-net:
+        ipv4_address: 10.89.0.56
+
   specialist_utility_worker:
     build:
       context: .
