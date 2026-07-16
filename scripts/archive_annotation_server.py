@@ -7,10 +7,13 @@ import json
 import mimetypes
 import os
 import tempfile
+import urllib.error
+import urllib.request
 from decimal import Decimal, InvalidOperation
 from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
@@ -40,7 +43,7 @@ def load_cases(manifest: Path) -> list[dict[str, object]]:
 
 def empty_annotations() -> dict[str, object]:
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "updated_at": None,
         "documents": {},
         "questions": [],
@@ -57,7 +60,7 @@ def load_annotations(path: Path) -> dict[str, object]:
 
 
 def save_annotations(path: Path, payload: dict[str, object]) -> None:
-    payload = {**payload, "schema_version": 2, "updated_at": datetime.now(timezone.utc).isoformat()}
+    payload = {**payload, "schema_version": 3, "updated_at": datetime.now(timezone.utc).isoformat()}
     path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(
         mode="w", encoding="utf-8", dir=path.parent, prefix=f".{path.name}.", delete=False
@@ -151,11 +154,10 @@ def normalize_annotations(
                         start_page=int(unit.get("start_page") or 1),
                         end_page=int(unit.get("end_page") or 1),
                     )
-                checks = specialist.get("checks")
-                if not isinstance(checks, list) or not checks or any(
-                    not isinstance(check, dict) or not str(check.get("expected") or "").strip()
-                    for check in checks
-                ):
+                if not isinstance(specialist.get("gold_tables"), list):
+                    specialist["gold_tables"] = []
+                    specialist["tables_reviewed"] = False
+                if specialist.get("tables_reviewed") is not True or not specialist["gold_tables"]:
                     incomplete_structured_specialist = True
         if "specialist" in annotation:
             del annotation["specialist"]
@@ -163,8 +165,151 @@ def normalize_annotations(
         if migrated or incomplete_structured_specialist:
             annotation["reviewed"] = False
     payload["documents"] = documents
-    payload["schema_version"] = 2
+    payload["schema_version"] = 3
     return payload
+
+
+def fetch_accounting_tables(api_base_url: str, case_id: str) -> dict[str, object]:
+    base = api_base_url.rstrip("/")
+    with urllib.request.urlopen(f"{base}/documents", timeout=15) as response:
+        documents = json.load(response)
+    document = next(
+        (
+            item for item in documents
+            if isinstance(item, dict) and str(item.get("external_id") or "") == case_id
+        ),
+        None,
+    )
+    if document is None:
+        return {"case_id": case_id, "document_id": None, "tables": [], "status": "document_not_loaded"}
+    document_id = str(document["id"])
+    with urllib.request.urlopen(
+        f"{base}/knowledge/documents/{document_id}/accounting-raw-tables", timeout=30
+    ) as response:
+        payload = json.load(response)
+    tables = payload.get("tables") if isinstance(payload, dict) else []
+    status = "available"
+    if not isinstance(tables, list) or not tables:
+        with urllib.request.urlopen(f"{base}/documents/{document_id}/ocr", timeout=30) as response:
+            ocr = json.load(response)
+        tables = accounting_tables_from_ocr(ocr)
+        status = "ocr_fallback"
+    return {
+        "case_id": case_id,
+        "document_id": document_id,
+        "tables": tables if isinstance(tables, list) else [],
+        "status": status,
+    }
+
+
+class _HTMLGoldTableParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.rows: list[list[tuple[str, bool]]] = []
+        self._row: list[tuple[str, bool]] | None = None
+        self._cell: list[str] | None = None
+        self._header = False
+        self._colspan = 1
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "tr":
+            self._row = []
+        elif tag in {"td", "th"} and self._row is not None:
+            self._cell = []
+            self._header = tag == "th"
+            values = dict(attrs)
+            try:
+                self._colspan = max(1, int(values.get("colspan") or 1))
+            except ValueError:
+                self._colspan = 1
+        elif tag == "br" and self._cell is not None:
+            self._cell.append(" ")
+
+    def handle_data(self, data: str) -> None:
+        if self._cell is not None:
+            self._cell.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in {"td", "th"} and self._cell is not None and self._row is not None:
+            value = " ".join("".join(self._cell).split())
+            self._row.append((value, self._header))
+            self._row.extend(("", self._header) for _ in range(self._colspan - 1))
+            self._cell = None
+        elif tag == "tr" and self._row is not None:
+            self.rows.append(self._row)
+            self._row = None
+
+
+def parse_html_gold_table(html: str) -> tuple[list[str], list[dict[str, object]]] | None:
+    parser = _HTMLGoldTableParser()
+    parser.feed(html)
+    rows = [row for row in parser.rows if row]
+    if not rows:
+        return None
+    width = max(len(row) for row in rows)
+    first_is_header = any(is_header for _, is_header in rows[0])
+    if first_is_header:
+        raw_headers = [value for value, _ in rows.pop(0)]
+    else:
+        raw_headers = [f"Colonna {index}" for index in range(1, width + 1)]
+    headers: list[str] = []
+    for index in range(width):
+        base = (raw_headers[index] if index < len(raw_headers) else "").strip() or f"Colonna {index + 1}"
+        candidate, suffix = base, 2
+        while candidate in headers:
+            candidate = f"{base} ({suffix})"
+            suffix += 1
+        headers.append(candidate)
+    parsed_rows = []
+    for index, row in enumerate(rows, start=1):
+        values = [value for value, _ in row] + [""] * (width - len(row))
+        parsed_rows.append({
+            "row_id": f"row_{index}",
+            "cells": dict(zip(headers, values, strict=True)),
+        })
+    return headers, parsed_rows
+
+
+def accounting_tables_from_ocr(payload: dict[str, object]) -> list[dict[str, object]]:
+    structured = payload.get("structured_json") if isinstance(payload, dict) else None
+    if not isinstance(structured, dict):
+        return []
+    pages = structured.get("pages")
+    if not isinstance(pages, list):
+        return []
+    orientation = structured.get("orientation_preprocess")
+    reversed_order = isinstance(orientation, dict) and orientation.get("page_order_reversed") is True
+    page_count = int(payload.get("page_count") or len(pages))
+    output: list[dict[str, object]] = []
+    for page in pages:
+        if not isinstance(page, dict):
+            continue
+        normalized_page = int(page.get("page_number") or page.get("page_no") or 0)
+        source_page = page_count + 1 - normalized_page if reversed_order else normalized_page
+        for table_index, table in enumerate(page.get("tables") or [], start=1):
+            if not isinstance(table, dict):
+                continue
+            html = next(
+                (
+                    cell.get("html") for cell in table.get("cells") or []
+                    if isinstance(cell, dict) and isinstance(cell.get("html"), str)
+                ),
+                None,
+            )
+            parsed = parse_html_gold_table(html) if html else None
+            if parsed is None:
+                continue
+            headers, rows = parsed
+            output.append({
+                "table_id": table.get("id") or f"page-{normalized_page}-table-{table_index}",
+                "table_type": "unknown",
+                "page_number": source_page,
+                "title": table.get("caption") or "",
+                "headers": headers,
+                "rows": rows,
+                "source": "ocr_structured",
+            })
+    return output
 
 
 def normalize_page_spec(value: str, *, start_page: int, end_page: int) -> list[int]:
@@ -252,7 +397,8 @@ def annotation_progress(cases: list[dict[str, object]], payload: dict[str, objec
 
 
 def make_handler(
-    *, manifest: Path, corpus_root: Path, suggestions: Path, output: Path
+    *, manifest: Path, corpus_root: Path, suggestions: Path, output: Path,
+    api_base_url: str = "http://127.0.0.1:8080",
 ) -> type[BaseHTTPRequestHandler]:
     cases = load_cases(manifest)
     cases_by_id = {str(case["case_id"]): case for case in cases}
@@ -283,6 +429,19 @@ def make_handler(
                     self.send_error(HTTPStatus.NOT_FOUND, "Unknown case")
                     return
                 self._file(corpus_root / str(case["relative_path"]), "application/pdf", allow_ranges=True)
+                return
+            if parsed.path.startswith("/api/accounting-tables/"):
+                case_id = unquote(parsed.path.removeprefix("/api/accounting-tables/"))
+                if case_id not in cases_by_id:
+                    self.send_error(HTTPStatus.NOT_FOUND, "Unknown case")
+                    return
+                try:
+                    self._json(fetch_accounting_tables(api_base_url, case_id))
+                except (urllib.error.URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+                    self._json(
+                        {"case_id": case_id, "status": "api_error", "tables": [], "error": str(exc)},
+                        status=HTTPStatus.BAD_GATEWAY,
+                    )
                 return
             relative = "index.html" if parsed.path in {"", "/"} else parsed.path.lstrip("/")
             target = (STATIC_ROOT / relative).resolve()
@@ -326,7 +485,7 @@ def make_handler(
                 return
             try:
                 length = int(self.headers.get("Content-Length", "0"))
-                if length <= 0 or length > 5_000_000:
+                if length <= 0 or length > 50_000_000:
                     raise ValueError("Invalid request size")
                 payload = json.loads(self.rfile.read(length))
                 if not isinstance(payload, dict):
@@ -393,6 +552,7 @@ def main() -> int:
     parser.add_argument("--corpus-root", default=str(Path.home() / "Pisa"))
     parser.add_argument("--suggestions", default=str(DEFAULT_SUGGESTIONS))
     parser.add_argument("--output", default=str(DEFAULT_OUTPUT))
+    parser.add_argument("--api-base-url", default="http://127.0.0.1:8080")
     args = parser.parse_args()
     if not Path(args.manifest).is_file():
         parser.error(
@@ -402,6 +562,7 @@ def main() -> int:
     handler = make_handler(
         manifest=Path(args.manifest), corpus_root=Path(args.corpus_root),
         suggestions=Path(args.suggestions), output=Path(args.output),
+        api_base_url=args.api_base_url,
     )
     server = ThreadingHTTPServer((args.host, args.port), handler)
     print(f"Megadoc archive annotator: http://{args.host}:{args.port}")

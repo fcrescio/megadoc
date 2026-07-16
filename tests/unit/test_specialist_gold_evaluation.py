@@ -1,6 +1,11 @@
 from types import SimpleNamespace
 
-from scripts.evaluate_specialist_gold import _accounting_check, _normalized_page, _payable_comparisons
+from scripts.evaluate_specialist_gold import (
+    _accounting_check,
+    _accounting_gold_cells,
+    _normalized_page,
+    _payable_comparisons,
+)
 from specialist_worker.services.utility_bill import (
     _extract_account_holder,
     _extract_payment_reference,
@@ -153,3 +158,23 @@ Totale fattura salvo conguaglio Euro 104,86
 """
 
     assert _extract_total_amount(text) == 104.86
+
+
+def test_full_accounting_gold_compares_every_cell_with_lineage():
+    results = _accounting_gold_cells(
+        [{
+            "page_number": 3,
+            "table_id": "table_2",
+            "headers": ["Data", "Saldo"],
+            "rows": [{"row_id": "row_1", "cells": {"Data": "20 MAGGIO 2008", "Saldo": "2,552.71"}}],
+        }],
+        [{
+            "page_number": 3,
+            "headers": ["Data", "Saldo"],
+            "rows": [{"row_id": "gold_row_1", "cells": {"Data": "20 maggio 2008", "Saldo": "2.552,71"}}],
+        }],
+    )
+
+    assert len(results) == 2
+    assert all(result["matched"] for result in results)
+    assert all(result["table_id"] == "table_2" for result in results)

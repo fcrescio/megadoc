@@ -73,19 +73,30 @@ def validate_annotations(cases: list[dict[str, object]], payload: dict[str, obje
                         )
                         if not table_pages:
                             errors.append(f"{case_id}: unit {index} accounting table pages invalid")
-                        checks = specialist.get("checks")
-                        if not isinstance(checks, list) or not checks:
-                            errors.append(f"{case_id}: unit {index} accounting structured checks missing")
+                        gold_tables = specialist.get("gold_tables")
+                        if specialist.get("tables_reviewed") is not True:
+                            errors.append(f"{case_id}: unit {index} accounting tables not reviewed")
+                        if not isinstance(gold_tables, list) or not gold_tables:
+                            errors.append(f"{case_id}: unit {index} accounting gold tables missing")
                         else:
-                            for check_index, check in enumerate(checks, start=1):
-                                if not isinstance(check, dict):
-                                    errors.append(f"{case_id}: unit {index} check {check_index} invalid")
+                            for table_index, table in enumerate(gold_tables, start=1):
+                                if not isinstance(table, dict):
+                                    errors.append(f"{case_id}: unit {index} gold table {table_index} invalid")
                                     continue
-                                page = check.get("page")
+                                headers = table.get("headers")
+                                rows = table.get("rows")
+                                page = table.get("page_number")
                                 if not isinstance(page, int) or not start <= page <= end:
-                                    errors.append(f"{case_id}: unit {index} check {check_index} page invalid")
-                                if not str(check.get("expected") or "").strip():
-                                    errors.append(f"{case_id}: unit {index} check {check_index} expected value missing")
+                                    errors.append(f"{case_id}: unit {index} gold table {table_index} page invalid")
+                                if not isinstance(headers, list) or not headers or any(not str(header).strip() for header in headers):
+                                    errors.append(f"{case_id}: unit {index} gold table {table_index} headers invalid")
+                                if not isinstance(rows, list) or not rows:
+                                    errors.append(f"{case_id}: unit {index} gold table {table_index} rows missing")
+                                elif isinstance(headers, list):
+                                    for row_index, row in enumerate(rows, start=1):
+                                        cells = row.get("cells") if isinstance(row, dict) else None
+                                        if not isinstance(cells, dict) or set(cells) != set(headers):
+                                            errors.append(f"{case_id}: unit {index} gold table {table_index} row {row_index} cells invalid")
                 covered.extend(range(start, end + 1))
                 unit_count += 1
             if sorted(covered) != list(range(1, page_count + 1)):

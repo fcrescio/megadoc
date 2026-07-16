@@ -20,13 +20,13 @@ docker run --rm --user root --network megadoc-net \
 Il report misura:
 
 - accuratezza dei campi payable obbligatori e degli opzionali effettivamente annotati;
-- accuratezza dei campioni accounting a livello di cella;
+- accuratezza di tutte le celle delle tabelle accounting revisionate;
 - presenza della lineage per ogni valore corretto;
 - numero di casi non caricati, che impedisce il superamento del gate.
 
 Omettere `--accounting-llm` per un baseline deterministico rapido. Il gate completo usa il flag, che riutilizza endpoint, modello e timeout del worker accounting.
 
-Le soglie iniziali sono `95%` per i payable, `98%` per le celle accounting e `100%` per la lineage. Un fallimento deve restare visibile: non correggere il gold copiando l'output automatico e non allargare pattern numerici non ancorati per far passare un documento.
+Le soglie iniziali sono `95%` per i payable, `98%` per le celle accounting e `100%` per la lineage. Quando `gold_tables` e' disponibile il runner ignora i controlli campione legacy e confronta la matrice completa. Un fallimento deve restare visibile: non correggere il gold copiando l'output automatico e non allargare pattern numerici non ancorati per far passare un documento.
 
 ## Interpretazione
 

@@ -1,11 +1,14 @@
 from pathlib import Path
 
 from scripts.archive_annotation_server import (
+    accounting_tables_from_ocr,
     annotation_progress,
     empty_annotations,
+    fetch_accounting_tables,
     load_annotations,
     normalize_annotations,
     normalize_page_spec,
+    parse_html_gold_table,
     parse_legacy_accounting_checks,
     save_annotations,
 )
@@ -87,6 +90,11 @@ def test_strict_validator_accepts_complete_fixture():
             else {"kind": kind, "table_pages": "1-2", "checks": [{
                 "page": 1, "table": "Rendiconto", "row": "Totale", "column": "Importo",
                 "expected": "10", "comparison": "amount",
+            }], "tables_reviewed": True, "gold_tables": [{
+                "page_number": 1,
+                "title": "Rendiconto",
+                "headers": ["Voce", "Importo"],
+                "rows": [{"row_id": "gold_row_1", "cells": {"Voce": "Totale", "Importo": "10"}}],
             }]}
         )
         payload["documents"][case["case_id"]] = {
@@ -131,7 +139,7 @@ def test_accounting_legacy_checks_are_structured_and_relative_pages_become_absol
     assert normalize_page_spec("1", start_page=16, end_page=16) == [16]
 
 
-def test_specialist_schema_upgrade_preserves_reviewed_status():
+def test_specialist_schema_upgrade_reopens_review_for_full_gold_tables():
     payload = empty_annotations()
     payload["documents"] = {
         "case-1": {
@@ -152,7 +160,9 @@ def test_specialist_schema_upgrade_preserves_reviewed_status():
 
     document = normalize_annotations([_case()], payload)["documents"]["case-1"]
 
-    assert document["reviewed"] is True
+    assert document["reviewed"] is False
+    assert document["document_units"][0]["specialist"]["gold_tables"] == []
+    assert document["document_units"][0]["specialist"]["tables_reviewed"] is False
     assert document["document_units"][0]["specialist"]["checks"][0]["expected"] == "10,00"
 
 
@@ -178,3 +188,76 @@ def test_specialist_schema_upgrade_reopens_incomplete_accounting_checks():
     document = normalize_annotations([_case(pages=1)], payload)["documents"]["case-1"]
 
     assert document["reviewed"] is False
+
+
+def test_fetch_accounting_tables_resolves_external_id(monkeypatch):
+    responses = iter([
+        [{"id": "doc-1", "external_id": "case-1"}],
+        {"document_id": "doc-1", "tables": [{"table_id": "table_1"}]},
+    ])
+    urls = []
+
+    class Response:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self):
+            import json
+            return json.dumps(self.payload).encode()
+
+    def fake_urlopen(url, timeout):
+        urls.append((url, timeout))
+        return Response(next(responses))
+
+    monkeypatch.setattr("scripts.archive_annotation_server.urllib.request.urlopen", fake_urlopen)
+
+    result = fetch_accounting_tables("http://api:8080/", "case-1")
+
+    assert result["status"] == "available"
+    assert result["tables"] == [{"table_id": "table_1"}]
+    assert urls == [
+        ("http://api:8080/documents", 15),
+        ("http://api:8080/knowledge/documents/doc-1/accounting-raw-tables", 30),
+    ]
+
+
+def test_parse_html_gold_table_preserves_full_editable_matrix():
+    parsed = parse_html_gold_table(
+        "<table><thead><tr><th>Data</th><th colspan='2'>Importi</th></tr></thead>"
+        "<tbody><tr><td>20 maggio</td><td>10,00</td><td>2,00</td></tr></tbody></table>"
+    )
+
+    assert parsed == (
+        ["Data", "Importi", "Colonna 3"],
+        [{
+            "row_id": "row_1",
+            "cells": {"Data": "20 maggio", "Importi": "10,00", "Colonna 3": "2,00"},
+        }],
+    )
+
+
+def test_accounting_tables_from_ocr_maps_reversed_pages_to_source_pdf():
+    tables = accounting_tables_from_ocr({
+        "page_count": 3,
+        "structured_json": {
+            "orientation_preprocess": {"page_order_reversed": True},
+            "pages": [{
+                "page_number": 3,
+                "tables": [{
+                    "id": "page-3-table-1",
+                    "cells": [{"html": "<table><tr><th>Voce</th><th>Importo</th></tr><tr><td>Totale</td><td>10,00</td></tr></table>"}],
+                }],
+            }],
+        },
+    })
+
+    assert len(tables) == 1
+    assert tables[0]["page_number"] == 1
+    assert tables[0]["headers"] == ["Voce", "Importo"]
+    assert tables[0]["rows"][0]["cells"]["Importo"] == "10,00"

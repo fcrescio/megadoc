@@ -132,6 +132,45 @@ def _accounting_check(tables: list[dict[str, Any]], check: dict[str, Any]) -> di
     return {"matched": False}
 
 
+def _accounting_gold_cells(
+    tables: list[dict[str, Any]], gold_tables: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    for gold_table in gold_tables:
+        gold_headers = [str(header) for header in gold_table.get("headers") or []]
+        page = gold_table.get("page_number")
+        candidates = [table for table in tables if table.get("page_number") == page]
+        table = max(
+            candidates,
+            key=lambda candidate: len(set(gold_headers) & set(candidate.get("headers") or [])),
+            default=None,
+        )
+        actual_rows = table.get("rows") or [] if isinstance(table, dict) else []
+        for row_index, gold_row in enumerate(gold_table.get("rows") or []):
+            gold_cells = gold_row.get("cells") if isinstance(gold_row, dict) else {}
+            actual_row = actual_rows[row_index] if row_index < len(actual_rows) else None
+            actual_cells = actual_row.get("cells") if isinstance(actual_row, dict) else {}
+            for column in gold_headers:
+                expected = gold_cells.get(column) if isinstance(gold_cells, dict) else None
+                actual = actual_cells.get(column) if isinstance(actual_cells, dict) else None
+                expected_amount, actual_amount = _amount(expected), _amount(actual)
+                matched = (
+                    expected_amount == actual_amount
+                    if expected_amount is not None and actual_amount is not None
+                    else _norm(expected) == _norm(actual)
+                )
+                results.append({
+                    "matched": matched,
+                    "page": table.get("page_number") if isinstance(table, dict) else None,
+                    "table_id": table.get("table_id") if isinstance(table, dict) else None,
+                    "row_id": actual_row.get("row_id") if isinstance(actual_row, dict) else None,
+                    "column": column if isinstance(actual_cells, dict) and column in actual_cells else None,
+                    "expected": expected,
+                    "actual": actual,
+                })
+    return results
+
+
 def evaluate(annotations: Path, database_url: str, *, accounting_llm: bool = False) -> dict[str, Any]:
     gold = json.loads(annotations.read_text(encoding="utf-8"))
     if accounting_llm:
@@ -181,6 +220,9 @@ def evaluate(annotations: Path, database_url: str, *, accounting_llm: bool = Fal
                     specialist["table_pages"] = ",".join(
                         str(_normalized_page(page, ocr)) for page in source_table_pages
                     )
+                    for gold_table in specialist.get("gold_tables") or []:
+                        if isinstance(gold_table, dict) and isinstance(gold_table.get("page_number"), int):
+                            gold_table["page_number"] = _normalized_page(gold_table["page_number"], ocr)
                 unit = DocumentUnit(
                     id=uuid.uuid4(),
                     ordinal=ordinal,
@@ -243,7 +285,13 @@ def evaluate(annotations: Path, database_url: str, *, accounting_llm: bool = Fal
                     actual_pages = {table.get("page_number") for table in tables if isinstance(table.get("page_number"), int)}
                     result["table_pages"] = {"expected": sorted(expected_pages), "actual": sorted(actual_pages), "matched": expected_pages <= actual_pages}
                     result["tables"] = tables
-                    check_results = [_accounting_check(tables, check) for check in specialist.get("checks") or []]
+                    gold_tables = [table for table in specialist.get("gold_tables") or [] if isinstance(table, dict)]
+                    check_results = (
+                        _accounting_gold_cells(tables, gold_tables)
+                        if gold_tables
+                        else [_accounting_check(tables, check) for check in specialist.get("checks") or []]
+                    )
+                    result["gold_mode"] = "full_tables" if gold_tables else "legacy_checks"
                     result["checks"] = check_results
                     check_total += len(check_results)
                     check_matches += sum(item["matched"] for item in check_results)

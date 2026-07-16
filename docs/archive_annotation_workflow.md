@@ -42,8 +42,9 @@ Per ogni documento:
 3. Correggere le entita' suggerite scegliendo sempre tipo e valore.
 4. Aggiungere le document unit in ordine. Una unit rappresenta un documento logico completo: includere copertina, bollettino, dettagli e allegati necessari a interpretarlo. Gli intervalli devono coprire ogni pagina esattamente una volta.
 5. Se una singola document unit e' payable o accounting, compilare lo specialista dentro quella unit. Un PDF misto puo' avere specialisti diversi per unit.
-6. Annotare anomalie di scansione o ordine nelle note.
-7. Premere `Completa e avanti`. L'azione resta bloccata finche' i dati non sono validi.
+6. Per ogni unit accounting aprire il tab `Accounting`, importare la ricostruzione, confrontarla con il PDF e correggere l'intera tabella. Confermare la revisione solo quando intestazioni, righe e celle sono complete.
+7. Annotare anomalie di scansione o ordine nelle note.
+8. Premere `Completa e avanti`. L'azione resta bloccata finche' i dati non sono validi.
 
 Scorciatoie:
 
@@ -53,7 +54,9 @@ Scorciatoie:
 
 Le coordinate annotate sono sempre quelle del PDF originale mostrato nel viewer. I runner traducono queste coordinate nell'ordine OCR normalizzato quando il preprocessore ha invertito le pagine.
 
-Per i payable annotare almeno tipo, emittente, destinatario, importo, valuta, scadenza e riferimento. Per l'accounting indicare le pagine con tabelle e almeno un controllo strutturato con pagina, identita' di riga, colonna e valore atteso. I campi legacy restano visibili solo per facilitare la migrazione.
+Per i payable annotare almeno tipo, emittente, destinatario, importo, valuta, scadenza e riferimento. Per l'accounting `gold_tables` conserva la matrice completa revisionata: pagina PDF originale, intestazioni e tutte le celle. I vecchi controlli campione restano visibili solo per facilitare la migrazione.
+
+L'importazione usa prima il risultato dello specialista accounting disponibile nell'API. Se il documento non ha un risultato specialistico, usa le tabelle HTML dell'OCR strutturato come proposta iniziale. In entrambi i casi la proposta viene copiata nel file privato: le modifiche successive non cambiano il database e una nuova importazione richiede conferma prima di sostituire il gold corrente.
 
 Nel tab `Domande`, aggiungere almeno 30 domande archivistiche. Una domanda rispondibile richiede risposta attesa ed evidenza nel formato:
 
