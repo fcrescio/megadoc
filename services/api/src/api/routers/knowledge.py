@@ -137,6 +137,7 @@ from knowledge_classifier.llm.base import ChatMessage
 from knowledge_classifier.llm.openai_compat import OpenAICompatibleProvider
 from knowledge_worker.dispatch import dispatch_scan_unit_processing
 from specialist_worker.dispatch import dispatch_specialist_job
+from api.services.retrieval import RetrievalService
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 
@@ -156,6 +157,7 @@ class _AccountingAskPlan(BaseModel):
 
 class _KnowledgeAgentAction(BaseModel):
     action: Literal[
+        "retrieve_evidence",
         "search_archive",
         "semantic_search",
         "list_topics",
@@ -1673,6 +1675,22 @@ def search_knowledge(
     )
 
 
+@router.get("/search/evidence")
+def search_evidence(
+    q: str = Query(min_length=2, max_length=1000),
+    document_id: str | None = None,
+    limit: int = Query(default=8, ge=1, le=20),
+    db: Session = Depends(get_db_session),
+):
+    """Return fused, page-oriented evidence for agents and quality probes."""
+    if document_id:
+        try:
+            uuid.UUID(document_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid document ID") from exc
+    return _agent_retrieve_evidence(db, q, document_id=document_id, limit=limit)
+
+
 @router.get("/specialists/utility-bills")
 def list_specialist_utility_bills(
     q: str | None = None,
@@ -2726,12 +2744,10 @@ def _build_knowledge_agent_messages(payload: KnowledgeAgentChatRequest, db: Sess
             content=(
                 "Sei un agente read-only che interroga un archivio documentale tramite tool. "
                 "Non inventare fatti: usa i tool per cercare documenti, topic, testo OCR e risultati specialistici. "
-                "Per domande naturali o concettuali usa semantic_search prima della ricerca keyword. "
+                "Per trovare documenti e pagine usa prima retrieve_evidence, che fonde ricerca keyword e semantica. "
                 "Prima di rispondere su un documento devi leggere il testo OCR con get_page_text per le pagine rilevanti. "
-                "Dopo aver identificato un documento lungo, usa search_document_text per localizzare le pagine rilevanti "
-                "invece di sfogliarlo pagina per pagina. "
-                "search_document_text puo' cercare nell'intero archivio se non conosci ancora document_id; quando hai "
-                "un document_id, usalo per restringere la ricerca al documento. "
+                "Dopo aver identificato un documento lungo, richiama retrieve_evidence con document_id per localizzare "
+                "le pagine rilevanti invece di sfogliarlo pagina per pagina. "
                 "Non ripetere la stessa azione con gli stessi parametri se il risultato precedente non era utile: "
                 "allarga la query, leggi una pagina candidata, oppure produci una final_answer negativa se non ci sono prove. "
                 "Per domande su bollette da pagare, scadenze, fornitori, importi o calendari usa search_calendar_events: "
@@ -3056,7 +3072,7 @@ def _is_supported_no_evidence_answer(
     for step in trace:
         if step.error:
             continue
-        if step.action in {"search_archive", "semantic_search", "search_document_text", "search_calendar_events", "list_topics"}:
+        if step.action in {"retrieve_evidence", "search_archive", "semantic_search", "search_document_text", "search_calendar_events", "list_topics"}:
             searched_steps += 1
     return searched_steps >= 2
 
@@ -3145,14 +3161,21 @@ def _embedding_provider() -> OpenAICompatibleProvider:
     )
 
 
-def _agent_semantic_search(db: Session, query: str, *, limit: int) -> dict[str, Any]:
+def _agent_semantic_search(
+    db: Session,
+    query: str,
+    *,
+    limit: int,
+    document_id: str | None = None,
+) -> dict[str, Any]:
     if not query.strip():
         return {"query": query, "results": [], "warning": "semantic_search requires a non-empty query"}
     provider = _embedding_provider()
     query_embedding = provider.embed(query)[0]
+    document_filter = "AND document_id = CAST(:document_id AS uuid)" if document_id else ""
     rows = db.execute(
         text(
-            """
+            f"""
             SELECT
                 source_type,
                 source_id::text AS source_id,
@@ -3165,11 +3188,18 @@ def _agent_semantic_search(db: Session, query: str, *, limit: int) -> dict[str, 
                 embedding_model,
                 (embedding <=> CAST(:embedding AS vector)) AS distance
             FROM knowledge_search_chunks
+            WHERE embedding_model = :embedding_model
+              {document_filter}
             ORDER BY embedding <=> CAST(:embedding AS vector)
             LIMIT :limit
             """
         ),
-        {"embedding": _vector_literal(query_embedding), "limit": limit},
+        {
+            "embedding": _vector_literal(query_embedding),
+            "embedding_model": provider.model_name,
+            "document_id": document_id,
+            "limit": limit,
+        },
     ).mappings().all()
     return {
         "query": query,
@@ -3416,7 +3446,125 @@ def _collect_knowledge_search_chunks(db: Session) -> list[dict[str, Any]]:
                     },
                 )
             )
+
+    latest_specialist_by_unit_type: dict[tuple[uuid.UUID, str], SpecialistResult] = {}
+    specialist_results = db.execute(
+        select(SpecialistResult).order_by(SpecialistResult.created_at.asc())
+    ).scalars().all()
+    for result in specialist_results:
+        latest_specialist_by_unit_type[(result.document_unit_id, result.specialist_type)] = result
+    units_by_id = {unit.id: unit for unit in units}
+    for result in latest_specialist_by_unit_type.values():
+        unit = units_by_id.get(result.document_unit_id)
+        document = unit.scan_unit.document if unit and unit.scan_unit else None
+        if not unit or not document:
+            continue
+        for evidence in _specialist_search_evidence(result, unit):
+            chunks.append(
+                _make_search_chunk(
+                    source_type="specialist_result",
+                    source_id=str(result.id),
+                    document_id=str(document.id),
+                    document_unit_id=str(unit.id),
+                    page_from=evidence["page_from"],
+                    page_to=evidence["page_to"],
+                    text_value=evidence["text"],
+                    metadata={
+                        "specialist_type": result.specialist_type,
+                        "review_status": result.review_status,
+                        "confidence": result.confidence,
+                        "document_unit_title": unit.title,
+                        **evidence.get("metadata", {}),
+                    },
+                )
+            )
     return chunks
+
+
+def _specialist_search_evidence(
+    result: SpecialistResult,
+    unit: DocumentUnit,
+) -> list[dict[str, Any]]:
+    payload = result.result_json if isinstance(result.result_json, dict) else {}
+    values = [f"Specialista: {result.specialist_type}"]
+    if result.specialist_type == "utility_bill":
+        labels = {
+            "issuer": "Fornitore",
+            "service_type": "Servizio",
+            "account_holder": "Intestatario",
+            "issue_date": "Data emissione",
+            "due_date": "Scadenza",
+            "billing_period_from": "Periodo da",
+            "billing_period_to": "Periodo a",
+            "total_amount": "Importo",
+            "currency": "Valuta",
+            "document_number": "Numero documento",
+            "contract_code": "Contratto",
+            "supply_reference": "Fornitura",
+        }
+        values.extend(
+            f"{label}: {payload[key]}"
+            for key, label in labels.items()
+            if payload.get(key) not in (None, "")
+        )
+        return [{
+            "text": "\n".join(values),
+            "page_from": unit.start_page,
+            "page_to": unit.end_page,
+            "metadata": {},
+        }]
+    if result.specialist_type == "accounting_statement":
+        values.extend(
+            f"{label}: {payload[key]}"
+            for key, label in {
+                "statement_type": "Tipo bilancio",
+                "accounting_period_from": "Periodo da",
+                "accounting_period_to": "Periodo a",
+                "currency": "Valuta",
+            }.items()
+            if payload.get(key) not in (None, "")
+        )
+        evidence: list[dict[str, Any]] = []
+        for table in payload.get("tables", []) or []:
+            if not isinstance(table, dict):
+                continue
+            explanation = table.get("llm_explanation")
+            description = (
+                explanation.get("summary") if isinstance(explanation, dict) else None
+            ) or table.get("description") or table.get("explanation") or table.get("title")
+            page_number = table.get("page_number")
+            page = int(page_number) if isinstance(page_number, (int, float)) else unit.start_page
+            table_values = [
+                *values,
+                f"Tabella: {table.get('table_type') or table.get('table_id')}",
+                f"Descrizione: {description}" if description else "",
+                f"Colonne: {', '.join(str(header) for header in table.get('headers', [])[:20])}",
+            ]
+            evidence.append({
+                "text": "\n".join(value for value in table_values if value),
+                "page_from": page,
+                "page_to": page,
+                "metadata": {
+                    "table_id": table.get("table_id"),
+                    "table_type": table.get("table_type"),
+                    "explanation_source": explanation.get("source") if isinstance(explanation, dict) else None,
+                },
+            })
+        return evidence or [{
+            "text": "\n".join(values),
+            "page_from": unit.start_page,
+            "page_to": unit.end_page,
+            "metadata": {},
+        }]
+    summary = payload.get("summary") or payload.get("description")
+    if summary:
+        values.append(f"Sintesi: {summary}")
+    return [{
+        "text": "\n".join(values),
+        "page_from": unit.start_page,
+        "page_to": unit.end_page,
+        "metadata": {},
+    }]
 
 
 def _make_search_chunk(
@@ -3617,6 +3765,10 @@ def _run_knowledge_agent_tool(
     allow_vision: bool,
 ) -> dict[str, Any] | list[Any]:
     limit = max(1, min(action.limit or 8, 20))
+    if action.action == "retrieve_evidence":
+        return _agent_retrieve_evidence(
+            db, action.query or "", document_id=action.document_id, limit=limit
+        )
     if action.action == "search_archive":
         return _agent_search_archive(db, action.query or "", limit=limit)
     if action.action == "semantic_search":
@@ -3826,6 +3978,36 @@ def _agent_search_archive(db: Session, query: str, *, limit: int) -> dict[str, A
         "document_units": [_agent_document_unit_brief(unit) for unit in units],
         "topics": topics,
     }
+
+
+def _agent_retrieve_evidence(
+    db: Session,
+    query: str,
+    *,
+    document_id: str | None,
+    limit: int,
+) -> dict[str, Any]:
+    def lexical(search_query: str, search_limit: int) -> dict[str, Any]:
+        return _agent_search_document_text(
+            db, document_id, search_query, limit=search_limit
+        )
+
+    def semantic(search_query: str, search_limit: int) -> dict[str, Any]:
+        return _agent_semantic_search(
+            db,
+            search_query,
+            limit=search_limit,
+            document_id=document_id,
+        )
+
+    result = RetrievalService(
+        lexical_search=lexical,
+        semantic_search=semantic,
+        max_per_document=limit if document_id else 2,
+    ).retrieve(query, limit=limit)
+    result["scope"] = "document" if document_id else "archive"
+    result["document_id"] = document_id
+    return result
 
 
 def _agent_list_topics(db: Session, query: str | None, *, limit: int) -> list[dict[str, Any]]:
