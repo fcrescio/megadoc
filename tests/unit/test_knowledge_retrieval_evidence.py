@@ -1,4 +1,9 @@
-from api.routers.knowledge import _KnowledgeAgentAction, _specialist_search_evidence
+from api.routers import knowledge
+from api.routers.knowledge import (
+    _KnowledgeAgentAction,
+    _run_knowledge_agent_tool,
+    _specialist_search_evidence,
+)
 from common.db.models import DocumentUnit, SpecialistResult
 
 
@@ -71,3 +76,32 @@ def test_utility_evidence_contains_payable_fields():
     assert "Fornitore: Acque S.p.A." in evidence[0]["text"]
     assert "Scadenza: 2026-08-31" in evidence[0]["text"]
     assert "Importo: 123.45" in evidence[0]["text"]
+
+
+def test_accounting_agent_tool_delegates_to_accounting_query_engine(monkeypatch):
+    captured = {}
+
+    def fake_ask(payload, db):
+        captured["payload"] = payload
+        captured["db"] = db
+        return {"status": "answered", "answer": "computed", "evidence": []}
+
+    monkeypatch.setattr(knowledge, "ask_accounting", fake_ask)
+    action = _KnowledgeAgentAction.model_validate({
+        "action": "query_accounting_tables",
+        "query": "Confronta le spese di Bonacci",
+        "document_id": "a61e4d32-9ce8-46bc-8bdf-f29c49285497",
+        "subject": "Bonacci",
+        "period_a_from": "2022-01-01",
+        "period_a_to": "2022-12-31",
+        "period_b_from": "2023-01-01",
+        "period_b_to": "2023-12-31",
+    })
+    db = object()
+
+    output = _run_knowledge_agent_tool(db, action, allow_vision=False)
+
+    assert output["status"] == "answered"
+    assert captured["db"] is db
+    assert captured["payload"].subject == "Bonacci"
+    assert captured["payload"].period_b_to.isoformat() == "2023-12-31"

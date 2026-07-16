@@ -168,6 +168,7 @@ class _KnowledgeAgentAction(BaseModel):
         "analyze_page_image",
         "request_page_vision",
         "search_calendar_events",
+        "query_accounting_tables",
         "final_answer",
     ]
     reasoning: str = Field(default="")
@@ -183,6 +184,11 @@ class _KnowledgeAgentAction(BaseModel):
     amount_max: float | None = Field(default=None)
     status: str | None = Field(default=None)
     review_status: str | None = Field(default=None)
+    subject: str | None = Field(default=None)
+    period_a_from: date | None = Field(default=None)
+    period_a_to: date | None = Field(default=None)
+    period_b_from: date | None = Field(default=None)
+    period_b_to: date | None = Field(default=None)
     limit: int | None = Field(default=None)
     answer: str | None = Field(default=None)
     confidence: float | None = Field(default=None, ge=0, le=1)
@@ -2753,6 +2759,10 @@ def _build_knowledge_agent_messages(payload: KnowledgeAgentChatRequest, db: Sess
                 "Per domande su bollette da pagare, scadenze, fornitori, importi o calendari usa search_calendar_events: "
                 "supplier/query sono ricerche testuali substring case-insensitive, mentre date_from/date_to e "
                 "amount_min/amount_max sono filtri liberi su scadenza e importo. "
+                "Per domande su bilanci, riparti, spese per soggetto o confronti tra esercizi usa "
+                "query_accounting_tables: passa la domanda in query, l'eventuale document_id, subject e i due "
+                "intervalli period_a/period_b se sono espliciti. Il tool esegue i calcoli sulle tabelle specialistiche "
+                "e restituisce evidence; leggi poi le pagine indicate prima di citarle. "
                 "Non inventare mai document_id o document_unit_id da nomi descrittivi: usa solo id restituiti dai tool "
                 "o gia' presenti nella conversazione. "
                 "Se l'utente ha selezionato documenti, trattali come contesto iniziale forte ma non come vincolo: "
@@ -3821,6 +3831,21 @@ def _run_knowledge_agent_tool(
             status=action.status,
             review_status=action.review_status,
             limit=limit,
+        )
+    if action.action == "query_accounting_tables":
+        if not action.query:
+            raise ValueError("query is required")
+        return ask_accounting(
+            AccountingAskRequest(
+                question=action.query,
+                document_id=action.document_id,
+                subject=action.subject,
+                period_a_from=action.period_a_from,
+                period_a_to=action.period_a_to,
+                period_b_from=action.period_b_from,
+                period_b_to=action.period_b_to,
+            ),
+            db,
         )
     raise ValueError(f"Unsupported action: {action.action}")
 
