@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 
 from celery import shared_task
 from common.application.graph import project_document_unit
+from common.application.retry import retry_delay_seconds
 from common.application.specialist_contracts import (
     SpecialistExecutionContext,
     attach_specialist_envelope,
@@ -158,7 +159,10 @@ def process_specialist_job(self, specialist_job_id: str):
             logger.error("Specialist task failed: %s", exc, exc_info=True)
             session.rollback()
             _update_specialist_job(engine, specialist_job_id, status="failed", finished_at=_utcnow(), error_message=str(exc))
-            raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))
+            raise self.retry(
+                exc=exc,
+                countdown=retry_delay_seconds(self.request.retries, key=f"specialist:{specialist_job_id}"),
+            )
         finally:
             session.close()
 

@@ -12,6 +12,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from common.application.knowledge import has_active_ingestion_jobs
+from common.application.retry import retry_delay_seconds
 from common.application.specialists import ensure_specialist_jobs_for_scan_unit
 from common.db.models import KnowledgeJob, ScanUnit
 from common.db.schema import ensure_knowledge_schema
@@ -149,7 +150,10 @@ def process_scan_unit_task(self, scan_unit_id: str):
                 finished_at=_utcnow(),
                 error_message=str(e),
             )
-            raise self.retry(exc=e, countdown=60 * (2 ** self.request.retries))
+            raise self.retry(
+                exc=e,
+                countdown=retry_delay_seconds(self.request.retries, key=f"knowledge:{scan_unit_id}"),
+            )
         finally:
             session.close()
 
@@ -252,7 +256,10 @@ def finalize_scan_topics_task(self, scan_unit_id: str):
                     finalization_job.error_message = str(exc)
                     status_session.commit()
             logger.error("Topic finalization failed: %s", exc, exc_info=True)
-            raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))
+            raise self.retry(
+                exc=exc,
+                countdown=retry_delay_seconds(self.request.retries, key=f"finalize:{scan_unit_id}"),
+            )
         finally:
             try:
                 session.execute(
@@ -283,7 +290,10 @@ def refresh_document_search_index_task(self, document_id: str):
         except Exception as exc:
             session.rollback()
             logger.error("Search index refresh failed for document %s: %s", document_id, exc, exc_info=True)
-            raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))
+            raise self.retry(
+                exc=exc,
+                countdown=retry_delay_seconds(self.request.retries, key=f"search-index:{document_id}"),
+            )
 
 
 def _get_latest_knowledge_job(session: Session, scan_unit_id: str, job_type: str | None = None) -> KnowledgeJob | None:
