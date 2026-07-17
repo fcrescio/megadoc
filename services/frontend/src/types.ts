@@ -114,6 +114,10 @@ export interface BackgroundActivityJob {
   started_at: string | null;
   finished_at: string | null;
   age_seconds: number;
+  duration_seconds: number | null;
+  eta_seconds: number | null;
+  queue_position: number | null;
+  waiting_reason: string | null;
   is_possibly_stale: boolean;
   stale_reason: string | null;
 }
@@ -125,6 +129,8 @@ export interface BackgroundActivityPipeline {
   failed: number;
   done: number;
   by_status: Record<string, number>;
+  mean_duration_seconds: number | null;
+  throughput_per_hour: number;
 }
 
 export interface BackgroundActivity {
@@ -141,6 +147,7 @@ export interface BackgroundActivity {
   };
   active_jobs: BackgroundActivityJob[];
   possibly_stale_jobs: BackgroundActivityJob[];
+  failed_jobs: BackgroundActivityJob[];
   recent_jobs: BackgroundActivityJob[];
 }
 

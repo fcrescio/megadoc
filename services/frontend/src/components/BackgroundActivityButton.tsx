@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useBackgroundActivity } from '../hooks/useJobs';
+import { replayBackgroundJob } from '../api/client';
 import type { BackgroundActivityJob, BackgroundActivityPipeline } from '../types';
 
 function formatAge(seconds: number) {
@@ -51,11 +52,19 @@ function PipelineSummary({ name, pipeline }: { name: string; pipeline: Backgroun
           {pipeline.done} completati
         </span>
       </div>
+      <p className="mt-2 text-xs text-slate-400">
+        {pipeline.throughput_per_hour.toFixed(1)} job/h
+        {pipeline.mean_duration_seconds != null ? ` · durata media ${formatAge(Math.round(pipeline.mean_duration_seconds))}` : ''}
+      </p>
     </div>
   );
 }
 
-function JobRow({ job }: { job: BackgroundActivityJob }) {
+function JobRow({ job, onReplay, replaying }: {
+  job: BackgroundActivityJob;
+  onReplay: (job: BackgroundActivityJob) => void;
+  replaying: boolean;
+}) {
   return (
     <div className="rounded-xl border border-white/10 bg-slate-950/50 p-3">
       <div className="flex items-start justify-between gap-3">
@@ -72,11 +81,23 @@ function JobRow({ job }: { job: BackgroundActivityJob }) {
       </div>
       <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-400">
         <span>{pipelineLabel(job.pipeline)}</span>
-        <span>eta {formatAge(job.age_seconds)}</span>
+        <span>attivo da {formatAge(job.age_seconds)}</span>
+        {job.eta_seconds != null && <span>ETA ~{formatAge(job.eta_seconds)}</span>}
+        {job.queue_position != null && <span>coda #{job.queue_position}</span>}
         {job.attempt_count > 0 && <span>try {job.attempt_count}</span>}
       </div>
-      {(job.stale_reason || job.error_message) && (
-        <p className="mt-2 text-xs text-amber-200">{job.error_message ?? job.stale_reason}</p>
+      {(job.waiting_reason || job.stale_reason || job.error_message) && (
+        <p className="mt-2 text-xs text-amber-200">{job.error_message ?? job.stale_reason ?? job.waiting_reason}</p>
+      )}
+      {job.status === 'failed' && (
+        <button
+          type="button"
+          disabled={replaying}
+          onClick={() => onReplay(job)}
+          className="mt-3 rounded-lg border border-rose-300/25 bg-rose-400/10 px-3 py-1.5 text-xs text-rose-100 disabled:opacity-50"
+        >
+          {replaying ? 'Riavvio...' : 'Riprova job'}
+        </button>
       )}
     </div>
   );
@@ -84,6 +105,7 @@ function JobRow({ job }: { job: BackgroundActivityJob }) {
 
 export default function BackgroundActivityButton() {
   const [open, setOpen] = useState(false);
+  const [replayingId, setReplayingId] = useState<string | null>(null);
   const activity = useBackgroundActivity(true);
   const data = activity.data;
 
@@ -100,7 +122,19 @@ export default function BackgroundActivityButton() {
     ? data.active_jobs
     : data?.possibly_stale_jobs.length
       ? data.possibly_stale_jobs
-      : data?.recent_jobs.slice(0, 8) ?? [];
+      : data?.failed_jobs.length
+        ? data.failed_jobs
+        : data?.recent_jobs.slice(0, 8) ?? [];
+
+  const replay = async (job: BackgroundActivityJob) => {
+    setReplayingId(job.id);
+    try {
+      await replayBackgroundJob(job.pipeline, job.id);
+      await activity.refetch();
+    } finally {
+      setReplayingId(null);
+    }
+  };
 
   return (
     <div className="relative">
@@ -148,9 +182,22 @@ export default function BackgroundActivityButton() {
               )}
               <div className="mt-4 space-y-2">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                  {data.active_jobs.length ? 'In corso' : data.possibly_stale_jobs.length ? 'Possibili appesi' : 'Recenti'}
+                  {data.active_jobs.length
+                    ? 'In corso'
+                    : data.possibly_stale_jobs.length
+                      ? 'Possibili appesi'
+                      : data.failed_jobs.length
+                        ? 'Da riprovare'
+                        : 'Recenti'}
                 </p>
-                {panelJobs.length ? panelJobs.map((job) => <JobRow key={`${job.pipeline}:${job.id}`} job={job} />) : (
+                {panelJobs.length ? panelJobs.map((job) => (
+                  <JobRow
+                    key={`${job.pipeline}:${job.id}`}
+                    job={job}
+                    onReplay={replay}
+                    replaying={replayingId === job.id}
+                  />
+                )) : (
                   <p className="text-sm text-slate-400">Nessun lavoro recente.</p>
                 )}
               </div>

@@ -130,7 +130,7 @@ export async function ensureDocumentSpecialists(
   const response = await fetch(`${API_BASE}/knowledge/documents/${documentId}/ensure-specialists`, {
     method: 'POST',
   });
-  return handleResponse(response);
+  return handleResponse<{ scan_unit_id: string; created_jobs: number; jobs: { id: string; specialist_type: string; status: string }[] }>(response);
 }
 
 export async function getKnowledgeTopics(includeInactive = false, topicKind?: string): Promise<KnowledgeTopicSummary[]> {
@@ -590,6 +590,13 @@ export async function getJobs(limit = 100): Promise<Job[]> {
 export async function getBackgroundActivity(): Promise<BackgroundActivity> {
   const response = await fetch(`${API_BASE}/jobs/background-activity`);
   return handleResponse<BackgroundActivity>(response);
+}
+
+export async function replayBackgroundJob(pipeline: string, jobId: string): Promise<{ status: string; job_id: string }> {
+  const response = await fetch(`${API_BASE}/jobs/${encodeURIComponent(pipeline)}/${encodeURIComponent(jobId)}/replay`, {
+    method: 'POST',
+  });
+  return handleResponse<{ status: string; job_id: string }>(response);
 }
 
 export async function getJob(id: string): Promise<Job> {

@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Annotated
@@ -59,6 +59,9 @@ from common.logging import configure_logging
 from common.storage.backends import StorageBackend, get_storage_backend
 from worker.tasks import process_ingestion_job
 from knowledge_classifier.config import get_settings as get_knowledge_settings
+from knowledge_worker.dispatch import dispatch_scan_unit_processing
+from specialist_worker.dispatch import dispatch_specialist_job
+from api.services.job_observability import summarize_jobs
 
 configure_logging(get_settings().log_level)
 
@@ -233,6 +236,110 @@ def background_activity(session: Session = Depends(db_session_dep)) -> dict:
     return _background_activity(session)
 
 
+@app.get("/jobs/metrics")
+def job_metrics(
+    hours: int = Query(default=24, ge=1, le=24 * 30),
+    session: Session = Depends(db_session_dep),
+) -> dict:
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+    pipelines = {
+        "ingestion": session.execute(
+            select(IngestionJob).where(IngestionJob.created_at >= cutoff)
+        ).scalars().all(),
+        "knowledge": session.execute(
+            select(KnowledgeJob).where(KnowledgeJob.created_at >= cutoff)
+        ).scalars().all(),
+        "specialists": session.execute(
+            select(SpecialistJob).where(SpecialistJob.created_at >= cutoff)
+        ).scalars().all(),
+    }
+    return {
+        "window_hours": hours,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "pipelines": {
+            name: summarize_jobs(jobs, window_hours=hours)
+            for name, jobs in pipelines.items()
+        },
+    }
+
+
+@app.post("/jobs/{pipeline}/{job_id}/replay")
+def replay_failed_job(
+    pipeline: str,
+    job_id: uuid.UUID,
+    session: Session = Depends(db_session_dep),
+) -> dict:
+    if pipeline == "ingestion":
+        failed_job = session.get(IngestionJob, job_id)
+        if failed_job is None:
+            raise HTTPException(status_code=404, detail="Ingestion job not found")
+        if failed_job.status != "failed":
+            raise HTTPException(status_code=409, detail="Only failed jobs can be replayed")
+        active = JobRepository(session).find_active_ingest_job(failed_job.document_id)
+        if active is not None:
+            return {"status": "already_active", "pipeline": pipeline, "job_id": str(active.id)}
+        replay = JobService(session).create_ingest_job(failed_job.document_id, priority=failed_job.priority)
+        dispatch_ingestion_job(replay.id)
+    elif pipeline == "knowledge":
+        failed_job = session.get(KnowledgeJob, job_id)
+        if failed_job is None:
+            raise HTTPException(status_code=404, detail="Knowledge job not found")
+        if failed_job.status != "failed":
+            raise HTTPException(status_code=409, detail="Only failed jobs can be replayed")
+        if failed_job.job_type != "full_processing":
+            raise HTTPException(status_code=409, detail="Only full_processing knowledge jobs can be replayed here")
+        active = session.execute(
+            select(KnowledgeJob)
+            .where(KnowledgeJob.scan_unit_id == failed_job.scan_unit_id)
+            .where(KnowledgeJob.job_type == failed_job.job_type)
+            .where(KnowledgeJob.status.in_(("queued", "pending", "processing", "running")))
+            .order_by(KnowledgeJob.created_at.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+        if active is not None:
+            return {"status": "already_active", "pipeline": pipeline, "job_id": str(active.id)}
+        replay = KnowledgeJob(
+            scan_unit_id=failed_job.scan_unit_id,
+            job_type=failed_job.job_type,
+            status="queued",
+        )
+        session.add(replay)
+        session.commit()
+        session.refresh(replay)
+        dispatch_scan_unit_processing(str(replay.scan_unit_id))
+    elif pipeline == "specialists":
+        failed_job = session.get(SpecialistJob, job_id)
+        if failed_job is None:
+            raise HTTPException(status_code=404, detail="Specialist job not found")
+        if failed_job.status != "failed":
+            raise HTTPException(status_code=409, detail="Only failed jobs can be replayed")
+        active = session.execute(
+            select(SpecialistJob)
+            .where(SpecialistJob.document_unit_id == failed_job.document_unit_id)
+            .where(SpecialistJob.specialist_type == failed_job.specialist_type)
+            .where(SpecialistJob.status.in_(("queued", "pending", "processing", "running")))
+            .order_by(SpecialistJob.created_at.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+        if active is not None:
+            return {"status": "already_active", "pipeline": pipeline, "job_id": str(active.id)}
+        replay = SpecialistJob(
+            document_unit_id=failed_job.document_unit_id,
+            specialist_type=failed_job.specialist_type,
+            status="queued",
+            input_version=failed_job.input_version,
+            routing_confidence=failed_job.routing_confidence,
+            routing_rationale=failed_job.routing_rationale,
+        )
+        session.add(replay)
+        session.commit()
+        session.refresh(replay)
+        dispatch_specialist_job(str(replay.id), replay.specialist_type)
+    else:
+        raise HTTPException(status_code=400, detail="Unknown pipeline")
+    return {"status": "replayed", "pipeline": pipeline, "job_id": str(replay.id)}
+
+
 @app.get("/jobs/{job_id}", response_model=JobResponse)
 def get_job(job_id: uuid.UUID, session: Session = Depends(db_session_dep)) -> JobResponse:
     JobService(session).reconcile_stale_jobs()
@@ -261,6 +368,7 @@ def _background_activity(session: Session) -> dict:
     knowledge_items = [_activity_item_from_knowledge(job, now) for job in knowledge_jobs]
     specialist_items = [_activity_item_from_specialist(job, session, now) for job in specialist_jobs]
     all_items = ingestion_items + knowledge_items + specialist_items
+    _enrich_activity_estimates(all_items)
 
     active_items = [
         item for item in all_items
@@ -299,6 +407,11 @@ def _background_activity(session: Session) -> dict:
             key=lambda item: item.get("started_at") or item.get("created_at") or "",
             reverse=True,
         )[:20],
+        "failed_jobs": sorted(
+            failed_items,
+            key=lambda item: item.get("finished_at") or item.get("created_at") or "",
+            reverse=True,
+        )[:20],
         "recent_jobs": recent_items,
     }
 
@@ -307,6 +420,11 @@ def _activity_pipeline_summary(items: list[dict], active_statuses: set[str], ter
     by_status: dict[str, int] = {}
     for item in items:
         by_status[item["status"]] = by_status.get(item["status"], 0) + 1
+    completed_durations = [
+        item["duration_seconds"] for item in items
+        if item.get("duration_seconds") is not None and item["status"] in terminal_statuses
+    ]
+    mean_duration = sum(completed_durations) / len(completed_durations) if completed_durations else None
     return {
         "total": len(items),
         "active": sum(1 for item in items if item["status"] in active_statuses and not item["is_possibly_stale"]),
@@ -314,6 +432,8 @@ def _activity_pipeline_summary(items: list[dict], active_statuses: set[str], ter
         "failed": by_status.get("failed", 0),
         "done": sum(count for status, count in by_status.items() if status in terminal_statuses),
         "by_status": by_status,
+        "mean_duration_seconds": round(mean_duration, 1) if mean_duration is not None else None,
+        "throughput_per_hour": _recent_throughput(items),
     }
 
 
@@ -335,6 +455,9 @@ def _activity_item_base(
     if anchor.tzinfo is None:
         anchor = anchor.replace(tzinfo=timezone.utc)
     age_seconds = int((now - anchor).total_seconds())
+    duration_seconds = None
+    if started_at and finished_at:
+        duration_seconds = max(0, int((finished_at - started_at).total_seconds()))
     return {
         "pipeline": pipeline,
         "id": str(job_id),
@@ -346,8 +469,50 @@ def _activity_item_base(
         "started_at": started_at.isoformat() if started_at else None,
         "finished_at": finished_at.isoformat() if finished_at else None,
         "age_seconds": max(0, age_seconds),
+        "duration_seconds": duration_seconds,
+        "eta_seconds": None,
+        "queue_position": None,
+        "waiting_reason": None,
         "is_possibly_stale": status in {"queued", "pending", "processing", "running"} and age_seconds > stale_after_seconds,
     }
+
+
+def _enrich_activity_estimates(items: list[dict]) -> None:
+    active_ingestion = any(
+        item["pipeline"] == "ingestion" and item["status"] in {"queued", "running"}
+        for item in items
+    )
+    for pipeline in {item["pipeline"] for item in items}:
+        pipeline_items = [item for item in items if item["pipeline"] == pipeline]
+        durations = [item["duration_seconds"] for item in pipeline_items if item.get("duration_seconds")]
+        average = sum(durations) / len(durations) if durations else None
+        queued = sorted(
+            [item for item in pipeline_items if item["status"] in {"queued", "pending"}],
+            key=lambda item: item["created_at"],
+        )
+        for position, item in enumerate(queued, start=1):
+            item["queue_position"] = position
+            item["eta_seconds"] = round(average * position) if average is not None else None
+            if pipeline == "knowledge" and active_ingestion:
+                item["waiting_reason"] = "In attesa che la coda OCR si svuoti; OCR ha priorita'."
+            else:
+                item["waiting_reason"] = f"In attesa del worker {pipeline}, posizione {position}."
+        for item in pipeline_items:
+            if item["status"] in {"processing", "running"}:
+                item["waiting_reason"] = f"Elaborazione {pipeline} in corso."
+                if average is not None:
+                    item["eta_seconds"] = max(0, round(average - item["age_seconds"]))
+            if item["is_possibly_stale"]:
+                item["waiting_reason"] = item.get("stale_reason") or "Job oltre la durata attesa."
+
+
+def _recent_throughput(items: list[dict]) -> float:
+    finished = [item for item in items if item.get("finished_at") and item["status"] in {"succeeded", "completed"}]
+    if not finished:
+        return 0.0
+    timestamps = [datetime.fromisoformat(item["finished_at"]) for item in finished]
+    span_hours = max((max(timestamps) - min(timestamps)).total_seconds() / 3600, 1 / 60)
+    return round(len(finished) / span_hours, 2)
 
 
 def _activity_item_from_ingestion(job: IngestionJob, session: Session, now: datetime) -> dict:
