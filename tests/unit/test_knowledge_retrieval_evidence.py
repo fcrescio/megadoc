@@ -1,6 +1,8 @@
 from api.routers import knowledge
 from api.routers.knowledge import (
     _KnowledgeAgentAction,
+    KnowledgeAgentChatRequest,
+    _prepare_automatic_agent_evidence,
     _run_knowledge_agent_tool,
     _split_search_text,
     _specialist_search_evidence,
@@ -116,3 +118,37 @@ def test_search_text_split_covers_tail_with_bounded_chunks():
     assert len(chunks) > 2
     assert all(len(chunk) <= 120 for chunk in chunks)
     assert "token-299" in chunks[-1]
+
+
+def test_automatic_evidence_reads_ranked_pages_and_seeds_trace(monkeypatch):
+    monkeypatch.setattr(
+        knowledge,
+        "_agent_retrieve_evidence",
+        lambda db, query, document_id, limit: {
+            "query": query,
+            "results": [
+                {"document_id": "doc-1", "page_from": 4, "metadata": {"original_filename": "one.pdf"}},
+                {"document_id": "doc-1", "page_from": 4, "metadata": {}},
+                {"document_id": "doc-2", "page_from": 7, "metadata": {"original_filename": "two.pdf"}},
+            ],
+            "warnings": [],
+        },
+    )
+    monkeypatch.setattr(
+        knowledge,
+        "_agent_page_text",
+        lambda db, document_id, page: {
+            "document_id": document_id,
+            "page_number": page,
+            "text": f"evidence {document_id} page {page}",
+        },
+    )
+
+    context, trace, signatures = _prepare_automatic_agent_evidence(
+        object(), KnowledgeAgentChatRequest(question="spese ascensore"), page_limit=2
+    )
+
+    assert context.count("PAGINA LETTA AUTOMATICAMENTE") == 2
+    assert "document_id: doc-1" in context
+    assert [step.action for step in trace] == ["retrieve_evidence", "get_page_text", "get_page_text"]
+    assert len(signatures) == 3

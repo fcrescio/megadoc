@@ -138,6 +138,7 @@ from knowledge_classifier.llm.openai_compat import OpenAICompatibleProvider
 from knowledge_worker.dispatch import dispatch_scan_unit_processing
 from specialist_worker.dispatch import dispatch_specialist_job
 from api.services.retrieval import RetrievalService
+from api.services.agent_orchestration import AgentToolBudget, SEARCH_ACTIONS, canonical_query
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 
@@ -2372,11 +2373,12 @@ def chat_with_knowledge_agent(
     if provider is None:
         raise HTTPException(status_code=503, detail="LLM backend is not configured")
 
-    messages = _build_knowledge_agent_messages(payload, db)
-    trace: list[KnowledgeAgentTraceStep] = []
+    automatic_context, trace, seen_tool_signatures = _prepare_automatic_agent_evidence(db, payload)
+    messages = _build_knowledge_agent_messages(payload, db, automatic_context=automatic_context)
+    tool_budget = _agent_budget_from_trace(trace)
     vision_requests: list[KnowledgeAgentVisionRequest] = []
     final_action: _KnowledgeAgentAction | None = None
-    seen_tool_signatures: set[str] = set()
+    blocked_tool_attempts = 0
 
     for step in range(1, payload.max_steps + 1):
         try:
@@ -2446,11 +2448,15 @@ def chat_with_knowledge_agent(
                 }
             else:
                 seen_tool_signatures.add(signature)
-                tool_output = _run_knowledge_agent_tool(db, action, allow_vision=payload.allow_vision)
-                if action.action == "request_page_vision" and isinstance(tool_output, dict):
-                    request = tool_output.get("vision_request")
-                    if isinstance(request, dict):
-                        vision_requests.append(KnowledgeAgentVisionRequest.model_validate(request))
+                budget_error = tool_budget.consume(action.action)
+                if budget_error:
+                    tool_output = {"status": "tool_budget_exhausted", "message": budget_error}
+                else:
+                    tool_output = _run_knowledge_agent_tool(db, action, allow_vision=payload.allow_vision)
+                    if action.action == "request_page_vision" and isinstance(tool_output, dict):
+                        request = tool_output.get("vision_request")
+                        if isinstance(request, dict):
+                            vision_requests.append(KnowledgeAgentVisionRequest.model_validate(request))
         except Exception as exc:
             tool_output = {}
             error = str(exc)
@@ -2472,6 +2478,14 @@ def chat_with_knowledge_agent(
                 content=f"Risultato tool {action.action}: {tool_output if error is None else {'error': error}}",
             )
         )
+        if isinstance(tool_output, dict) and tool_output.get("status") in {
+            "repeated_tool_skipped", "tool_budget_exhausted",
+        }:
+            blocked_tool_attempts += 1
+            if blocked_tool_attempts >= 2:
+                break
+        else:
+            blocked_tool_attempts = 0
 
     if final_action is None:
         final_action, final_step = _force_knowledge_agent_final_answer(provider, messages, trace, payload.max_steps + 1)
@@ -2557,13 +2571,16 @@ def stream_knowledge_agent_chat(
 
     def event_stream():
         started = time.monotonic()
-        messages = _build_knowledge_agent_messages(payload, db)
-        trace: list[KnowledgeAgentTraceStep] = []
+        automatic_context, trace, seen_tool_signatures = _prepare_automatic_agent_evidence(db, payload)
+        messages = _build_knowledge_agent_messages(payload, db, automatic_context=automatic_context)
+        tool_budget = _agent_budget_from_trace(trace)
         vision_requests: list[KnowledgeAgentVisionRequest] = []
         final_action: _KnowledgeAgentAction | None = None
-        seen_tool_signatures: set[str] = set()
+        blocked_tool_attempts = 0
 
         yield _knowledge_agent_stream_event("status", {"status": "running", "model": provider.model_name})
+        for trace_step in trace:
+            yield _knowledge_agent_stream_event("step", trace_step.model_dump(mode="json"))
         for step in range(1, payload.max_steps + 1):
             try:
                 action, _ = provider.chat_with_json(messages, _KnowledgeAgentAction, temperature=0.1, max_retries=2)
@@ -2628,11 +2645,15 @@ def stream_knowledge_agent_chat(
                     }
                 else:
                     seen_tool_signatures.add(signature)
-                    tool_output = _run_knowledge_agent_tool(db, action, allow_vision=payload.allow_vision)
-                    if action.action == "request_page_vision" and isinstance(tool_output, dict):
-                        request = tool_output.get("vision_request")
-                        if isinstance(request, dict):
-                            vision_requests.append(KnowledgeAgentVisionRequest.model_validate(request))
+                    budget_error = tool_budget.consume(action.action)
+                    if budget_error:
+                        tool_output = {"status": "tool_budget_exhausted", "message": budget_error}
+                    else:
+                        tool_output = _run_knowledge_agent_tool(db, action, allow_vision=payload.allow_vision)
+                        if action.action == "request_page_vision" and isinstance(tool_output, dict):
+                            request = tool_output.get("vision_request")
+                            if isinstance(request, dict):
+                                vision_requests.append(KnowledgeAgentVisionRequest.model_validate(request))
             except Exception as exc:
                 tool_output = {}
                 error = str(exc)
@@ -2654,6 +2675,14 @@ def stream_knowledge_agent_chat(
                     content=f"Risultato tool {action.action}: {tool_output if error is None else {'error': error}}",
                 )
             )
+            if isinstance(tool_output, dict) and tool_output.get("status") in {
+                "repeated_tool_skipped", "tool_budget_exhausted",
+            }:
+                blocked_tool_attempts += 1
+                if blocked_tool_attempts >= 2:
+                    break
+            else:
+                blocked_tool_attempts = 0
 
         if final_action is None:
             final_action, final_step = _force_knowledge_agent_final_answer(provider, messages, trace, payload.max_steps + 1)
@@ -2770,7 +2799,12 @@ def _validate_knowledge_agent_final(
     return None
 
 
-def _build_knowledge_agent_messages(payload: KnowledgeAgentChatRequest, db: Session | None = None) -> list[ChatMessage]:
+def _build_knowledge_agent_messages(
+    payload: KnowledgeAgentChatRequest,
+    db: Session | None = None,
+    *,
+    automatic_context: str = "",
+) -> list[ChatMessage]:
     messages = [
         ChatMessage(
             role="system",
@@ -2781,6 +2815,8 @@ def _build_knowledge_agent_messages(payload: KnowledgeAgentChatRequest, db: Sess
                 "Prima di rispondere su un documento devi leggere il testo OCR con get_page_text per le pagine rilevanti. "
                 "Dopo aver identificato un documento lungo, richiama retrieve_evidence con document_id per localizzare "
                 "le pagine rilevanti invece di sfogliarlo pagina per pagina. "
+                "Le PAGINE LETTE AUTOMATICAMENTE nel contesto sono evidenze gia' verificate e citabili: "
+                "rispondi direttamente se bastano, senza ripetere retrieve_evidence o get_page_text. "
                 "Non ripetere la stessa azione con gli stessi parametri se il risultato precedente non era utile: "
                 "allarga la query, leggi una pagina candidata, oppure produci una final_answer negativa se non ci sono prove. "
                 "Per domande su bollette da pagare, scadenze, fornitori, importi o calendari usa search_calendar_events: "
@@ -2814,15 +2850,14 @@ def _build_knowledge_agent_messages(payload: KnowledgeAgentChatRequest, db: Sess
                 ),
             )
         )
-    presearch_context = _build_question_presearch_context(db, payload.question)
-    if presearch_context:
+    if automatic_context:
         messages.append(
             ChatMessage(
                 role="user",
                 content=(
-                    "Ricerca keyword OCR preliminare sulla domanda. "
-                    "Usala solo come orientamento: prima di citarla nella risposta devi leggere la pagina con get_page_text.\n\n"
-                    f"{presearch_context}"
+                    "Evidenze recuperate e lette automaticamente prima del ragionamento. "
+                    "Ogni blocco riporta documento e pagina e puo' essere citato nella final_answer.\n\n"
+                    f"{automatic_context}"
                 ),
             )
         )
@@ -2844,6 +2879,86 @@ def _build_knowledge_agent_messages(payload: KnowledgeAgentChatRequest, db: Sess
         )
     )
     return messages
+
+
+def _prepare_automatic_agent_evidence(
+    db: Session,
+    payload: KnowledgeAgentChatRequest,
+    *,
+    page_limit: int = 3,
+) -> tuple[str, list[KnowledgeAgentTraceStep], set[str]]:
+    trace: list[KnowledgeAgentTraceStep] = []
+    signatures: set[str] = set()
+    try:
+        retrieval = _agent_retrieve_evidence(db, payload.question, document_id=None, limit=max(page_limit * 2, 6))
+    except Exception as exc:
+        trace.append(KnowledgeAgentTraceStep(step=0, action="automatic_retrieve_evidence", error=str(exc)))
+        return "", trace, signatures
+
+    retrieval_action = _KnowledgeAgentAction(action="retrieve_evidence", query=payload.question, limit=max(page_limit * 2, 6))
+    signatures.add(_knowledge_agent_tool_signature(retrieval_action))
+    trace.append(
+        KnowledgeAgentTraceStep(
+            step=0,
+            action="retrieve_evidence",
+            reasoning="automatic evidence retrieval",
+            input={"query": payload.question, "limit": max(page_limit * 2, 6)},
+            output=retrieval,
+        )
+    )
+    blocks: list[str] = []
+    seen_pages: set[tuple[str, int]] = set()
+    for candidate in retrieval.get("results", []):
+        document_id = candidate.get("document_id")
+        page_number = candidate.get("page_from")
+        if not document_id or not isinstance(page_number, int):
+            continue
+        page_key = (document_id, page_number)
+        if page_key in seen_pages:
+            continue
+        seen_pages.add(page_key)
+        try:
+            page = _agent_page_text(db, document_id, page_number)
+        except Exception as exc:
+            trace.append(
+                KnowledgeAgentTraceStep(
+                    step=0,
+                    action="get_page_text",
+                    input={"document_id": document_id, "page_number": page_number},
+                    error=str(exc),
+                )
+            )
+            continue
+        action = _KnowledgeAgentAction(
+            action="get_page_text",
+            document_id=document_id,
+            page_number=page_number,
+        )
+        signatures.add(_knowledge_agent_tool_signature(action))
+        trace.append(
+            KnowledgeAgentTraceStep(
+                step=0,
+                action="get_page_text",
+                reasoning="automatic evidence read",
+                input={"document_id": document_id, "page_number": page_number},
+                output=page,
+            )
+        )
+        metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+        blocks.append(
+            "\n".join(
+                [
+                    "PAGINA LETTA AUTOMATICAMENTE",
+                    f"document_id: {document_id}",
+                    f"filename: {metadata.get('original_filename') or 'n/d'}",
+                    f"page: {page_number}",
+                    f"text: {page.get('text', '')}",
+                ]
+            )
+        )
+        if len(blocks) >= page_limit:
+            break
+    return "\n\n---\n\n".join(blocks), trace, signatures
 
 
 def _build_selected_document_context(db: Session | None, document_ids: list[str]) -> str:
@@ -4060,7 +4175,23 @@ def _knowledge_agent_tool_signature(action: _KnowledgeAgentAction) -> str:
     for key, value in list(payload.items()):
         if isinstance(value, str):
             payload[key] = " ".join(value.strip().lower().split())
+    if action.action in SEARCH_ACTIONS and action.query:
+        payload["query"] = canonical_query(action.query)
     return json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
+
+
+def _agent_budget_from_trace(trace: list[KnowledgeAgentTraceStep]) -> AgentToolBudget:
+    budget = AgentToolBudget()
+    for step in trace:
+        if not step.error and step.action in {
+            "retrieve_evidence",
+            "get_page_text",
+            "analyze_page_image",
+            "search_calendar_events",
+            "query_accounting_tables",
+        }:
+            budget.consume(step.action)
+    return budget
 
 
 def _agent_search_calendar_events(
