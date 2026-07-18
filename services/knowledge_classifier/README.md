@@ -162,8 +162,8 @@ GET /knowledge/specialist-results/{result_id}/export?format=json|csv
 
 | Variabile | Descrizione | Default |
 |-----------|-------------|---------|
-| `KN_LLM_ENDPOINT` | Endpoint LLM API visto dall'API/container standard | `http://10.89.0.3:8080/v1` |
-| `KN_WORKER_LLM_ENDPOINT` | Endpoint LLM visto dal worker in host network | `http://10.89.0.3:8080/v1` |
+| `KN_LLM_ENDPOINT` | Endpoint LLM API visto dall'API/container standard | `http://host.docker.internal:8080/v1` |
+| `KN_WORKER_LLM_ENDPOINT` | Endpoint LLM visto dal worker | `http://host.docker.internal:8080/v1` |
 | `KN_LLM_MODEL` | Nome modello LLM | `qwen3.6-A3B` |
 | `KN_LLM_API_KEY` | API key LLM | - |
 | `KN_LLM_TIMEOUT` | Timeout richieste | `240` |

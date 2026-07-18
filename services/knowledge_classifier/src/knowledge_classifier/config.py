@@ -14,7 +14,7 @@ class Settings(BaseSettings):
 
     # LLM Configuration
     llm_endpoint: str = Field(
-        default="http://10.89.0.3:8080/v1",
+        default="http://host.docker.internal:8080/v1",
         description="LLM API endpoint (OpenAI-compatible)"
     )
     llm_model: str = Field(default="qwen3.5-27B", description="LLM model name")

@@ -99,6 +99,27 @@ export interface SystemStatus {
   llm_backend: RemoteBackendStatus;
 }
 
+export interface RuntimeMLSettings {
+  llm_endpoint: string;
+  llm_model: string;
+  embedding_endpoint: string;
+  embedding_model: string;
+  ocr_vision_endpoint: string;
+  ocr_vision_model: string;
+  ocr_dots_endpoint: string;
+  ocr_dots_model: string;
+}
+
+export interface RuntimeSettingsResponse {
+  values: RuntimeMLSettings;
+  environment_defaults: RuntimeMLSettings;
+  overridden_keys: string[];
+}
+
+export interface RuntimeSettingsProbeResponse {
+  backends: RemoteBackendStatus[];
+}
+
 export interface BackgroundActivityJob {
   pipeline: 'ingestion' | 'knowledge' | 'specialists' | string;
   id: string;

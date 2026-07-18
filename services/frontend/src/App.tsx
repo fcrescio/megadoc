@@ -8,10 +8,11 @@ const DocumentDetail = lazy(() => import('./components/DocumentDetail'));
 const UploadForm = lazy(() => import('./components/UploadForm'));
 const KnowledgeBase = lazy(() => import('./components/KnowledgeBase'));
 const ManualView = lazy(() => import('./components/ManualView'));
+const SettingsView = lazy(() => import('./components/SettingsView'));
 
-type View = 'documents' | 'knowledge' | 'upload' | 'manual';
+type View = 'documents' | 'knowledge' | 'upload' | 'manual' | 'settings';
 type DocumentTab = 'info' | 'pdf' | 'ocr' | 'knowledge' | 'versions' | 'assets';
-type MainNavIcon = 'documents' | 'knowledge' | 'manual' | 'upload';
+type MainNavIcon = 'documents' | 'knowledge' | 'manual' | 'upload' | 'settings';
 
 interface RouteState {
   view: View;
@@ -38,6 +39,9 @@ function parseRoute(): RouteState {
   }
   if (pathname === '/manual') {
     return { view: 'manual', selectedDoc: null, initialTab: 'info', selectedChatDocumentIds: [] };
+  }
+  if (pathname === '/settings') {
+    return { view: 'settings', selectedDoc: null, initialTab: 'info', selectedChatDocumentIds: [] };
   }
   if (pathname.startsWith('/documents/')) {
     const documentId = pathname.replace('/documents/', '').trim();
@@ -105,6 +109,14 @@ function NavIcon({ icon }: { icon: MainNavIcon }) {
       </svg>
     );
   }
+  if (icon === 'settings') {
+    return (
+      <svg {...common}>
+        <circle cx="12" cy="12" r="3" />
+        <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21h-4v-.09A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3v-4h.09A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.09A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.13.38.36.72.68.98.31.26.7.4 1.1.4H21v4h-.09A1.7 1.7 0 0 0 19.4 15Z" />
+      </svg>
+    );
+  }
   return (
     <svg {...common}>
       <path d="M12 16V4" />
@@ -139,6 +151,8 @@ function App() {
       url = '/manual';
     } else if (next.view === 'upload' && !next.selectedDoc) {
       url = '/upload';
+    } else if (next.view === 'settings' && !next.selectedDoc) {
+      url = '/settings';
     } else if (next.selectedDoc) {
       url = `/documents/${next.selectedDoc}`;
       if (next.initialTab !== 'info') {
@@ -213,6 +227,7 @@ function App() {
                 { id: 'knowledge', label: 'Conoscenza', icon: 'knowledge' },
                 { id: 'manual', label: 'Manuale', icon: 'manual' },
                 { id: 'upload', label: 'Caricamento', icon: 'upload' },
+                { id: 'settings', label: 'Settings', icon: 'settings' },
               ].map((item) => (
                 <button
                   key={item.id}
@@ -288,6 +303,8 @@ function App() {
             />
           ) : route.view === 'manual' ? (
             <ManualView />
+          ) : route.view === 'settings' ? (
+            <SettingsView />
           ) : (
             <div className="grid gap-6 xl:grid-cols-[1.35fr_0.85fr]">
               <DocumentList onSelectDocument={(documentId) => openDocument(documentId)} />

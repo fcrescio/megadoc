@@ -117,6 +117,27 @@ class SystemStatusResponse(BaseModel):
     llm_backend: RemoteBackendStatus
 
 
+class RuntimeMLSettings(BaseModel):
+    llm_endpoint: str
+    llm_model: str
+    embedding_endpoint: str
+    embedding_model: str
+    ocr_vision_endpoint: str
+    ocr_vision_model: str
+    ocr_dots_endpoint: str
+    ocr_dots_model: str
+
+
+class RuntimeSettingsResponse(BaseModel):
+    values: RuntimeMLSettings
+    environment_defaults: RuntimeMLSettings
+    overridden_keys: list[str]
+
+
+class RuntimeSettingsProbeResponse(BaseModel):
+    backends: list[RemoteBackendStatus]
+
+
 class ManualCommentCreate(BaseModel):
     selected_text: str
     selection_start: int | None = None

@@ -45,6 +45,7 @@ from common.application.entities import (
     get_or_create_canonical_entity,
 )
 from common.application.projections import rebuild_semantic_projections
+from common.application.runtime_settings import resolve_runtime_settings
 from common.db.models import (
     CanonicalEntity,
     CanonicalEntityVariant,
@@ -2369,7 +2370,7 @@ def chat_with_knowledge_agent(
     db: Session = Depends(get_db_session),
 ):
     started = time.monotonic()
-    provider = _knowledge_agent_provider()
+    provider = _knowledge_agent_provider(db)
     if provider is None:
         raise HTTPException(status_code=503, detail="LLM backend is not configured")
 
@@ -2565,7 +2566,7 @@ def stream_knowledge_agent_chat(
     payload: KnowledgeAgentChatRequest,
     db: Session = Depends(get_db_session),
 ):
-    provider = _knowledge_agent_provider()
+    provider = _knowledge_agent_provider(db)
     if provider is None:
         raise HTTPException(status_code=503, detail="LLM backend is not configured")
 
@@ -3295,18 +3296,21 @@ def _serialize_knowledge_agent_run_detail(run: KnowledgeAgentRun) -> KnowledgeAg
     )
 
 
-def _embedding_provider() -> OpenAICompatibleProvider:
+def _embedding_provider(db: Session) -> OpenAICompatibleProvider:
     settings = get_knowledge_settings()
-    endpoint = (
+    defaults = {
+        "embedding_endpoint": (
         os.getenv("KN_EMBEDDING_ENDPOINT")
         or os.getenv("KN_WORKER_LLM_ENDPOINT")
         or settings.embedding_endpoint
         or settings.llm_endpoint
-    )
-    model = os.getenv("KN_EMBEDDING_MODEL", settings.embedding_model)
+        ),
+        "embedding_model": os.getenv("KN_EMBEDDING_MODEL", settings.embedding_model),
+    }
+    runtime = resolve_runtime_settings(db, defaults)
     return OpenAICompatibleProvider(
-        base_url=endpoint,
-        model=model,
+        base_url=runtime["embedding_endpoint"],
+        model=runtime["embedding_model"],
         api_key=settings.llm_api_key,
         timeout=max(settings.embedding_timeout, 120),
         max_tokens=None,
@@ -3322,7 +3326,7 @@ def _agent_semantic_search(
 ) -> dict[str, Any]:
     if not query.strip():
         return {"query": query, "results": [], "warning": "semantic_search requires a non-empty query"}
-    provider = _embedding_provider()
+    provider = _embedding_provider(db)
     query_embedding = provider.embed(query)[0]
     document_filter = "AND document_id = CAST(:document_id AS uuid)" if document_id else ""
     rows = db.execute(
@@ -3384,7 +3388,7 @@ def _agent_lexical_index_search(
 ) -> dict[str, Any]:
     if not query.strip():
         return {"query": query, "hits": [], "warning": "query is empty"}
-    provider = _embedding_provider()
+    provider = _embedding_provider(db)
     terms = [term for term in re.findall(r"[\w]+", query.lower()) if len(term) >= 3]
     if not terms:
         return {"query": query, "hits": [], "warning": "query has no searchable terms"}
@@ -3443,7 +3447,7 @@ def _agent_lexical_index_search(
 
 
 def _knowledge_search_index_stats(db: Session) -> KnowledgeSearchIndexStats:
-    active_model = _embedding_provider().model_name
+    active_model = _embedding_provider(db).model_name
     total = int(db.execute(
         text("SELECT count(*) FROM knowledge_search_chunks WHERE embedding_model = :model"),
         {"model": active_model},
@@ -3499,7 +3503,7 @@ def _knowledge_search_index_stats(db: Session) -> KnowledgeSearchIndexStats:
 
 
 def _rebuild_knowledge_search_index(db: Session) -> KnowledgeSearchIndexRebuildResponse:
-    provider = _embedding_provider()
+    provider = _embedding_provider(db)
     chunks = _collect_knowledge_search_chunks(db)
     db.execute(text("DELETE FROM knowledge_search_chunks WHERE embedding_model = :model"), {"model": provider.model_name})
     chunks_indexed, chunks_skipped = _index_knowledge_search_chunks(db, provider, chunks)
@@ -3517,7 +3521,7 @@ def _refresh_document_search_index(
     db: Session,
     document_id: uuid.UUID,
 ) -> KnowledgeSearchIndexRebuildResponse:
-    provider = _embedding_provider()
+    provider = _embedding_provider(db)
     chunks = _collect_knowledge_search_chunks(db, document_id=document_id)
     db.execute(
         text("""
@@ -3953,7 +3957,7 @@ def ask_accounting(
             "evidence": [],
         }
 
-    plan = _plan_accounting_question(payload, tables)
+    plan = _plan_accounting_question(db, payload, tables)
     subject = payload.subject or plan.subject or _fallback_subject_from_question(payload.question)
     if not subject:
         return {
@@ -4056,28 +4060,36 @@ def _normalize_search_text(value: str | None) -> str:
     return re.sub(r"[^a-z0-9]+", " ", ascii_value).strip()
 
 
-def _accounting_llm_provider() -> OpenAICompatibleProvider | None:
+def _accounting_llm_provider(db: Session) -> OpenAICompatibleProvider | None:
     settings = get_knowledge_settings()
-    endpoint = os.getenv("KN_WORKER_LLM_ENDPOINT", settings.llm_endpoint)
+    runtime = resolve_runtime_settings(db, {
+        "llm_endpoint": os.getenv("KN_WORKER_LLM_ENDPOINT", settings.llm_endpoint),
+        "llm_model": settings.llm_model,
+    })
+    endpoint = runtime["llm_endpoint"]
     if endpoint.startswith("mock://"):
         return None
     return OpenAICompatibleProvider(
         base_url=endpoint,
-        model=settings.llm_model,
+        model=runtime["llm_model"],
         api_key=settings.llm_api_key,
         timeout=max(settings.llm_timeout, 120),
         max_tokens=min(settings.llm_max_tokens, 2048),
     )
 
 
-def _knowledge_agent_provider() -> OpenAICompatibleProvider | None:
+def _knowledge_agent_provider(db: Session) -> OpenAICompatibleProvider | None:
     settings = get_knowledge_settings()
-    endpoint = os.getenv("KN_WORKER_LLM_ENDPOINT", settings.llm_endpoint)
+    runtime = resolve_runtime_settings(db, {
+        "llm_endpoint": os.getenv("KN_WORKER_LLM_ENDPOINT", settings.llm_endpoint),
+        "llm_model": settings.llm_model,
+    })
+    endpoint = runtime["llm_endpoint"]
     if endpoint.startswith("mock://"):
         return None
     return OpenAICompatibleProvider(
         base_url=endpoint,
-        model=settings.llm_model,
+        model=runtime["llm_model"],
         api_key=settings.llm_api_key,
         timeout=max(settings.llm_timeout, 180),
         max_tokens=min(settings.llm_max_tokens, 4096),
@@ -4475,7 +4487,7 @@ def _agent_analyze_page_image(
 ) -> dict[str, Any]:
     if page_number < 1:
         raise ValueError("page_number must be >= 1")
-    provider = _knowledge_agent_provider()
+    provider = _knowledge_agent_provider(db)
     if provider is None:
         raise ValueError("LLM backend is not configured")
     image_base64, render_info = _render_document_page_png_base64(db, document_id, page_number)
@@ -4728,10 +4740,11 @@ def _extract_ocr_page_text(ocr: OCRResult, page_number: int) -> str:
 
 
 def _plan_accounting_question(
+    db: Session,
     payload: AccountingAskRequest,
     tables: list[dict[str, Any]],
 ) -> _AccountingAskPlan:
-    provider = _accounting_llm_provider()
+    provider = _accounting_llm_provider(db)
     if provider is None:
         return _fallback_accounting_plan(payload.question)
     table_summary = [

@@ -8,6 +8,16 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from common.db.base import Base
 
 
+class RuntimeSetting(Base):
+    __tablename__ = "runtime_settings"
+
+    key: Mapped[str] = mapped_column(String(128), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
 class Document(Base):
     __tablename__ = "documents"
     __table_args__ = (Index("ix_documents_sha256", "sha256"),)

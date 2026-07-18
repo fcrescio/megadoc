@@ -66,7 +66,7 @@ class Settings(BaseSettings):
     ocr_accelerator_num_threads: int = Field(default=4, alias="OCR_ACCELERATOR_NUM_THREADS")
     ocr_rapidocr_backend: str = Field(default="torch", alias="OCR_RAPIDOCR_BACKEND")
     ocr_llm_vision_endpoint: str = Field(
-        default="http://10.89.0.3:8080/v1",
+        default="http://host.docker.internal:8080/v1",
         alias="OCR_LLM_VISION_ENDPOINT",
     )
     ocr_llm_vision_model: str = Field(default="qwen3.6-A3B", alias="OCR_LLM_VISION_MODEL")
@@ -75,7 +75,7 @@ class Settings(BaseSettings):
     ocr_llm_vision_max_tokens: int = Field(default=4096, alias="OCR_LLM_VISION_MAX_TOKENS")
     ocr_llm_vision_render_scale: float = Field(default=1.5, alias="OCR_LLM_VISION_RENDER_SCALE")
     ocr_dots_native_endpoint: str = Field(
-        default="http://10.89.0.3:8080/v1",
+        default="http://host.docker.internal:8080/v1",
         alias="OCR_DOTS_NATIVE_ENDPOINT",
     )
     ocr_dots_native_model: str = Field(
@@ -129,7 +129,7 @@ class Settings(BaseSettings):
     )
     ocr_refinement_enabled: bool = Field(default=False, alias="OCR_REFINEMENT_ENABLED")
     ocr_refinement_endpoint: str = Field(
-        default="http://10.89.0.3:8080/v1",
+        default="http://host.docker.internal:8080/v1",
         alias="OCR_REFINEMENT_ENDPOINT",
     )
     ocr_refinement_model: str = Field(default="qwen3.6-A3B", alias="OCR_REFINEMENT_MODEL")

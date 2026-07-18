@@ -28,8 +28,16 @@ from common.api.schemas import (
     OCRResponse,
     RemoteBackendStatus,
     ReadinessResponse,
+    RuntimeMLSettings,
+    RuntimeSettingsProbeResponse,
+    RuntimeSettingsResponse,
     SystemStatusResponse,
     UploadResponse,
+)
+from common.application.runtime_settings import (
+    load_runtime_settings,
+    resolve_runtime_settings,
+    save_runtime_settings,
 )
 from common.application.repositories import (
     AssetRepository,
@@ -1034,8 +1042,9 @@ def system_status(
     except Exception:
         storage_status = "error"
 
-    ocr_status = _probe_ocr_backend(settings)
-    llm_status = _probe_llm_backend(settings)
+    runtime = _effective_runtime_settings(session, settings)
+    ocr_status = _probe_ocr_backend(settings, runtime)
+    llm_status = _probe_llm_backend(runtime)
 
     statuses = {
         db_status,
@@ -1060,7 +1069,108 @@ def system_status(
     )
 
 
-def _probe_ocr_backend(settings: Settings) -> RemoteBackendStatus:
+@app.get("/settings/runtime", response_model=RuntimeSettingsResponse)
+def get_runtime_settings(
+    session: Session = Depends(db_session_dep),
+    settings: Settings = Depends(get_settings_dep),
+) -> RuntimeSettingsResponse:
+    defaults = _runtime_setting_defaults(settings)
+    overrides = load_runtime_settings(session)
+    return RuntimeSettingsResponse(
+        values=RuntimeMLSettings(**resolve_runtime_settings(session, defaults)),
+        environment_defaults=RuntimeMLSettings(**defaults),
+        overridden_keys=sorted(overrides),
+    )
+
+
+@app.put("/settings/runtime", response_model=RuntimeSettingsResponse)
+def put_runtime_settings(
+    payload: RuntimeMLSettings,
+    session: Session = Depends(db_session_dep),
+    settings: Settings = Depends(get_settings_dep),
+) -> RuntimeSettingsResponse:
+    values = payload.model_dump()
+    _validate_runtime_endpoints(values)
+    try:
+        save_runtime_settings(session, values)
+        session.commit()
+    except ValueError as exc:
+        session.rollback()
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    defaults = _runtime_setting_defaults(settings)
+    return RuntimeSettingsResponse(
+        values=payload,
+        environment_defaults=RuntimeMLSettings(**defaults),
+        overridden_keys=sorted(values),
+    )
+
+
+@app.post("/settings/runtime/probe", response_model=RuntimeSettingsProbeResponse)
+def probe_runtime_settings(payload: RuntimeMLSettings) -> RuntimeSettingsProbeResponse:
+    values = payload.model_dump()
+    _validate_runtime_endpoints(values)
+    probes = [
+        _probe_openai_compatible_backend(
+            name="knowledge_llm",
+            endpoint=values["llm_endpoint"],
+            model=values["llm_model"],
+            api_key=get_knowledge_settings().llm_api_key,
+            timeout_seconds=10,
+        ),
+        _probe_openai_compatible_backend(
+            name="embeddings",
+            endpoint=values["embedding_endpoint"],
+            model=values["embedding_model"],
+            api_key=get_knowledge_settings().llm_api_key,
+            timeout_seconds=10,
+        ),
+        _probe_openai_compatible_backend(
+            name="ocr:dots_native",
+            endpoint=values["ocr_dots_endpoint"],
+            model=values["ocr_dots_model"],
+            api_key=get_settings().ocr_dots_native_api_key,
+            timeout_seconds=10,
+        ),
+        _probe_openai_compatible_backend(
+            name="ocr:llm_vision",
+            endpoint=values["ocr_vision_endpoint"],
+            model=values["ocr_vision_model"],
+            api_key=get_settings().ocr_llm_vision_api_key,
+            timeout_seconds=10,
+        ),
+    ]
+    return RuntimeSettingsProbeResponse(backends=probes)
+
+
+def _runtime_setting_defaults(settings: Settings) -> dict[str, str]:
+    knowledge = get_knowledge_settings()
+    llm_endpoint = os.getenv("KN_WORKER_LLM_ENDPOINT", knowledge.llm_endpoint)
+    return {
+        "llm_endpoint": llm_endpoint,
+        "llm_model": knowledge.llm_model,
+        "embedding_endpoint": knowledge.embedding_endpoint or llm_endpoint,
+        "embedding_model": knowledge.embedding_model,
+        "ocr_vision_endpoint": settings.ocr_llm_vision_endpoint,
+        "ocr_vision_model": settings.ocr_llm_vision_model,
+        "ocr_dots_endpoint": os.getenv(
+            "OCR_WORKER_DOTS_NATIVE_ENDPOINT", settings.ocr_dots_native_endpoint
+        ),
+        "ocr_dots_model": settings.ocr_dots_native_model,
+    }
+
+
+def _effective_runtime_settings(session: Session, settings: Settings) -> dict[str, str]:
+    return resolve_runtime_settings(session, _runtime_setting_defaults(settings))
+
+
+def _validate_runtime_endpoints(values: dict[str, str]) -> None:
+    for key in ("llm_endpoint", "embedding_endpoint", "ocr_vision_endpoint", "ocr_dots_endpoint"):
+        value = values[key].strip()
+        if not value.startswith(("http://", "https://", "mock://")):
+            raise HTTPException(status_code=422, detail=f"{key} must be an HTTP(S) or mock URL")
+
+
+def _probe_ocr_backend(settings: Settings, runtime: dict[str, str]) -> RemoteBackendStatus:
     backend = (settings.ocr_backend or "").strip().lower()
     if backend not in {"dots_native", "llm_vision"}:
         return RemoteBackendStatus(
@@ -1071,12 +1181,12 @@ def _probe_ocr_backend(settings: Settings) -> RemoteBackendStatus:
             model_available=None,
         )
     if backend == "dots_native":
-        endpoint = os.getenv("OCR_WORKER_DOTS_NATIVE_ENDPOINT", settings.ocr_dots_native_endpoint)
-        model = settings.ocr_dots_native_model
+        endpoint = runtime["ocr_dots_endpoint"]
+        model = runtime["ocr_dots_model"]
         api_key = settings.ocr_dots_native_api_key
     else:
-        endpoint = settings.ocr_llm_vision_endpoint
-        model = settings.ocr_llm_vision_model
+        endpoint = runtime["ocr_vision_endpoint"]
+        model = runtime["ocr_vision_model"]
         api_key = settings.ocr_llm_vision_api_key
     return _probe_openai_compatible_backend(
         name=f"ocr:{backend}",
@@ -1086,22 +1196,22 @@ def _probe_ocr_backend(settings: Settings) -> RemoteBackendStatus:
     )
 
 
-def _probe_llm_backend(settings: Settings) -> RemoteBackendStatus:
+def _probe_llm_backend(runtime: dict[str, str]) -> RemoteBackendStatus:
     kn_settings = get_knowledge_settings()
-    if kn_settings.use_mock_llm:
+    if runtime["llm_endpoint"].startswith("mock://"):
         return RemoteBackendStatus(
             name="knowledge_llm",
             status="ok",
-            endpoint=kn_settings.llm_endpoint,
-            model=kn_settings.llm_model,
+            endpoint=runtime["llm_endpoint"],
+            model=runtime["llm_model"],
             detail="Mock LLM attivo.",
             server_reachable=True,
             model_available=True,
         )
     return _probe_openai_compatible_backend(
         name="knowledge_llm",
-        endpoint=os.getenv("KN_WORKER_LLM_ENDPOINT", kn_settings.llm_endpoint),
-        model=kn_settings.llm_model,
+        endpoint=runtime["llm_endpoint"],
+        model=runtime["llm_model"],
         api_key=kn_settings.llm_api_key,
     )
 

@@ -1,0 +1,39 @@
+services:
+  api:
+    networks:
+      ml-infra-net:
+        ipv4_address: 10.89.0.51
+
+  worker:
+    gpus: all
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    networks:
+      ml-infra-net:
+        ipv4_address: 10.89.0.52
+
+  worker_llm_vision:
+    networks:
+      ml-infra-net:
+        ipv4_address: 10.89.0.53
+
+  knowledge_worker:
+    networks:
+      ml-infra-net:
+        ipv4_address: 10.89.0.54
+
+  specialist_accounting_worker:
+    networks:
+      ml-infra-net:
+        ipv4_address: 10.89.0.55
+
+  search_index_worker:
+    networks:
+      ml-infra-net:
+        ipv4_address: 10.89.0.56
+
+networks:
+  ml-infra-net:
+    name: ml-infra_ml-infra-net
+    external: true

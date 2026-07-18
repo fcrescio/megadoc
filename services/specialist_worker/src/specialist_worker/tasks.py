@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from celery import shared_task
 from common.application.graph import project_document_unit
 from common.application.retry import retry_delay_seconds
+from common.application.runtime_settings import resolve_runtime_settings
 from common.application.specialist_contracts import (
     SpecialistExecutionContext,
     attach_specialist_envelope,
@@ -87,7 +88,7 @@ def process_specialist_job(self, specialist_job_id: str):
             ocr_result = document_unit.scan_unit.ocr_result
             segment_text = extract_document_unit_text(document_unit, ocr_result)
 
-            registry = build_specialist_registry(_accounting_reconciliation_provider)
+            registry = build_specialist_registry(lambda: _accounting_reconciliation_provider(session))
             handler = registry.get(specialist_job.specialist_type)
             extraction = handler.extract(SpecialistExecutionContext(
                 session=session,
@@ -167,21 +168,25 @@ def process_specialist_job(self, specialist_job_id: str):
             session.close()
 
 
-def _accounting_reconciliation_provider() -> OpenAICompatibleProvider | None:
+def _accounting_reconciliation_provider(session: Session) -> OpenAICompatibleProvider | None:
     enabled = (
         os.getenv("SPECIALIST_ACCOUNTING_LLM_RECONCILIATION_ENABLED", "true").strip().lower()
     )
     if enabled not in {"1", "true", "yes", "on"}:
         return None
     settings = get_knowledge_settings()
-    endpoint = os.getenv("KN_WORKER_LLM_ENDPOINT", settings.llm_endpoint)
+    runtime = resolve_runtime_settings(session, {
+        "llm_endpoint": os.getenv("KN_WORKER_LLM_ENDPOINT", settings.llm_endpoint),
+        "llm_model": settings.llm_model,
+    })
+    endpoint = runtime["llm_endpoint"]
     if endpoint.startswith("mock://"):
         return None
     timeout = int(os.getenv("SPECIALIST_ACCOUNTING_LLM_RECONCILIATION_TIMEOUT", "240"))
     max_tokens = int(os.getenv("SPECIALIST_ACCOUNTING_LLM_RECONCILIATION_MAX_TOKENS", "4096"))
     return OpenAICompatibleProvider(
         base_url=endpoint,
-        model=settings.llm_model,
+        model=runtime["llm_model"],
         api_key=settings.llm_api_key,
         timeout=timeout,
         max_tokens=min(max_tokens, settings.llm_max_tokens),

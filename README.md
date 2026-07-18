@@ -35,7 +35,7 @@ Funzionalità implementate:
 - `services/knowledge_classifier`: README e modulo logico della fase knowledge.
 - `packages/common`: dominio, DB models, repository, servizi applicativi, storage, adapter OCR, knowledge e specialisti.
 - `docker-compose.yml`: stack completo con `postgres`, `redis`, `minio`, `mc-init`, `migrate`, `api`, `worker`, `worker_llm_vision`, `knowledge_worker`, specialisti e `frontend`.
-- rete interna `megadoc-net` per backend, dati e worker; `frontend-net` per il proxy frontend verso l'API; `ml-infra-net` per i servizi che devono parlare con l'infrastruttura ML esterna.
+- rete interna `megadoc-net` per backend e dati, `frontend-net` per il proxy frontend e `backend-egress-net` per raggiungere backend ML esterni. La rete statica `ml-infra-net` è solo nell'override Linux.
 
 ## Struttura Repo Per Nuovi Agenti
 
@@ -60,10 +60,19 @@ Funzionalità implementate:
 ## Avvio
 
 1. Copia `.env.example` in `.env`.
-2. Avvia lo stack con `docker compose --env-file .env up --build`.
+2. Avvia lo stack portabile con `docker compose --env-file .env up --build`.
 3. Verifica `http://localhost:8080/health` e `http://localhost:8080/ready`.
 
 Il container `mc-init` crea automaticamente i bucket MinIO e `migrate` applica le migration Alembic prima di avviare API e worker.
+
+Su macOS, un llama.cpp avviato sull'host è raggiungibile dai container come
+`http://host.docker.internal:8080/v1`. Su Linux con NVIDIA e la rete ML storica usa:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.linux-nvidia.yml up --build
+```
+
+Dettagli e prerequisiti sono in `docs/portable_deployment.md`.
 
 ## Configurazione Runtime
 
@@ -84,6 +93,10 @@ Variabili principali:
 - `STORAGE_BACKEND`: `s3` in compose, `filesystem` nei test.
 
 Nota: il backend locale LLM/OCR carica un solo modello alla volta. La pipeline dà priorità agli OCR rispetto alla knowledge per evitare thrashing tra `dots.ocr` e Qwen.
+
+Endpoint e nomi modello non sensibili possono essere modificati anche dalla pagina
+`/settings`. Gli override sono salvati in Postgres e letti dai nuovi job; API key e
+altre credenziali restano esclusivamente nelle variabili ambiente.
 
 ## Uso API
 

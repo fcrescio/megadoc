@@ -6,6 +6,9 @@ import type {
   Job,
   BackgroundActivity,
   SystemStatus,
+  RuntimeMLSettings,
+  RuntimeSettingsProbeResponse,
+  RuntimeSettingsResponse,
   UploadResponse,
   DocumentKnowledge,
   KnowledgeTopicSummary,
@@ -72,6 +75,29 @@ export async function getDocuments(limit = 100): Promise<Document[]> {
 export async function getSystemStatus(): Promise<SystemStatus> {
   const response = await fetch(`${API_BASE}/system/status`);
   return handleResponse<SystemStatus>(response);
+}
+
+export async function getRuntimeSettings(): Promise<RuntimeSettingsResponse> {
+  const response = await fetch(`${API_BASE}/settings/runtime`);
+  return handleResponse<RuntimeSettingsResponse>(response);
+}
+
+export async function saveRuntimeSettings(values: RuntimeMLSettings): Promise<RuntimeSettingsResponse> {
+  const response = await fetch(`${API_BASE}/settings/runtime`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(values),
+  });
+  return handleResponse<RuntimeSettingsResponse>(response);
+}
+
+export async function probeRuntimeSettings(values: RuntimeMLSettings): Promise<RuntimeSettingsProbeResponse> {
+  const response = await fetch(`${API_BASE}/settings/runtime/probe`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(values),
+  });
+  return handleResponse<RuntimeSettingsProbeResponse>(response);
 }
 
 export async function getDocument(id: string): Promise<Document> {

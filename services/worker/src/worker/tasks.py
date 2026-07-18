@@ -48,7 +48,7 @@ def process_ingestion_job(self, job_id: str, backend_override: str | None = None
         job_service = JobService(session)
         ocr_service = OCRService(
             session,
-            settings=ocr_service_settings(backend_override),
+            settings=ocr_service_settings(session, backend_override),
         )
         job = job_service.jobs.get(UUID(job_id))
         if job is None:
@@ -97,10 +97,23 @@ def process_ingestion_job(self, job_id: str, backend_override: str | None = None
         session.close()
 
 
-def ocr_service_settings(backend_override: str | None):
+def ocr_service_settings(session, backend_override: str | None):
     from common.config import get_settings
+    from common.application.runtime_settings import resolve_runtime_settings
 
     settings = get_settings()
-    if not backend_override:
-        return settings
-    return settings.model_copy(update={"ocr_backend": backend_override})
+    runtime = resolve_runtime_settings(session, {
+        "ocr_vision_endpoint": settings.ocr_llm_vision_endpoint,
+        "ocr_vision_model": settings.ocr_llm_vision_model,
+        "ocr_dots_endpoint": settings.ocr_dots_native_endpoint,
+        "ocr_dots_model": settings.ocr_dots_native_model,
+    })
+    updates = {
+        "ocr_llm_vision_endpoint": runtime["ocr_vision_endpoint"],
+        "ocr_llm_vision_model": runtime["ocr_vision_model"],
+        "ocr_dots_native_endpoint": runtime["ocr_dots_endpoint"],
+        "ocr_dots_native_model": runtime["ocr_dots_model"],
+    }
+    if backend_override:
+        updates["ocr_backend"] = backend_override
+    return settings.model_copy(update=updates)

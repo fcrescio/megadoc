@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from common.application.knowledge import has_active_ingestion_jobs
 from common.application.retry import retry_delay_seconds
+from common.application.runtime_settings import resolve_runtime_settings
 from common.application.specialists import ensure_specialist_jobs_for_scan_unit
 from common.db.models import KnowledgeJob, ScanUnit
 from common.db.schema import ensure_knowledge_schema
@@ -93,13 +94,17 @@ def process_scan_unit_task(self, scan_unit_id: str):
     
     with Session(engine) as session:
         try:
+            runtime = resolve_runtime_settings(session, {
+                "llm_endpoint": settings.llm_endpoint,
+                "llm_model": settings.llm_model,
+            })
             # Initialize LLM provider
-            if settings.use_mock_llm:
-                llm_provider = MockDeterministicProvider(model=settings.llm_model)
+            if runtime["llm_endpoint"].startswith("mock://"):
+                llm_provider = MockDeterministicProvider(model=runtime["llm_model"])
             else:
                 llm_provider = OpenAICompatibleProvider(
-                    base_url=settings.llm_endpoint,
-                    model=settings.llm_model,
+                    base_url=runtime["llm_endpoint"],
+                    model=runtime["llm_model"],
                     api_key=settings.llm_api_key,
                     timeout=settings.llm_timeout,
                     max_tokens=settings.llm_max_tokens,
@@ -201,12 +206,16 @@ def finalize_scan_topics_task(self, scan_unit_id: str):
                 finalization_job.attempt_count += 1
             session.commit()
 
-            if settings.use_mock_llm:
-                llm_provider = MockDeterministicProvider(model=settings.llm_model)
+            runtime = resolve_runtime_settings(session, {
+                "llm_endpoint": settings.llm_endpoint,
+                "llm_model": settings.llm_model,
+            })
+            if runtime["llm_endpoint"].startswith("mock://"):
+                llm_provider = MockDeterministicProvider(model=runtime["llm_model"])
             else:
                 llm_provider = OpenAICompatibleProvider(
-                    base_url=settings.llm_endpoint,
-                    model=settings.llm_model,
+                    base_url=runtime["llm_endpoint"],
+                    model=runtime["llm_model"],
                     api_key=settings.llm_api_key,
                     timeout=settings.llm_timeout,
                     max_tokens=settings.llm_max_tokens,
