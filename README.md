@@ -66,7 +66,8 @@ Funzionalità implementate:
 Il container `mc-init` crea automaticamente i bucket MinIO e `migrate` applica le migration Alembic prima di avviare API e worker.
 
 Su macOS, un llama.cpp avviato sull'host è raggiungibile dai container come
-`http://host.docker.internal:8080/v1`. Su Linux con NVIDIA e la rete ML storica usa:
+`http://host.docker.internal:8080/v1`. Imposta `MEGADOC_API_PORT=8081` se llama.cpp
+occupa la porta host 8080. Su Linux con NVIDIA e la rete ML storica usa:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.linux-nvidia.yml up --build

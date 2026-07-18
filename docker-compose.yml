@@ -116,7 +116,7 @@ services:
         "8080"
       ]
     ports:
-      - "8080:8080"
+      - "${MEGADOC_API_PORT:-8080}:8080"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 15s

@@ -17,12 +17,17 @@ Avvio:
 
 ```bash
 cp .env.example .env
+printf '\nMEGADOC_API_PORT=8081\n' >> .env
 docker compose up --build
 ```
 
 Nella pagina `/settings` usa `http://host.docker.internal:8080/v1` per raggiungere
 llama.cpp sull'host. Il probe verifica `/health` e `/v1/models` dal container API,
 quindi misura la raggiungibilità effettiva usata dall'applicazione.
+
+`MEGADOC_API_PORT=8081` evita il conflitto con llama.cpp sulla porta host 8080. La
+porta interna dell'API resta 8080 e il frontend continua a funzionare senza altre
+modifiche. L'accesso API diretto sarà in questo caso `http://localhost:8081`.
 
 I bind mount non sono usati per i dati persistenti, evitando differenze di permessi
 e prestazioni fra filesystem Linux e macOS. Per importare directory locali è
@@ -59,8 +64,8 @@ cambio OCR o knowledge occorre rilanciare esplicitamente lo stadio interessato.
 ```bash
 docker compose config -q
 docker compose ps
-curl http://localhost:8080/ready
-curl http://localhost:8080/settings/runtime
+curl "http://localhost:${MEGADOC_API_PORT:-8080}/ready"
+curl "http://localhost:${MEGADOC_API_PORT:-8080}/settings/runtime"
 ```
 
 Apri `/settings`, esegui `Verifica backend`, quindi salva. Il probe deve riportare
