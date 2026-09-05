@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class UploadResponse(BaseModel):
@@ -106,6 +106,7 @@ class RemoteBackendStatus(BaseModel):
     server_reachable: bool = False
     model_available: bool | None = None
     latency_ms: int | None = None
+    available_models: list[str] = Field(default_factory=list)
 
 
 class SystemStatusResponse(BaseModel):

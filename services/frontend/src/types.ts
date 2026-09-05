@@ -80,6 +80,7 @@ export interface Job {
 }
 
 export interface RemoteBackendStatus {
+  available_models: string[];
   name: string;
   status: 'ok' | 'degraded' | 'error';
   endpoint: string | null;

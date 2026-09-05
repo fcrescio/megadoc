@@ -1241,6 +1241,8 @@ def _probe_openai_compatible_backend(
     detail: str | None = None
 
     active_endpoint = endpoint
+    model_ids: set[str] = set()
+    catalog_verified = False
     try:
         health_request = UrlRequest(health_url, headers=headers, method="GET")
         started = datetime.now(timezone.utc)
@@ -1259,12 +1261,18 @@ def _probe_openai_compatible_backend(
         if latency_ms is None:
             latency_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
         server_reachable = True
-        models = payload.get("data", []) if isinstance(payload, dict) else []
+        if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
+            raise ValueError("Risposta /models non conforme: atteso un elenco data.")
+        models = payload["data"]
+        if any(not isinstance(item, dict) or not isinstance(item.get("id"), str) for item in models):
+            raise ValueError("Risposta /models non conforme: identificatori modello mancanti.")
         model_ids = {
             item.get("id")
             for item in models
             if isinstance(item, dict) and isinstance(item.get("id"), str)
         }
+        catalog_verified = True
+        detail = None
         if model:
             model_available = model in model_ids
             if not model_available:
@@ -1275,23 +1283,21 @@ def _probe_openai_compatible_backend(
         if exc.code == 404 and server_reachable:
             model_available = None
             detail = "Server raggiungibile; elenco modelli non esposto da /v1/models."
-        elif not server_reachable:
+        else:
             detail = f"Model listing failed: HTTP {exc.code}"
     except URLError as exc:
-        if not server_reachable:
-            detail = f"Backend non raggiungibile: {exc.reason}"
+        detail = f"Elenco modelli non verificabile: {exc.reason}"
     except Exception as exc:
-        if not server_reachable:
-            detail = f"Model listing failed: {exc}"
+        detail = f"Elenco modelli non verificabile: {exc}"
 
     status = "ok"
     if not server_reachable:
         status = "error"
-    elif model_available is False:
+    elif not catalog_verified or model_available is False:
         status = "degraded"
 
     if detail is None and status == "ok":
-        detail = "Backend remoto operativo."
+        detail = "Catalogo modelli verificato; generazione non testata."
 
     return RemoteBackendStatus(
         name=name,
@@ -1302,4 +1308,5 @@ def _probe_openai_compatible_backend(
         server_reachable=server_reachable,
         model_available=model_available,
         latency_ms=latency_ms,
+        available_models=sorted(model_ids),
     )

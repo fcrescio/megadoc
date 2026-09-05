@@ -1,6 +1,26 @@
 # Agent Handoff - Stato Progetto Megadoc
 
-Ultimo aggiornamento: 2026-05-07.
+## Ripresa del 2026-09-05
+
+Repository ripresa da `c043fc4`, senza modifiche locali. Stack attivo: 48 documenti,
+nessun job ingestion, knowledge o specialistico attivo al momento del controllo.
+La descrizione storica sotto risale a maggio e non rappresenta lo stato completo.
+Per la roadmap usare `global_system_review_2026-07.md` e i documenti `phase*.md`.
+
+- UI su `localhost:3030`, pagina `/settings` per endpoint e modelli persistenti.
+- Compose base portabile; questa installazione usa anche
+  `docker-compose.linux-nvidia.yml`. Conservare entrambi i file nei rebuild.
+- Il probe remoto ora richiede un catalogo `/models` valido per dichiararsi OK:
+  `/health` da solo indica soltanto raggiungibilita'. Nessuna generazione viene
+  eseguita. Settings propone i modelli del catalogo e invalida la verifica quando
+  cambia un campo.
+- Fasi 6 e 7: basi implementate nei commit di luglio; benchmark di qualita' e carico
+  restano da certificare. Vedere `phase7_operations.md` per limiti e comandi.
+- Prossimi interventi: completare verifica dei consumer delle impostazioni runtime
+  (in particolare indice embedding), poi backup/restore verificato della fase 8.
+- Corpus privato e annotazioni devono rimanere fuori da Git.
+
+## Appunti storici (2026-05-07)
 
 Questo file è il punto di ingresso per una nuova sessione agentica. Lo scopo è dare una mappa operativa del repository, dello stato del prodotto e dei problemi aperti senza dover ricostruire tutta la storia dalla chat.
 

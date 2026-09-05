@@ -38,7 +38,11 @@ export default function SettingsView() {
     }).catch((error) => setMessage(String(error))).finally(() => setBusy(null));
   }, []);
 
-  const update = (key: keyof RuntimeMLSettings, value: string) => setValues((current) => current ? { ...current, [key]: value } : current);
+  const update = (key: keyof RuntimeMLSettings, value: string) => {
+    setValues((current) => current ? { ...current, [key]: value } : current);
+    setProbes([]);
+    setMessage(null);
+  };
   const runProbe = async () => {
     if (!values) return;
     setBusy('probe'); setMessage(null); setProbes([]);
@@ -58,14 +62,30 @@ export default function SettingsView() {
   return (
     <section className="mx-auto max-w-5xl space-y-5">
       <header><h2 className="text-2xl font-semibold text-white">Settings</h2><p className="mt-1 text-sm text-slate-400">Configurazione runtime dei backend OpenAI-compatible. Gli indirizzi sono risolti dai container: per un server sul Mac usa <code>http://host.docker.internal:8080/v1</code>.</p></header>
-      <div className="grid gap-4 lg:grid-cols-2">
+      <fieldset disabled={busy !== null} className="grid gap-4 lg:grid-cols-2">
         {groups.map((group) => <div key={group.title} className="rounded-2xl border border-white/10 bg-slate-900/75 p-5">
           <h3 className="font-semibold text-white">{group.title}</h3><p className="mb-4 text-xs text-slate-400">{group.description}</p>
           <label className="block text-xs font-medium text-slate-300">Endpoint<input value={values[group.endpoint]} onChange={(event) => update(group.endpoint, event.target.value)} className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-cyan-400/50" /></label>
           <label className="mt-3 block text-xs font-medium text-slate-300">Modello<input value={values[group.model]} onChange={(event) => update(group.model, event.target.value)} className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-cyan-400/50" /></label>
           <p className="mt-2 text-[11px] text-slate-500">Default ambiente: {defaults[group.model]} · {overrides.includes(group.model) || overrides.includes(group.endpoint) ? 'override persistente' : 'nessun override'}</p>
+          {probes.find((probe) => probe.endpoint === values[group.endpoint])?.available_models?.length ? (
+            <label className="mt-3 block text-xs text-slate-300">Modelli dichiarati dal server
+              <select
+                aria-label={`Modelli disponibili: ${group.title}`}
+                value=""
+                onChange={(event) => update(group.model, event.target.value)}
+                className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white"
+              >
+                <option value="" disabled>Seleziona un modello</option>
+                {probes.find((probe) => probe.endpoint === values[group.endpoint])?.available_models.map((model) => (
+                  <option key={model} value={model}>{model}</option>
+                ))}
+              </select>
+            </label>
+          ) : null}
         </div>)}
-      </div>
+      </fieldset>
+      <p className="text-xs text-slate-400">La verifica legge il catalogo senza caricare i modelli. Dopo un cambio di modello embedding occorre ricostruire l'indice semantico.</p>
       <div className="flex flex-wrap gap-3"><button disabled={busy !== null} onClick={runProbe} className="rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-2 text-sm text-cyan-100 disabled:opacity-40">{busy === 'probe' ? 'Verifica...' : 'Verifica backend'}</button><button disabled={busy !== null} onClick={save} className="rounded-xl bg-cyan-300 px-4 py-2 text-sm font-semibold text-slate-950 disabled:opacity-40">{busy === 'save' ? 'Salvataggio...' : 'Salva'}</button></div>
       {message && <p className="rounded-xl border border-white/10 bg-white/5 p-3 text-sm text-slate-200">{message}</p>}
       {probes.length > 0 && <div className="grid gap-3 md:grid-cols-2">{probes.map((result) => <ProbeResult key={result.name} result={result} />)}</div>}
