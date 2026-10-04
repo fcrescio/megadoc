@@ -50,6 +50,18 @@ def test_sdk_table_without_structure_is_not_silently_accepted():
         structured_sdk_page(1, {"pages": [[{"label": "table", "content": "flattened"}]], "markdown": "flattened"})
 
 
+def test_sdk_layout_diagnostics_are_preserved_without_becoming_facts():
+    regions = [[{"label": "text", "score": 0.23, "bbox_2d": [100, 200, 700, 270]}]]
+    coverage = [{"page_index": 0, "skipped_regions": []}]
+    page = structured_sdk_page(1, {"pages": [[{"label": "text", "content": "Test"}]],
+                                   "markdown": "Test", "layout_regions": regions,
+                                   "coverage": coverage, "layout_s": 0.7})
+    assert page["metadata"]["sdk_layout_regions"] == regions
+    assert page["metadata"]["sdk_coverage"] == coverage
+    assert page["metadata"]["layout_s"] == 0.7
+    assert page["tables"] == []
+
+
 def test_glm_exposes_region_failure_reason(monkeypatch, valid_pdf_path):
     import httpx
 

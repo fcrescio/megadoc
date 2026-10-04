@@ -90,6 +90,12 @@ def structured_sdk_page(page_number: int, payload: dict) -> dict:
             page["figures"].append(evidence)
     page["metadata"].update(payload.get("metadata") or {})
     page["metadata"]["sdk_raw_regions"] = payload.get("raw_pages") or []
+    if "layout_regions" in payload:
+        page["metadata"]["sdk_layout_regions"] = payload["layout_regions"]
+    if "coverage" in payload:
+        page["metadata"]["sdk_coverage"] = payload["coverage"]
+    if "layout_s" in payload:
+        page["metadata"]["layout_s"] = payload["layout_s"]
     return page
 
 
