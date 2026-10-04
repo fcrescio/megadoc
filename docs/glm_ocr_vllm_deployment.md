@@ -36,9 +36,11 @@ Endpoint e nomi modello sono modificabili anche in `/settings`: gli override nel
 database prevalgono sull'ambiente. Il backend OCR attivo si sceglie in `.env`.
 `OCR_REMOTE_BACKEND` mantiene il worker remoto allineato alla scelta globale.
 
-GLM usa `Text Recognition:` con istruzione esplicita di conservare tabelle HTML
-e testo Markdown. L'adattatore
-Megadoc conserva il contenuto e separa le tabelle HTML e Markdown con riferimento alla pagina.
+GLM usa ora `/v1/parse` con la pipeline SDK ufficiale: layout PP-DocLayoutV3
+su CPU, riconoscimento delle regioni con OpenVINO su Intel iGPU e prompt
+distinti per testo, tabelle e formule. Megadoc renderizza a 200 DPI e conserva
+ordine, etichette, coordinate normalizzate e struttura delle tabelle. Il profilo
+archivistico conserva anche intestazioni e note, escluse dal profilo SDK standard.
 Una risposta troncata dal limite token produce errore esplicito: non viene salvata
 come OCR completo. Il timeout e' 600 secondi per richiesta.
 
@@ -65,7 +67,12 @@ Limite strutturale misurato: con `Text Recognition:` una tabella sintetica
 stessa immagine restituisce una tabella HTML corretta, ma omette il titolo esterno.
 Con istruzioni esplicite di conservazione delle tabelle, la prova restituisce
 titolo e tutte le celle in Markdown; l'adattatore converte la tabella in HTML
-strutturato. Questa e' la configurazione attiva. La qualita' delle tabelle dense
+strutturato. Questa era la configurazione iniziale, sostituita dalla pipeline SDK.
+La qualita' delle tabelle dense
 reali richiede ancora valutazione: non si puo' assumere equivalenza con il layout
 di dots. Nessun documento esistente
 e' stato riprocessato o sovrascritto durante queste prove.
+
+Per la configurazione attuale e le misure iGPU, vedere
+[allineamento SDK](glm_ocr_sdk_alignment_2026-10-04.md). I tempi della verifica
+iniziale sopra non descrivono la nuova pipeline.
