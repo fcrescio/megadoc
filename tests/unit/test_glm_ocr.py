@@ -15,7 +15,7 @@ def test_glm_retains_table_html_and_page_evidence():
     assert _ingestion_queue_for_backend(Settings(OCR_BACKEND="glm_ocr"), None) == "ingestion_llm_vision"
 
 
-def test_glm_rejects_truncated_generation(monkeypatch, valid_pdf_path):
+def test_glm_rejects_incomplete_parser_response(monkeypatch, valid_pdf_path):
     class Response:
         def raise_for_status(self):
             pass
@@ -48,3 +48,13 @@ def test_sdk_regions_keep_layout_and_table_evidence():
 def test_sdk_table_without_structure_is_not_silently_accepted():
     with pytest.raises(ValueError, match="no recoverable"):
         structured_sdk_page(1, {"pages": [[{"label": "table", "content": "flattened"}]], "markdown": "flattened"})
+
+
+def test_glm_exposes_region_failure_reason(monkeypatch, valid_pdf_path):
+    import httpx
+
+    response = httpx.Response(502, request=httpx.Request("POST", "http://ocr/v1/parse"),
+                              json={"error": {"message": "Region OCR truncated at token limit"}})
+    monkeypatch.setattr("httpx.Client.post", lambda *args, **kwargs: response)
+    with pytest.raises(ProcessingError, match="Region OCR truncated"):
+        GLMOCRService(Settings()).process(valid_pdf_path)

@@ -118,7 +118,15 @@ class GLMOCRService:
                     payload = response.json()
                     structured = structured_sdk_page(index, payload)
                 except (httpx.HTTPError, ValueError, KeyError, IndexError) as exc:
-                    raise ProcessingError(f"GLM OCR failed on page {index}: {exc}") from exc
+                    detail = str(exc)
+                    if isinstance(exc, httpx.HTTPStatusError):
+                        try:
+                            error = exc.response.json().get("error", {})
+                            if isinstance(error, dict) and isinstance(error.get("message"), str):
+                                detail = error["message"]
+                        except (ValueError, AttributeError):
+                            pass
+                    raise ProcessingError(f"GLM OCR failed on page {index}: {detail}") from exc
                 pages.append(structured)
                 usage.append(payload.get("usage") or {})
         text = "\n\n".join(page["markdown"] for page in pages)
