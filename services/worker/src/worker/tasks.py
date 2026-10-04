@@ -103,12 +103,16 @@ def ocr_service_settings(session, backend_override: str | None):
 
     settings = get_settings()
     runtime = resolve_runtime_settings(session, {
+        "ocr_glm_endpoint": settings.ocr_glm_endpoint,
+        "ocr_glm_model": settings.ocr_glm_model,
         "ocr_vision_endpoint": settings.ocr_llm_vision_endpoint,
         "ocr_vision_model": settings.ocr_llm_vision_model,
         "ocr_dots_endpoint": settings.ocr_dots_native_endpoint,
         "ocr_dots_model": settings.ocr_dots_native_model,
     })
     updates = {
+        "ocr_glm_endpoint": runtime["ocr_glm_endpoint"],
+        "ocr_glm_model": runtime["ocr_glm_model"],
         "ocr_llm_vision_endpoint": runtime["ocr_vision_endpoint"],
         "ocr_llm_vision_model": runtime["ocr_vision_model"],
         "ocr_dots_native_endpoint": runtime["ocr_dots_endpoint"],

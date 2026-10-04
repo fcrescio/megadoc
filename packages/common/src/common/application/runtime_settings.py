@@ -18,6 +18,8 @@ RUNTIME_ML_SETTING_KEYS = frozenset(
         "ocr_vision_model",
         "ocr_dots_endpoint",
         "ocr_dots_model",
+        "ocr_glm_endpoint",
+        "ocr_glm_model",
     }
 )
 

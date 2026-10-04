@@ -298,7 +298,7 @@ def _text_origin(
     if value == "hybrid":
         return "hybrid"
     backend = str(structured.get("backend") or engine_name or "").lower()
-    if backend in {"dots_native", "llm_vision"}:
+    if backend in {"dots_native", "llm_vision", "glm_ocr"}:
         return "ocr"
     return "unknown"
 

@@ -101,6 +101,8 @@ export interface SystemStatus {
 }
 
 export interface RuntimeMLSettings {
+  ocr_glm_endpoint: string;
+  ocr_glm_model: string;
   llm_endpoint: string;
   llm_model: string;
   embedding_endpoint: string;

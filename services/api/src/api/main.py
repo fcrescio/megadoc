@@ -125,7 +125,7 @@ def dispatch_ingestion_job(job_id: uuid.UUID, ocr_backend: str | None = None) ->
 
 
 def _ingestion_queue_for_backend(settings: Settings, ocr_backend: str | None) -> str:
-    if (ocr_backend or "").strip().lower() in {"llm_vision", "dots_native"}:
+    if (ocr_backend or settings.ocr_backend or "").strip().lower() in {"llm_vision", "dots_native", "glm_ocr"}:
         return settings.ingestion_queue_llm_vision
     return settings.ingestion_queue_default
 
@@ -1111,6 +1111,10 @@ def probe_runtime_settings(payload: RuntimeMLSettings) -> RuntimeSettingsProbeRe
     _validate_runtime_endpoints(values)
     probes = [
         _probe_openai_compatible_backend(
+            name="ocr:glm_ocr", endpoint=values["ocr_glm_endpoint"],
+            model=values["ocr_glm_model"], api_key=None, timeout_seconds=10,
+        ),
+        _probe_openai_compatible_backend(
             name="knowledge_llm",
             endpoint=values["llm_endpoint"],
             model=values["llm_model"],
@@ -1146,6 +1150,8 @@ def _runtime_setting_defaults(settings: Settings) -> dict[str, str]:
     knowledge = get_knowledge_settings()
     llm_endpoint = os.getenv("KN_WORKER_LLM_ENDPOINT", knowledge.llm_endpoint)
     return {
+        "ocr_glm_endpoint": settings.ocr_glm_endpoint,
+        "ocr_glm_model": settings.ocr_glm_model,
         "llm_endpoint": llm_endpoint,
         "llm_model": knowledge.llm_model,
         "embedding_endpoint": knowledge.embedding_endpoint or llm_endpoint,
@@ -1164,7 +1170,7 @@ def _effective_runtime_settings(session: Session, settings: Settings) -> dict[st
 
 
 def _validate_runtime_endpoints(values: dict[str, str]) -> None:
-    for key in ("llm_endpoint", "embedding_endpoint", "ocr_vision_endpoint", "ocr_dots_endpoint"):
+    for key in ("llm_endpoint", "embedding_endpoint", "ocr_vision_endpoint", "ocr_dots_endpoint", "ocr_glm_endpoint"):
         value = values[key].strip()
         if not value.startswith(("http://", "https://", "mock://")):
             raise HTTPException(status_code=422, detail=f"{key} must be an HTTP(S) or mock URL")
@@ -1172,7 +1178,7 @@ def _validate_runtime_endpoints(values: dict[str, str]) -> None:
 
 def _probe_ocr_backend(settings: Settings, runtime: dict[str, str]) -> RemoteBackendStatus:
     backend = (settings.ocr_backend or "").strip().lower()
-    if backend not in {"dots_native", "llm_vision"}:
+    if backend not in {"dots_native", "llm_vision", "glm_ocr"}:
         return RemoteBackendStatus(
             name=f"ocr:{backend or 'docling'}",
             status="ok",
@@ -1180,7 +1186,11 @@ def _probe_ocr_backend(settings: Settings, runtime: dict[str, str]) -> RemoteBac
             server_reachable=True,
             model_available=None,
         )
-    if backend == "dots_native":
+    if backend == "glm_ocr":
+        endpoint = runtime["ocr_glm_endpoint"]
+        model = runtime["ocr_glm_model"]
+        api_key = None
+    elif backend == "dots_native":
         endpoint = runtime["ocr_dots_endpoint"]
         model = runtime["ocr_dots_model"]
         api_key = settings.ocr_dots_native_api_key

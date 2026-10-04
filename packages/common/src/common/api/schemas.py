@@ -119,6 +119,8 @@ class SystemStatusResponse(BaseModel):
 
 
 class RuntimeMLSettings(BaseModel):
+    ocr_glm_endpoint: str = "http://host.docker.internal:18030/v1"
+    ocr_glm_model: str = "glm-ocr"
     llm_endpoint: str
     llm_model: str
     embedding_endpoint: str

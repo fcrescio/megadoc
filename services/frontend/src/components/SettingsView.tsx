@@ -8,6 +8,7 @@ const groups: Array<{
   endpoint: keyof RuntimeMLSettings;
   model: keyof RuntimeMLSettings;
 }> = [
+  { title: 'OCR GLM', description: 'OCR dedicato su Intel GPU, con testo e tabelle HTML.', endpoint: 'ocr_glm_endpoint', model: 'ocr_glm_model' },
   { title: 'Knowledge e chat', description: 'Classificazione, specialisti e agente di consultazione.', endpoint: 'llm_endpoint', model: 'llm_model' },
   { title: 'Embedding', description: 'Indicizzazione e ricerca semantica.', endpoint: 'embedding_endpoint', model: 'embedding_model' },
   { title: 'OCR vision', description: 'Analisi visuale delle pagine.', endpoint: 'ocr_vision_endpoint', model: 'ocr_vision_model' },

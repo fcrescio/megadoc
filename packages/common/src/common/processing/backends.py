@@ -7,6 +7,7 @@ from common.domain.exceptions import ProcessingError
 from common.domain.models import OCRResultModel
 from common.processing.dots_native import DotsNativeOCRService
 from common.processing.llm_vision import LLMVisionOCRService
+from common.processing.glm_ocr import GLMOCRService
 from common.processing.preflight import PDFPreflightReport
 
 
@@ -141,6 +142,8 @@ def get_processing_backend(settings: Settings | None = None) -> DocumentProcessi
         return DotsNativeProcessingBackend(app_settings)
     if app_settings.ocr_backend == "llm_vision":
         return LLMVisionProcessingBackend(app_settings)
+    if app_settings.ocr_backend == "glm_ocr":
+        return GLMOCRService(app_settings)
     return DoclingProcessingBackend(app_settings)
 
 
