@@ -148,6 +148,7 @@ def main():
     parser.add_argument("--glm-endpoint", default="http://host.docker.internal:18030/v1")
     parser.add_argument("--qwen-endpoint", default="http://host.docker.internal:18020/v1")
     parser.add_argument("--qwen-model", default="qwen3.8-27b")
+    parser.add_argument("--backend", choices=("glm", "qwen"), action="append", help="Run only selected backends; default: both")
     parser.add_argument("--page-rotations", help="Supplementary experiment: comma-separated explicit source-page rotations")
     parser.add_argument("document_ids", nargs="+")
     args = parser.parse_args()
@@ -170,11 +171,13 @@ def main():
         manifest = {"source_sha256": baseline["source_sha256"], "normalized_sha256": hashlib.sha256(normalized.read_bytes()).hexdigest(), "historical_engine": baseline["engine_version"], "historical_created_at": baseline["created_at"], "scope": "OCR only; archived orientation replayed; no downstream jobs", "glm_model": settings.ocr_glm_model, "qwen_model": settings.ocr_llm_vision_model, "glm_endpoint": args.glm_endpoint, "qwen_endpoint": args.qwen_endpoint, "render_scale": 1.5, "glm_max_tokens": settings.ocr_glm_max_tokens, "qwen_max_tokens": settings.ocr_llm_vision_max_tokens}
         manifest_path = directory / "manifest.json"
         manifest["rotation_overrides"] = rotations
+        manifest["glm_pipeline"] = "glmocr-sdk"
+        manifest["glm_render_dpi"] = 200
         if manifest_path.exists() and json.loads(manifest_path.read_text()) != manifest:
             raise ValueError("Experiment settings changed: use a new output directory")
         save(manifest_path, manifest)
         summary = {"document_id": document_id, "historical_pages": baseline["page_count"], "historical_tables": sum(len(page.get("tables") or []) for page in baseline["structured_json"].get("pages", []))}
-        for backend in ("glm", "qwen"):
+        for backend in (args.backend or ("glm", "qwen")):
             result = run_backend(backend, normalized, directory, settings, baseline)
             summary[backend] = {key: value for key, value in result.items() if key != "result"}
         save(directory / "comparison.json", summary)

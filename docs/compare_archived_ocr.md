@@ -21,7 +21,10 @@ docker compose run --rm --no-deps --user "$(id -u):$(id -g)" \
 Endpoints and the Qwen model can be supplied explicitly with `--glm-endpoint`,
 `--qwen-endpoint`, and `--qwen-model`. Defaults match the local experimental
 servers on ports 18030 and 18020. Backend timeout is 600 seconds for Qwen;
-GLM uses its configured timeout. Render scale is 1.5 for both adapters.
+GLM uses its configured timeout. The GLM SDK adapter renders at 200 DPI; Qwen
+uses scale 1.5. These are production-stack comparisons, not resolution-matched
+model comparisons. `--backend glm` or `--backend qwen` can avoid rerunning an
+unchanged control backend.
 
 ## Evidence and controls
 
@@ -42,9 +45,9 @@ resume. Existing results are reused; incompatible manifest settings are rejected
 Use a new evidence directory for a new experiment or retry. An adapter exception
 does not discard previous page responses or prevent the other backend from running.
 
-Requests are sequential. The models receive the same normalized PDF and page
-render scale, but use their native production prompts and output contracts:
-GLM emits Markdown/HTML, whereas `llm_vision` requests structured JSON. Internal
+Requests are sequential. The models receive the same normalized PDF but use
+their native production rendering, prompts and output contracts: GLM uses the
+official layout/crop SDK via `/v1/parse`, whereas `llm_vision` requests page JSON. Internal
 image preprocessing, tokenization and hardware differ. These timings compare
 the complete OCR adapters, not isolated model architectures.
 
