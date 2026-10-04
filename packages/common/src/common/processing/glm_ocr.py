@@ -61,6 +61,38 @@ def structured_glm_page(page_number: int, markdown: str) -> dict:
     }
 
 
+def structured_sdk_page(page_number: int, payload: dict) -> dict:
+    regions = payload["pages"]
+    if not isinstance(regions, list) or len(regions) != 1 or not isinstance(regions[0], list):
+        raise ValueError("GLM parser must return exactly one page")
+    page = structured_glm_page(page_number, payload["markdown"])
+    page["blocks"] = []
+    page["tables"] = []
+    page["figures"] = []
+    for index, region in enumerate(regions[0], 1):
+        content = region.get("content") or ""
+        bbox = region.get("bbox_2d")
+        evidence = {"id": f"page-{page_number}-block-{index}",
+                    "type": region["label"], "reading_order": index,
+                    "text": content, "bbox": bbox,
+                    "metadata": {"bbox_coordinate_system": "normalized_1000",
+                                 "native_label": region.get("native_label")}}
+        page["blocks"].append(evidence)
+        if region["label"] == "table":
+            tables = structured_glm_page(page_number, content)["tables"]
+            if not tables:
+                raise ValueError(f"GLM table region {index} has no recoverable table structure")
+            for table in tables:
+                table.update(id=f"page-{page_number}-table-{len(page['tables']) + 1}", bbox=bbox,
+                             metadata=evidence["metadata"])
+                page["tables"].append(table)
+        elif region["label"] == "image":
+            page["figures"].append(evidence)
+    page["metadata"].update(payload.get("metadata") or {})
+    page["metadata"]["sdk_raw_regions"] = payload.get("raw_pages") or []
+    return page
+
+
 class GLMOCRService:
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -75,28 +107,19 @@ class GLMOCRService:
             timeout=self.settings.ocr_glm_timeout,
         ) as client:
             for index, page in enumerate(document, 1):
-                image = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5), alpha=False).tobytes("png")
+                image = page.get_pixmap(matrix=fitz.Matrix(200 / 72, 200 / 72), alpha=False).tobytes("png")
                 try:
-                    response = client.post("chat/completions", json={
+                    response = client.post("parse", json={
                         "model": self.settings.ocr_glm_model,
-                        "messages": [{"role": "user", "content": [
-                            {"type": "image_url", "image_url": {"url": "data:image/png;base64," + base64.b64encode(image).decode()}},
-                            {"type": "text", "text": "Text Recognition: Preserve tables as HTML and all other text as Markdown."},
-                        ]}],
-                        "temperature": 0,
+                        "document": "data:image/png;base64," + base64.b64encode(image).decode(),
                         "max_tokens": self.settings.ocr_glm_max_tokens,
                     })
                     response.raise_for_status()
                     payload = response.json()
-                    choice = payload["choices"][0]
-                    if choice.get("finish_reason") == "length":
-                        raise ProcessingError(f"GLM OCR page {index} truncated at token limit")
-                    content = choice["message"]["content"]
-                    if not isinstance(content, str):
-                        raise ValueError("OCR content is not text")
+                    structured = structured_sdk_page(index, payload)
                 except (httpx.HTTPError, ValueError, KeyError, IndexError) as exc:
                     raise ProcessingError(f"GLM OCR failed on page {index}: {exc}") from exc
-                pages.append(structured_glm_page(index, content.strip()))
+                pages.append(structured)
                 usage.append(payload.get("usage") or {})
         text = "\n\n".join(page["markdown"] for page in pages)
         return OCRResultModel(

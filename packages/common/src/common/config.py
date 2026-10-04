@@ -65,7 +65,7 @@ class Settings(BaseSettings):
     ocr_glm_endpoint: str = Field(default="http://host.docker.internal:18030/v1", alias="OCR_GLM_ENDPOINT")
     ocr_glm_model: str = Field(default="glm-ocr", alias="OCR_GLM_MODEL")
     ocr_glm_timeout: int = Field(default=600, alias="OCR_GLM_TIMEOUT")
-    ocr_glm_max_tokens: int = Field(default=4096, alias="OCR_GLM_MAX_TOKENS")
+    ocr_glm_max_tokens: int = Field(default=8192, alias="OCR_GLM_MAX_TOKENS")
     ocr_accelerator_device: str = Field(default="auto", alias="OCR_ACCELERATOR_DEVICE")
     ocr_accelerator_num_threads: int = Field(default=4, alias="OCR_ACCELERATOR_NUM_THREADS")
     ocr_rapidocr_backend: str = Field(default="torch", alias="OCR_RAPIDOCR_BACKEND")
