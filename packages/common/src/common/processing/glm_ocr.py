@@ -3,6 +3,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 import httpx
+from markdown_it import MarkdownIt
 
 from common.config import Settings
 from common.domain.exceptions import ProcessingError
@@ -44,7 +45,7 @@ class _TableParser(HTMLParser):
 
 def structured_glm_page(page_number: int, markdown: str) -> dict:
     parser = _TableParser()
-    parser.feed(markdown)
+    parser.feed(MarkdownIt("commonmark", {"html": True}).enable("table").render(markdown))
     return {
         "page_number": page_number,
         "page_no": page_number,
@@ -80,7 +81,7 @@ class GLMOCRService:
                         "model": self.settings.ocr_glm_model,
                         "messages": [{"role": "user", "content": [
                             {"type": "image_url", "image_url": {"url": "data:image/png;base64," + base64.b64encode(image).decode()}},
-                            {"type": "text", "text": "Text Recognition:"},
+                            {"type": "text", "text": "Text Recognition: Preserve tables as HTML and all other text as Markdown."},
                         ]}],
                         "temperature": 0,
                         "max_tokens": self.settings.ocr_glm_max_tokens,

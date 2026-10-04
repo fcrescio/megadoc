@@ -26,3 +26,11 @@ def test_glm_rejects_truncated_generation(monkeypatch, valid_pdf_path):
     monkeypatch.setattr("httpx.Client.post", lambda *args, **kwargs: Response())
     with pytest.raises(ProcessingError, match="truncated"):
         GLMOCRService(Settings()).process(valid_pdf_path)
+
+
+def test_glm_markdown_table_becomes_structured_html():
+    page = structured_glm_page(1, "Riparto\n\n| Unita | Acqua |\n|---|---|\n| A10 | 123,45 |")
+    assert len(page["tables"]) == 1
+    html = page["tables"][0]["cells"][0]["html"]
+    assert "<td>A10</td>" in html
+    assert "<td>123,45</td>" in html
