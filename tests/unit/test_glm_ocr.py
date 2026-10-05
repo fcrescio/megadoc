@@ -62,11 +62,19 @@ def test_sdk_layout_diagnostics_are_preserved_without_becoming_facts():
     assert page["tables"] == []
 
 
-def test_glm_exposes_region_failure_reason(monkeypatch, valid_pdf_path):
+@pytest.mark.parametrize("reason", ["Region OCR truncated at token limit",
+                                   "generation_loop: repeated tokens",
+                                   "generation_timeout: region deadline"])
+def test_glm_exposes_region_failure_reason_without_retry(monkeypatch, valid_pdf_path, reason):
     import httpx
 
     response = httpx.Response(502, request=httpx.Request("POST", "http://ocr/v1/parse"),
-                              json={"error": {"message": "Region OCR truncated at token limit"}})
-    monkeypatch.setattr("httpx.Client.post", lambda *args, **kwargs: response)
-    with pytest.raises(ProcessingError, match="Region OCR truncated"):
+                              json={"error": {"message": reason}})
+    calls = []
+    def post(*args, **kwargs):
+        calls.append(True)
+        return response
+    monkeypatch.setattr("httpx.Client.post", post)
+    with pytest.raises(ProcessingError, match=f"GLM OCR failed on page 1: {reason}"):
         GLMOCRService(Settings()).process(valid_pdf_path)
+    assert len(calls) == 1
