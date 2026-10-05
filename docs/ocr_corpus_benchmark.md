@@ -127,6 +127,23 @@ invalide fermano il confronto dopo aver salvato la pagina: niente cascata di
 centinaia di errori fittizi. Lo stato `interrupted` richiede diagnosi e riavvio
 esplicito, non retry nascosti. L'archivio storico resta in sola lettura.
 
+Il troncamento storico e' stato riprodotto anche col runtime corretto: 544 righe
+HTML vuote identiche, nessuna chiusura della tabella e 8192 token dopo 446.70 s.
+Il controllo OCR successivo riesce: e' un ciclo di generazione, non un backend
+guasto. Payload e testo incompleto sono conservati nella diagnostica privata;
+la causa del ciclo non e' ancora isolata. Non aumentare il budget e chiamarlo fix.
+
+Nuovo run avviato in `~/megadoc-ocr-benchmarks/2026-10-05-corpus-int8/`, container
+`megadoc-ocr-corpus-int8-benchmark`, backend unico su 18030. Contiene gli stessi
+49 risultati dots / 48 documenti / 321 pagine. Il run precedente e il database
+sono preservati. Per il monitoraggio:
+
+```bash
+docker logs --tail 30 megadoc-ocr-corpus-int8-benchmark
+cat ~/megadoc-ocr-benchmarks/2026-10-05-corpus-int8/REPORT.md
+cat ~/megadoc-ocr-benchmarks/2026-10-05-corpus-int8/current.json
+```
+
 ```bash
 docker compose run -d --no-deps --name megadoc-ocr-corpus-benchmark \
   --user "$(id -u):$(id -g)" \
