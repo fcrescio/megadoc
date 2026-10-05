@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only, resumable dots/GLM FP16/GLM INT8 corpus benchmark."""
+"""Read-only, resumable dots/GLM corpus benchmark with selected variants."""
 import argparse
 import base64
 from datetime import datetime, timezone
@@ -121,11 +121,21 @@ def recognize(client, endpoint, image, directory, variant, index, dots, max_toke
     return record
 
 
+def assert_backend_usable(client, endpoint, record):
+    if record["status"] == "ok":
+        return
+    if record.get("http_status") != 502 and record["status"] != "unmatched_baseline":
+        raise RuntimeError(f"Stopping after backend failure: {record.get('error')}")
+    response = client.get(endpoint.rstrip("/").removesuffix("/v1") + "/health")
+    response.raise_for_status()
+
+
 def report(output, manifest, state, current=None):
     rows = []
     for case in manifest["cases"]:
         rows.extend(json.loads(p.read_text()) for p in sorted((output / case["ocr_result_id"]).glob("pair-*.json")))
-    summary = summarize(rows, manifest["source_pages"], manifest["distinct_documents"], state, current)
+    summary = summarize(rows, manifest["source_pages"], manifest["distinct_documents"], state, current,
+                        tuple(manifest["experiment"]["endpoints"]))
     if state == "finished" and any(v["failed"] for v in summary["variants"].values()):
         state = summary["state"] = "finished_with_failures"
     summary["updated_at"] = stamp()
@@ -160,6 +170,8 @@ def main():
     parser.add_argument("--model-manifest", required=True, type=Path)
     parser.add_argument("--timeout", type=float, default=1800)
     parser.add_argument("--max-tokens", type=int, default=8192)
+    parser.add_argument("--variant", choices=("fp16", "int8"), action="append",
+                        help="Only selected variants; default runs both")
     parser.add_argument("--prepare-only", action="store_true")
     parser.add_argument("--report-only", action="store_true")
     args = parser.parse_args()
@@ -174,7 +186,9 @@ def main():
         hashes = {name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest() for name in
                   ("scripts/benchmark_ocr_corpus.py", "scripts/ocr_corpus_metrics.py",
                    "scripts/compare_archived_ocr.py", "packages/common/src/common/processing/glm_ocr.py")}
-        experiment = {"endpoints": {"fp16": args.fp16_endpoint, "int8": args.int8_endpoint},
+        endpoints = {"fp16": args.fp16_endpoint, "int8": args.int8_endpoint}
+        variants = tuple(dict.fromkeys(args.variant or ("fp16", "int8")))
+        experiment = {"endpoints": {v: endpoints[v] for v in variants},
                       "model_manifest": json.loads(args.model_manifest.read_text()), "code_sha256": hashes,
                       "timeout": args.timeout, "max_tokens": args.max_tokens, "render_dpi": 200,
                       "orientation": "exact archived order/rotation replay; no manual upright corrections"}
@@ -212,7 +226,7 @@ def main():
                         with fitz.open(directory / "normalized.pdf") as pdf:
                             image = pdf[index].get_pixmap(matrix=fitz.Matrix(200 / 72, 200 / 72), alpha=False).tobytes("png")
                         row = {**current, "document_id": case["document_id"], "dots_table_profile": table_profile(dots or {})}
-                        order = ("fp16", "int8") if completed % 2 == 0 else ("int8", "fp16")
+                        order = variants if completed % 2 == 0 else variants[::-1]
                         for variant in order:
                             save(output / "current.json", {**current, "variant": variant, "started_at": stamp()})
                             row[variant] = recognize(client, experiment["endpoints"][variant], image,
@@ -220,10 +234,14 @@ def main():
                                                      experiment["model_manifest"]["expected_parse_metadata"])
                             print(json.dumps({**current, "variant": variant, "status": row[variant]["status"],
                                               "seconds": round(row[variant]["seconds"], 3)}), flush=True)
-                        if all(row[v]["status"] == "ok" for v in order):
+                        if len(order) == 2 and all(row[v]["status"] == "ok" for v in order):
                             row["fp16_int8"] = concordance(row["fp16"]["page"]["markdown"], row["int8"]["page"]["markdown"])
                         save(pair_path, row)
                         completed += 1
+                        # Backend failures must stop the experiment, not turn all
+                        # remaining pages into spurious extraction failures.
+                        for variant in order:
+                            assert_backend_usable(client, experiment["endpoints"][variant], row[variant])
                 report(output, manifest, "finished")
                 save(output / "current.json", {"state": "finished", "finished_at": stamp()})
         except BaseException:

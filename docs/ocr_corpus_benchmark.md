@@ -89,6 +89,44 @@ e avviare le due varianti dedicate. `--prepare-only` congela l'archivio senza OC
 Il runner richiede che codice e configurazione coincidano col manifest; dopo
 modifiche comportamentali creare una directory di esperimento nuova.
 
+### Confronto solo INT8 e diagnosi del run precedente
+
+Dal 2026-10-05 `--variant int8` esclude FP16 dalle richieste e dalle statistiche.
+Le misure restano confronti con dots, senza inventare coppie FP16/INT8. Ogni
+variante ha anche la concordanza media per documento e bootstrap a livello di
+documento. Conservare sempre il run precedente: non sovrascriverne i checkpoint.
+
+Il run del 4 ottobre ha prodotto solo 31 pagine INT8 riuscite su 321. Il resto
+mescola errori di estrazione e guasti del backend: non costituisce una misura
+affidabile della qualita' sull'archivio. La diagnosi controllata sul servizio
+OpenVINO ha riprodotto due allocazioni superiori al limite di 1 GiB della UHD 770:
+maschera vision quadratica da 1.53 GB e logits del prompt da 1.17 GB. Dopo il
+secondo errore il riuso del decoder provoca un segfault in due processi distinti.
+Gli errori storici di reshape/broadcast non sono ancora riprodotti esattamente.
+
+Le correzioni equivalenti (maschera zero broadcast per singola immagine e testa
+vocabolario applicata solo all'ultimo token) non ridimensionano le scansioni.
+Una regressione SDK completa su una tabella economica riesce due volte e produce
+testo identico alla precedente estrazione INT8 riuscita. La riproduzione della
+grande pagina con 32 token dimostra invece solo il superamento dei limiti di
+allocazione, **non** un OCR completo. Diagnostica e limiti sono documentati nella
+repo `glm-ocr-service`, `docs/igpu-allocation-diagnostic-2026-10-05.md`.
+
+Usare un solo modello residente. L'override `compose.int8.yml` del microservizio
+attiva INT8 e le due correzioni sulla porta normale 18030. Il manifest modelli
+deve essere generato con `--compact-vision-mask --last-token-logits` e l'image ID
+effettivamente distribuito. Nel runner aggiungere:
+
+```bash
+--variant int8 --int8-endpoint http://host.docker.internal:18030/v1
+```
+
+Un errore isolato di estrazione 502 continua solo se `/health` risponde sano.
+Errori di rete, runtime non sano, autenticazione, configurazione diversa o risposte
+invalide fermano il confronto dopo aver salvato la pagina: niente cascata di
+centinaia di errori fittizi. Lo stato `interrupted` richiede diagnosi e riavvio
+esplicito, non retry nascosti. L'archivio storico resta in sola lettura.
+
 ```bash
 docker compose run -d --no-deps --name megadoc-ocr-corpus-benchmark \
   --user "$(id -u):$(id -g)" \

@@ -58,8 +58,40 @@ def test_missing_or_misnumbered_baseline_page_is_not_silently_compared():
     assert runner.baseline_page(baseline, 1) is None
 
 
+def test_int8_only_summary_does_not_invent_fp16_pairs():
+    values = concordance("100 test", "100 test")
+    row = {"document_id": "one", "dots_table_profile": {"tables": 0},
+           "int8": {"status": "ok", "seconds": 1, "concordance": values,
+                    "table_profile": {"tables": 0}}}
+    result = summarize([row], 1, 1, "finished", variants=("int8",))
+    assert set(result["variants"]) == {"int8"}
+    assert "not_applicable" in result["paired"]
+    assert result["strata"]["dots_no_table"]["pages"] == 1
+
+
 def test_checkpoint_prevents_repeating_completed_requests(tmp_path):
     import json
     saved = {"status": "failed", "error": "previous failure", "seconds": 1}
     (tmp_path / "page-0001-fp16.json").write_text(json.dumps(saved))
     assert runner.recognize(None, "unused", b"", tmp_path, "fp16", 0, None, 8192, {}) == saved
+
+
+def test_runtime_and_network_failures_stop_before_next_page():
+    for record in ({"status": "failed", "http_status": 503, "error": "runtime"},
+                   {"status": "failed", "error": "network"},
+                   {"status": "failed", "http_status": 200, "error": "metadata mismatch"},
+                   {"status": "failed", "http_status": 401, "error": "authentication"}):
+        with pytest.raises(RuntimeError, match="Stopping"):
+            runner.assert_backend_usable(None, "unused", record)
+
+
+def test_isolated_page_error_continues_only_if_backend_is_healthy():
+    import httpx
+    record = {"status": "failed", "http_status": 502}
+    for health in (200, 503):
+        with httpx.Client(transport=httpx.MockTransport(lambda req: httpx.Response(health, json={}))) as client:
+            if health == 200:
+                runner.assert_backend_usable(client, "http://example/v1", record)
+            else:
+                with pytest.raises(httpx.HTTPStatusError):
+                    runner.assert_backend_usable(client, "http://example/v1", record)

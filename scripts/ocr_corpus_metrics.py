@@ -77,8 +77,7 @@ def bootstrap_mean_ci(values, seed=17, iterations=2000):
     return [means[int(iterations * 0.025)], means[min(iterations - 1, int(iterations * 0.975))]]
 
 
-def summarize(rows, expected, total_documents, state, current=None):
-    variants = ("fp16", "int8")
+def summarize(rows, expected, total_documents, state, current=None, variants=("fp16", "int8")):
     summary = {"state": state, "current": current, "expected_page_pairs": expected,
                "total_distinct_documents": total_documents, "attempted_pages": len(rows),
                "warning": "Dots is not gold; all scores measure concordance, not accuracy.",
@@ -93,6 +92,25 @@ def summarize(rows, expected, total_documents, state, current=None):
             "numeric_retention": distribution([r["concordance"]["numeric_retention_not_accuracy"] for r in ok]),
             "tables": sum(r["table_profile"]["tables"] for r in ok),
         }
+        document_values = defaultdict(list)
+        for row in rows:
+            if row.get(variant, {}).get("status") == "ok":
+                document_values[row["document_id"]].append(
+                    row[variant]["concordance"]["word_sequence_agreement_not_accuracy"])
+        means = [statistics.mean(values) for values in document_values.values()]
+        summary["variants"][variant]["document_word_agreement"] = {
+            "distribution": distribution(means), "document_bootstrap_95_ci": bootstrap_mean_ci(means)}
+    if len(variants) == 1:
+        variant = variants[0]
+        summary["paired"] = {"not_applicable": "Single-variant experiment"}
+        summary["strata"] = {}
+        for group, has_tables in (("dots_table", True), ("dots_no_table", False)):
+            group_rows = [r for r in rows if r.get(variant, {}).get("status") == "ok"
+                          and bool(r["dots_table_profile"]["tables"]) == has_tables]
+            summary["strata"][group] = {"pages": len(group_rows), variant: {
+                "word_agreement": distribution([r[variant]["concordance"]["word_sequence_agreement_not_accuracy"] for r in group_rows]),
+                "numeric_retention": distribution([r[variant]["concordance"]["numeric_retention_not_accuracy"] for r in group_rows])}}
+        return summary
     paired = [row for row in rows if all(row.get(v, {}).get("status") == "ok" for v in variants)]
     summary["paired"]["successful_page_pairs"] = len(paired)
     summary["paired"]["canonical_text_identical_pages"] = sum(row["fp16_int8"]["canonical_text_identical"] for row in paired)
