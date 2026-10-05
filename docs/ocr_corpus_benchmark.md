@@ -144,6 +144,38 @@ cat ~/megadoc-ocr-benchmarks/2026-10-05-corpus-int8/REPORT.md
 cat ~/megadoc-ocr-benchmarks/2026-10-05-corpus-int8/current.json
 ```
 
+### Arresto dei cicli di generazione
+
+Il microservizio GLM ora controlla i token dentro il decoder: suffissi esattamente
+periodici, almeno 32 copie consecutive e almeno 512 token, escluso il prompt.
+Le normali ripetizioni dei tag con cifre/testo diversi non bastano a fermarlo.
+Si tratta di una protezione conservativa contro sprechi, non di un giudizio sulla
+correttezza della trascrizione. Tabelle legittime con moltissime righe identiche
+potrebbero richiedere revisione; cicli non esatti o molto lunghi possono sfuggire.
+
+L'API restituisce 502 con codice `generation_loop` oppure `generation_timeout`;
+Megadoc conserva pagina e motivo nel fallimento del job senza retry automatici.
+Nessun testo parziale diventa un risultato OCR accettato. Il runtime resta sano.
+Le eccezioni vere del driver mantengono invece la precedente protezione 503.
+
+L'override INT8 imposta anche un limite cooperativo di 600 secondi per regione.
+Non puo' interrompere una chiamata nativa GPU bloccata: viene controllato fra
+passi del decoder, non e' un watchdog del processo. Le impostazioni compaiono
+in health e metadati; nuovi manifest devono includere la policy attiva.
+
+Richieste dei ritagli, output parziali e motivi sono salvati nel volume Docker
+privato `ocr-failures` del microservizio, non in Git. Il replay offline dei testi
+di 5035 regioni delle 316 pagine riuscite non ha rilevato cicli; non e' una nuova
+inferenza delle 316 pagine e non garantisce assenza di falsi positivi futuri.
+Procedura e test sono in `glm-ocr-service/docs/generation-guard.md`.
+
+Il replay live di tutte e cinque le pagine fallite ha intercettato cinque cicli,
+senza raggiungere 8192 token o il timeout: tempo totale delle richieste ridotto
+da 47m52s a 11m54s (circa -75%). Tutti e cinque i controlli successivi riescono.
+Le pagine restano fallimenti OCR: la protezione riduce lo spreco, non corregge
+il contenuto. Gli originali e i checkpoint del confronto restano invariati.
+Evidenze private in `~/megadoc-ocr-benchmarks/2026-10-05-loop-guard-five-pages/`.
+
 ```bash
 docker compose run -d --no-deps --name megadoc-ocr-corpus-benchmark \
   --user "$(id -u):$(id -g)" \
